@@ -32,4 +32,13 @@ for (const component of ['ErrorBoundary', 'RunReplayPanel']) {
 }
 assert.doesNotMatch(read('src/styles.css'), /渲染崩溃兜底页|运行回放（S8）/, 'global styles must not absorb extracted component styles again');
 
+const knownIssues = read('docs/known-issues.md');
+for (const id of ['WIN-SANDBOX', 'RELEASE-SIGNING', 'BACKEND-MATRIX', 'MODULE-SPLIT', 'MAC-PIXEL-QA']) {
+  assert.match(knownIssues, new RegExp(`\\| ${id} \\|`), `known issue ${id} must remain tracked until completed`);
+}
+for (const template of ['bug.yml', 'engineering-debt.yml']) {
+  const source = read(`.github/ISSUE_TEMPLATE/${template}`);
+  assert.match(source, /validations:\s*\n\s*required: true/, `${template} must require evidence-bearing fields`);
+}
+
 console.log('MODULE BOUNDARIES: PASS (editor/dock separation and non-increasing legacy size ceilings)');

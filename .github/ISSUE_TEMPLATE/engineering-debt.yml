@@ -1,0 +1,30 @@
+name: 工程问题
+description: 跟踪隔离、发布、兼容性、架构或测试债务
+title: "engineering: "
+body:
+  - type: input
+    id: known_issue
+    attributes:
+      label: 已知问题 ID
+      placeholder: WIN-SANDBOX / RELEASE-SIGNING / 新 ID
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 当前证据
+      description: 写明当前实现能证明什么、不能证明什么。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完成判据
+      description: 列出真实命令、平台、测试、制品或运行行为；不能只写“测试通过”。
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 外部依赖或阻塞条件
+      description: 例如 Windows 主机、签名证书、第三方 CLI 或真实模型凭据。

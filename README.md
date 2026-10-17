@@ -90,6 +90,7 @@ npm run dist:win    # Windows packaging; dist:mac / dist:linux as well
 Executors: the built-in CodeNode agent, plus Codex, DeepSeek Harness, Hermes, OpenCode, OpenClaw and custom ACP agents — all over ACP v1 stdio ([details](docs/backends.md)).
 
 Test principles, the gate list and the release process are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Open risks and their evidence-based completion criteria are tracked in [docs/known-issues.md](docs/known-issues.md).
 
 ## License
 

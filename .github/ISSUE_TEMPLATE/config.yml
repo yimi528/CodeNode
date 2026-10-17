@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 开发日志与已知问题
+    url: https://github.com/yimi528/CodeNode/blob/main/docs/known-issues.md
+    about: 提交前先核对现有问题、证据与完成判据

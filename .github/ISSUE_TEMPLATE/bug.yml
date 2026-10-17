@@ -1,0 +1,36 @@
+name: Bug 报告
+description: 报告可复现的 CodeNode 功能或界面错误
+title: "bug: "
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 从启动 CodeNode 开始，写出最短、可重复的操作序列。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期与实际结果
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本或 commit
+      placeholder: v0.13.0 / 8b4dd42
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options: [Windows, macOS, Linux]
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 日志、截图或验证证据
+      description: 请删除 API Key、Token、个人路径中的敏感信息。
