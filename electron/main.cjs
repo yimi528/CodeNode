@@ -90,6 +90,7 @@ const ipcContext = { ipcMain, userDataDir: () => app.getPath('userData') };
 require('./ipc/models.cjs').register({ ...ipcContext, agent });
 require('./ipc/metrics.cjs').register({ ...ipcContext, agent, sandbox, runStore });
 const agentRuntime=agentIpc.register(ipcContext);
+require('./ipc/backend.cjs').register({ ...ipcContext, agent, sandbox, activeRequests:agentIpc.activeRequests });
 app.on('before-quit',()=>agentRuntime.close());
 app.on('quit',()=>agentRuntime.close());
 require('./ipc/project.cjs').register({ ...ipcContext, dialog, getFocusedWindow: () => BrowserWindow.getFocusedWindow(), sandbox,

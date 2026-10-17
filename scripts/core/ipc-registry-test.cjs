@@ -15,6 +15,7 @@ const os = require('os');
 const path = require('path');
 
 const EXPECTED = {
+  'backend.cjs': ['agent:backend-save', 'agent:backend-status', 'agent:backend-control'],
   'models.cjs': ['models:list', 'models:save', 'models:delete', 'models:active', 'models:discover', 'models:connect'],
   'metrics.cjs': ['agent:metrics'],
   'project.cjs': [
@@ -35,7 +36,6 @@ const EXPECTED = {
     'goal:list', 'goal:scheduler-bind', 'goal:execution-start', 'goal:execution-stop', 'goal:create', 'goal:update', 'goal:token-usage-reconcile', 'goal:cost-reconcile', 'goal:auto-advance-claim', 'goal:auto-advance-release', 'goal:task-create', 'goal:task-batch-create', 'goal:task-delete-planned', 'goal:task-update', 'goal:plan-propose', 'goal:run-review', 'goal:run-review-confirm',
     'goal:decision-create', 'goal:decision-resolve', 'goal:verify', 'goal:audit',
     'goal:can-run', 'goal:context-add', 'goal:experience-confirm', 'goal:context-for-role', 'goal:wait-observe', 'goal:wait-check',
-    'agent:backend-save', 'agent:backend-status', 'agent:backend-control',
     'agent:cost-settings-save',
     'agent:resume-plan', 'agent:resume-start', 'agent:chat', 'agent:stop',
     'agent:events',

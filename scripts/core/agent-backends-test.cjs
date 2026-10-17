@@ -78,7 +78,10 @@ async function main() {
   assert.equal(settings.read(root, userData).settings.backend, 'builtin');
   settings.write(root, userData, 'machine', selected);
   const handlers=new Map();
-  require('../../electron/ipc/agent.cjs').register({ipcMain:{handle:(name,handler)=>handlers.set(name,handler)},userDataDir:()=>userData});
+  const ipcMain={handle:(name,handler)=>handlers.set(name,handler)},agentIpc=require('../../electron/ipc/agent.cjs');
+  agentIpc.register({ipcMain,userDataDir:()=>userData});
+  require('../../electron/ipc/backend.cjs').register({ipcMain,userDataDir:()=>userData,activeRequests:agentIpc.activeRequests,
+    agent:require('../../electron/agent.cjs'),sandbox:require('../../electron/sandbox.cjs')});
   const storedBytes=fs.readFileSync(path.join(userData,'backend.json'),'utf8');
   const preview=await handlers.get('agent:backend-status')({},root,{...settings.config.defaults,backend:'builtin'});
   assert.equal(preview.ok,true);assert.equal(preview.capabilities.backend,'builtin','connection check uses unsaved selected settings instead of saved Codex');
