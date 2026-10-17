@@ -1,19 +1,13 @@
-import GoalOverview from './components/GoalOverview';
-import { useEffect, useLayoutEffect } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect } from 'react';
 import { themeTokens, themeColorScheme } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
-import Toolbar from './components/Toolbar';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
 import ActivityBar from './components/ActivityBar';
-import PluginWorkspace from './components/PluginWorkspace';
-import TaskWorkspace from './components/TaskWorkspace';
-import Canvas from './components/Canvas';
 import ProjectGate from './components/ProjectGate';
 import SidePanel from './components/side/SidePanel';
 import './components/side/nodeInspectorDock.css';
 import ProjectNavigation from './components/ProjectNavigation';
 import ConversationPanel from './components/ConversationPanel';
-import FileWorkspace from './components/FileWorkspace';
 import AddMenu from './components/AddMenu';
 import StatusBar from './components/StatusBar';
 import { useGraphStore } from './store/graphStore';
@@ -23,11 +17,26 @@ import { useProjectStore } from './store/projectStore';
 import { newProject, openProject, saveProject, restoreLastProject } from './lib/projectActions';
 import { installToolListener } from './lib/toolUi';
 import ToolDialog from './components/ToolDialog';
-import ModelManager from './components/ModelManager';
-import WorkbenchDock from './components/WorkbenchDock';
-import GlobalSettings from './components/GlobalSettings';
 import GoalAutoAdvanceManager from './components/GoalAutoAdvanceManager';
 import { getActiveVectorNode } from './vector/vectorStore';
+
+const GlobalSettings = lazy(() => import('./components/GlobalSettings'));
+const ModelManager = lazy(() => import('./components/ModelManager'));
+const WorkbenchDock = lazy(() => import('./components/WorkbenchDock'));
+const PluginWorkspace = lazy(() => import('./components/PluginWorkspace'));
+const TaskWorkspace = lazy(() => import('./components/TaskWorkspace'));
+const FileWorkspace = lazy(() => import('./components/FileWorkspace'));
+const Canvas = lazy(() => import('./components/Canvas'));
+const GoalOverview = lazy(() => import('./components/GoalOverview'));
+const Toolbar = lazy(() => import('./components/Toolbar'));
+
+function CanvasLoading() {
+  return <div className="canvas-welcome" role="status"><div className="canvas-welcome-eyebrow">CODE NODE</div><h2>正在准备画布…</h2><p>项目与对话已经就绪。</p></div>;
+}
+
+function DialogLoading() {
+  return <div className="settings-mask"><section className="global-settings settings-loading" role="status">正在加载设置…</section></div>;
+}
 
 function isTypingTarget(): boolean {
   const el = document.activeElement as HTMLElement | null;
@@ -84,6 +93,8 @@ export default function App() {
     for (const [name,value] of Object.entries(themeTokens(theme))) root.style.setProperty(name,value);
   }, [theme]);
   const dockOpen = useUiStore((s) => s.dockOpen);
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const modelManagerOpen = useUiStore((s) => s.modelManagerOpen);
   const booted = useUiStore((s) => s.booted);
   const projectRoot = useProjectStore((s) => s.root);
   const { fitView } = useReactFlow();
@@ -286,30 +297,34 @@ export default function App() {
   return (
     <div className={`app ui-clean glass-theme theme-${theme}`}>
       <div className="app-shell"><ActivityBar/><div className="app-shell-main">
-      <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Toolbar /></div>
+      <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Suspense fallback={<div className="toolbar toolbar-loading" aria-hidden="true" />}>{appPage === 'workbench' ? <Toolbar /> : null}</Suspense></div>
       <div className={`app-body side-left${dockOpen && appPage==='workbench' ? ' has-dock' : ''}`}>
-        {appPage==='plugins'&&<PluginWorkspace/>}
-        <TaskWorkspace hidden={appPage!=='tasks'}/>
+        <Suspense fallback={null}>
+          {appPage === 'plugins' ? <PluginWorkspace /> : null}
+          {appPage === 'tasks' ? <TaskWorkspace hidden={false} /> : null}
+        </Suspense>
         <div className="app-workbench-layer" data-inactive={appPage!=='workbench'} aria-hidden={appPage!=='workbench'} inert={appPage!=='workbench'}>
         <div className="app-project-navigation"><ProjectNavigation /></div>
         <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
-<div className="workspace-overview-layer" hidden={!overview}><GoalOverview/></div>
+<div className="workspace-overview-layer" hidden={!overview}><Suspense fallback={null}><GoalOverview /></Suspense></div>
 <div className="workspace-content" hidden={overview} inert={overview}>
-            {(sideTab === 'project' || sideTab === 'preview') && <FileWorkspace />}
+            <Suspense fallback={null}>{(sideTab === 'project' || sideTab === 'preview') ? <FileWorkspace /> : null}</Suspense>
             {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
-            <div className="workspace-canvas" aria-hidden={sideTab === 'project' || sideTab === 'preview'}><Canvas /></div>
+            <div className="workspace-canvas" aria-hidden={sideTab === 'project' || sideTab === 'preview'}><Suspense fallback={<CanvasLoading />}><Canvas /></Suspense></div>
             <ConversationPanel />
           </div>
         </main>
         <div className="app-workbench-overlays" hidden={appPage!=='workbench'}><AddMenu />
-        <WorkbenchDock /></div></div>
+        <Suspense fallback={null}>{dockOpen && appPage === 'workbench' ? <WorkbenchDock /> : null}</Suspense></div></div>
       </div>
       <div hidden={appPage!=='workbench'} className="app-workbench-status"><StatusBar /></div>
       </div></div>
       <ToolDialog />
       <GoalAutoAdvanceManager />
-      <GlobalSettings />
-      <ModelManager />
+      <Suspense fallback={(settingsOpen || modelManagerOpen) ? <DialogLoading /> : null}>
+        {settingsOpen ? <GlobalSettings /> : null}
+        {modelManagerOpen ? <ModelManager /> : null}
+      </Suspense>
     </div>
   );
 }

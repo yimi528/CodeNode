@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { useProjectStore } from '../store/projectStore';
-import { EditorPanel } from './WorkbenchDock';
+import EditorPanel from './EditorPanel';
 import ProjectPanel from './side/ProjectPanel';
 import PreviewPanel from './side/PreviewPanel';
 export default function FileWorkspace() {

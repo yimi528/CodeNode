@@ -13,6 +13,8 @@
     "node": ">=22.12"
   },
   "scripts": {
+    "log:add": "node scripts/add-development-log.cjs",
+    "test:development-log": "node scripts/core/development-log-test.cjs",
     "test:message-actions-ui":"node scripts/run-electron.cjs scripts/ui/message-actions-ui-test.cjs",
     "test:simple-settings-ui":"node scripts/run-electron.cjs scripts/ui/simple-settings-ui-test.cjs",
     "test:trellis": "node scripts/core/trellis-compatibility-test.cjs",
@@ -36,6 +38,12 @@
     "test:goal-canvas-ui": "vite build && node scripts/run-electron.cjs scripts/ui/goal-task-graph-ui-test.cjs",
     "test:goal-scope": "node scripts/core/goal-scope-test.cjs",
     "test:release-sign": "node scripts/core/release-sign-test.cjs",
+    "test:release-workflow": "node scripts/core/release-workflow-test.cjs",
+    "test:workflow-roles": "node scripts/core/workflow-roles-test.cjs",
+    "test:design-system": "node scripts/core/design-system-test.cjs",
+    "test:lazy-surfaces": "node scripts/core/lazy-surface-test.cjs",
+    "test:module-boundaries": "node scripts/core/module-boundaries-test.cjs",
+    "test:backend-live-harness": "node scripts/core/backend-live-harness-test.cjs",
     "test:goal-ipc-recovery": "node scripts/core/goal-ipc-recovery-test.cjs",
     "test:goal-desktop-restart": "node scripts/tools/goal-desktop-restart-e2e.cjs",
     "test:goal-auto-live": "node scripts/tools/goal-auto-advance-live-e2e.cjs",

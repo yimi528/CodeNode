@@ -10,12 +10,14 @@
 //   4. 无 JSON 依赖之外的系统调用；stdout 逐行输出 JSON，二进制内容一律 base64，避免编码问题。
 //
 // 协议（stdin/stdout 逐行 JSON）：
-//   node → exe : 命令行 -spec <spec.json>；stdin 关闭 = 请求终止（子进程树一并终止）
+//   node → exe : 命令行 -spec <spec.json>；stdin 关闭 = 请求终止（子进程树一并终止）；
+//                interactive=true 时逐行接收 {"op":"stdin","b64":"..."} / {"op":"stdin_end"}
 //   exe → node : {"ev":"started","pid":N} | {"ev":"out","stream":"stdout|stderr","b64":"..."}
 //                | {"ev":"exit","code":N,"killed":bool} | {"ev":"error","message":"..."} | {"ev":"probe",...}
 //
 // spec.json:
 //   { "file": "node", "args": ["-e","..."], "cwd": "E:\\proj", "env": {...},
+//     "interactive": false,
 //     "limits": { "maxProcesses": 8, "maxMemoryMB": 512, "cpuSeconds": 60, "brokerReserveMB": 160 } }
 using System;
 using System.Collections.Generic;
@@ -215,6 +217,7 @@ internal static class WinJob
         uint cpuSeconds = ToUInt(limits, "cpuSeconds");
         uint brokerReserveMB = ToUInt(limits, "brokerReserveMB");
         if (brokerReserveMB == 0) brokerReserveMB = 160;
+        bool interactive = spec.ContainsKey("interactive") && Convert.ToBoolean(spec["interactive"], CultureInfo.InvariantCulture);
 
         _job = CreateJobObject(IntPtr.Zero, null);
         if (_job == IntPtr.Zero) { Fail("CreateJobObject failed err=" + Marshal.GetLastWin32Error(), 3); return 3; }
@@ -268,10 +271,7 @@ internal static class WinJob
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            // 子进程必须拿到「立即 EOF」的 stdin：写成 false 时子进程继承 broker 的 stdin
-            // （node 侧用于存活探测的长生命管道，永不关闭也不写数据），任何会读 stdin 的程序
-            // 会永久阻塞且零输出、只能等超时强杀（实测 MSYS git.exe：git --version 挂满 60s）。
-            // 该后端本就不支持交互式 stdin（guardedInteractiveSpawn 走别的路径），故直接关闭。
+            // 非交互任务拿到立即 EOF；交互任务由下方 broker 协议转发 stdin。
             RedirectStandardInput = true,
             CreateNoWindow = true,
             WorkingDirectory = Convert.ToString(spec.ContainsKey("cwd") ? spec["cwd"] : Directory.GetCurrentDirectory()),
@@ -302,11 +302,12 @@ internal static class WinJob
             return 4;
         }
         if (_child == null) { Fail("spawn returned null", 4); return 4; }
-        try { _child.StandardInput.Close(); } catch { }
+        if (!interactive) { try { _child.StandardInput.Close(); } catch { } }
 
         Emit("{\"ev\":\"started\",\"pid\":" + _child.Id + "}");
 
-        // 父进程（node）stdin EOF 或收到任意指令 = 要求终止 → 结束 job
+        // 父进程（node）stdin EOF = 要求终止。交互模式下，普通行是发给目标进程的
+        // base64 stdin；非交互模式保留旧语义（收到任意内容即终止）。
         var watch = new Thread(() =>
         {
             try
@@ -315,6 +316,28 @@ internal static class WinJob
                 {
                     string line = Console.In.ReadLine();
                     if (line == null) break; // EOF：node 已退出/管道断开
+                    if (!interactive) break;
+                    Dictionary<string, object> message = null;
+                    try { message = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(line); }
+                    catch { continue; }
+                    string op = message != null && message.ContainsKey("op") ? Convert.ToString(message["op"]) : string.Empty;
+                    if (op == "stdin")
+                    {
+                        try
+                        {
+                            byte[] bytes = Convert.FromBase64String(Convert.ToString(message["b64"]));
+                            _child.StandardInput.BaseStream.Write(bytes, 0, bytes.Length);
+                            _child.StandardInput.BaseStream.Flush();
+                        }
+                        catch { break; }
+                        continue;
+                    }
+                    if (op == "stdin_end")
+                    {
+                        try { _child.StandardInput.Close(); } catch { }
+                        continue;
+                    }
+                    if (op == "terminate") break;
                 }
             }
             catch { }

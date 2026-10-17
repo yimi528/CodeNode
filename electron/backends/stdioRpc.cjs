@@ -3,6 +3,7 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { guardedInteractiveSpawn, killSandboxed } = require('../sandbox.cjs');
 const config = require('../../config/agent.backends.json');
 const { killProcessTree } = require('../processTree.cjs');
 const { launchEnvironment } = require('./network.cjs');
@@ -78,14 +79,26 @@ function pathIsAbsolute(value) { return require('path').isAbsolute(value); }
 class StdioRpc extends EventEmitter {
   constructor(command, args, cwd, options = {}) {
     super(); this.pending = new Map(); this.sequence = 0; this.closed = false; this.buffer = ''; this.stderrTail=[];
+    this.protocolStarted = false; this.stdoutPreamble = []; this.stdoutPreambleBytes = 0;
     this.child = null; this.spawnError = null;
     this.ready = (async () => {
       const resolved = resolveCommand(command); const network = await launchEnvironment();
       const env = { ...network.env, ...(options.env || {}) };
       if (resolved.command === process.execPath && process.versions.electron) env.ELECTRON_RUN_AS_NODE = '1';
       this.proxySource = network.proxySource;
-      this.child = (options.spawn || spawn)(resolved.command, [...resolved.prefix, ...(args || [])],
-        { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      const childArgs = [...resolved.prefix, ...(args || [])];
+      if (options.spawn) {
+        this.child = options.spawn(resolved.command, childArgs,
+          { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      } else if (options.policy) {
+        this.child = (options.guardedInteractiveSpawn || guardedInteractiveSpawn)(
+          { file: resolved.command, args: childArgs, cwd, env },
+          { cwd, env, policy: options.policy, context: options.context }
+        );
+      } else {
+        this.child = spawn(resolved.command, childArgs,
+          { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      }
       this.child.stdout.setEncoding('utf8'); this.child.stdout.on('data', chunk => this.receive(chunk));
       this.child.stderr.on('data', chunk => {const value=String(redact(String(chunk)));this.stderrTail.push(value.slice(-4000));if(this.stderrTail.length>8)this.stderrTail.shift();this.emit('stderr',value.slice(-4000));});
       this.child.on('error', error => { this.spawnError = error; this.disconnected(error); });
@@ -98,7 +111,11 @@ class StdioRpc extends EventEmitter {
     await this.ready;
     return new Promise((resolve, reject) => {
       const id = ++this.sequence;
-      const timer = setTimeout(() => { this.pending.delete(String(id)); reject(new Error('Agent 请求超时：' + method)); }, timeout);
+      const timer = setTimeout(() => {
+        this.pending.delete(String(id));
+        const diagnostic=this.stderrTail.slice(-3).join('\n').slice(-1200);
+        reject(new Error('Agent 请求超时：' + method + (diagnostic?'；最近输出：'+diagnostic:'')));
+      }, timeout);
       this.pending.set(String(id), { resolve, reject, timer, method });
       this.send({ jsonrpc: '2.0', id, method, params: params || {} }).catch(error => {
         clearTimeout(timer); this.pending.delete(String(id)); reject(error);
@@ -113,7 +130,20 @@ class StdioRpc extends EventEmitter {
     let index;
     while ((index = this.buffer.indexOf('\n')) >= 0) {
       const line = this.buffer.slice(0, index); this.buffer = this.buffer.slice(index + 1); if (!line.trim()) continue;
-      let message; try { message = JSON.parse(line); } catch { this.disconnected(new Error('Agent 返回无效 JSON')); void this.close(); return; }
+      let message;
+      try { message = JSON.parse(line); }
+      catch {
+        // Some real ACP adapters print Rich banners/status rows on stdout even after initialization.
+        // JSON-RPC is newline framed, so a line that is not JSON cannot be a partial protocol frame;
+        // route bounded noise to diagnostics and keep reading. The hard count/byte cap still fails
+        // closed if the process is not actually speaking ACP or floods stdout indefinitely.
+        const safeLine=String(redact(line)).slice(0,500),bytes=Buffer.byteLength(line);
+        if(this.stdoutPreamble.length<config.maxStdoutNoiseLines&&this.stdoutPreambleBytes+bytes<=config.maxStdoutNoiseBytes){
+          this.stdoutPreamble.push(safeLine);this.stdoutPreambleBytes+=bytes;this.stderrTail.push('[stdout noise] '+safeLine);if(this.stderrTail.length>8)this.stderrTail.shift();this.emit('stderr','[stdout noise] '+safeLine);continue;
+        }
+        this.disconnected(new Error('Agent 返回无效 JSON：'+safeLine)); void this.close(); return;
+      }
+      this.protocolStarted = true;
       if (message.method) this.emit(message.id != null ? 'request' : 'notification', message);
       else {
         const item = this.pending.get(String(message.id)); if (!item) continue;
@@ -139,12 +169,13 @@ class StdioRpc extends EventEmitter {
     if (!this.child || this.child.exitCode != null) return;
     this.disconnected(new Error('Agent 协议连接已关闭'));
     await new Promise(resolve => {
+      if (this.child.backend) { killSandboxed(this.child, true); resolve(true); return; }
       if (process.platform !== 'win32') { killProcessTree(this.child, true); resolve(true); return; }
       const killer = spawn('taskkill', ['/pid', String(this.child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' });
       const timer = setTimeout(() => { this.child.kill(); resolve(true); }, config.shutdownTimeoutMs);
       killer.once('exit', () => { clearTimeout(timer); resolve(true); }); killer.once('error', () => { clearTimeout(timer); resolve(true); });
     });
-    this.child.stdin.destroy(); this.child.stdout.destroy(); this.child.stderr.destroy(); this.child.unref();
+    this.child.stdin?.destroy?.(); this.child.stdout?.destroy?.(); this.child.stderr?.destroy?.(); this.child.unref?.();
   }
 }
 module.exports = { StdioRpc, resolveCommand };

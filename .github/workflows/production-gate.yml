@@ -1,11 +1,12 @@
 name: production-gate
 
-# 触发：所有分支的 push / 所有 PR / 手动。
-# 之前 push 与 PR 都写死 branches: [n0_12]，分支改名后这个工作流再也不会运行——
-# 门禁"存在但永不触发"比没有门禁更危险，这里改成不带分支过滤。
+# main 是默认集成线：合入后跑生产门禁；PR 事件只承载可选的真实模型子集，
+# 离线门禁与打包由 CodeNode CI 负责，避免同一 PR 重复三平台全量回归。
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
@@ -77,6 +78,7 @@ jobs:
   gate:
     name: Gate (${{ matrix.os }})
     needs: credentials
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -85,6 +87,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          # 开发日志门禁会覆盖整次 push / PR 的变更范围，必须保留可比较的历史。
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc

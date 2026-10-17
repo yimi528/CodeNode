@@ -1,10 +1,12 @@
 name: CodeNode CI
 
-# 触发：所有分支的 push、所有 PR、手动触发。
-# 不再写死分支名——历史上这里写死过 n0_12，分支一改名 CI 就静默失效了（门禁形同虚设）。
+# yimi-branch 是交付开发线：push 时跑完整验证与三平台打包；进入 main 的 PR 也跑同一套。
+# main 合入后的稳定线由 production-gate 负责，避免同一 SHA 重复跑两套相同离线门禁。
 on:
   push:
+    branches: [yimi-branch]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -25,6 +27,9 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v7
+        with:
+          # 开发日志门禁会覆盖整次 push / PR 的变更范围，必须保留可比较的历史。
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           # 版本单一来源：.nvmrc（与 package.json engines 保持一致）

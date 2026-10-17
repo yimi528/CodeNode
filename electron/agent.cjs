@@ -51,6 +51,11 @@ const observationState = require('./observationState.cjs');
 // 意图识别 / 授权判定（照 Codex guardian 分类器，见 electron/intent.cjs 顶部注释）
 const intentLib = require('./intent.cjs');
 const { parseThresholds: parseAlertThresholds } = require('./alerts.cjs');
+const {
+  DEFAULTS, DEFAULT_MAX_TOKENS, DEFAULT_TURN_TIMEOUT_MS, DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  DEFAULT_TRUNCATION_NUDGES, configInteger, configNumber, configList,
+  parseReasoningEffort, parseReliabilityConfig, parseSandboxConfig, parseLimitsConfig,
+} = require('./agentRuntimeConfig.cjs');
 
 function loadProperties(file) {
   const out = {};
@@ -63,68 +68,6 @@ function loadProperties(file) {
     out[t.slice(0, i).trim()] = t.slice(i + 1).trim();
   }
   return out;
-}
-
-/**
- * 输出上限的默认值。
- *
- * 8192 曾是这个项目的默认值，**在开思考链时是不够用的**：真实 DeepSeek 实测
- * （2026-09-17，reasoning_effort=medium，让它写一份 4000 字文档）——
- *   max_tokens=1000  → completion=1000，其中 reasoning=1000，正文 **0 字**（整轮只剩思考）
- *   max_tokens=8192  → completion=8196，其中 reasoning=5037，正文 5520 字，finish_reason=length
- *   max_tokens=8192  → 另一次 completion=5440，其中 reasoning=1939，正文 6061 字，finish_reason=stop
- * 即：思考 token 与正文**共用** max_tokens，8k 档位上「回答写一半就被砍」是掷硬币；
- * 而供应商侧 32768 / 65536 都接受。所以默认提到 32768（仍可由 config 覆盖）。
- */
-const DEFAULT_MAX_TOKENS = 32768;
-/** 单轮模型请求的总时长上限（含流式中断后的重发）。旧默认是 180s 硬超时，见 DEFAULT_STREAM_IDLE_TIMEOUT_MS 注释 */
-const DEFAULT_TURN_TIMEOUT_MS = 600000;
-/**
- * 流式「停滞」超时：**只要还有数据到达就重置**。
- *
- * 之前只有 180s 的墙钟总超时，于是「慢但在持续输出」的长回答会被整轮砍掉，
- * 报错还是英文的 `This operation was aborted`，用户只看到回答写一半就没了。
- * 现在把两种情形分开：不再有数据 = 停滞（可重发）；总时长超限 = 真超时。
- */
-const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120000;
-/** 流式响应中断（网络掉线 / 停滞）后整轮重发的次数；0 = 不重发（旧行为） */
-const DEFAULT_STREAM_MAX_ATTEMPTS = 2;
-/** finish_reason=length 时最多补问几次（接着写），用尽仍截断则如实标 length_truncated */
-const DEFAULT_TRUNCATION_NUDGES = 4;
-
-/**
- * 出厂默认口径（唯一来源，供测试与生产自检引用）。
- *
- * 为什么要单独导出：这些值此前散落在源码常量与 `config/agent.properties` 两处，而那个
- * 配置文件是 **tracked + skip-worktree** —— 本地改了它，`git status` 也看不见，于是
- * 「本地测试全绿、CI 用的还是旧值」这种偏差只能等 CI 红才发现（2026-09-17 真实踩到）。
- */
-const DEFAULTS = Object.freeze({
-  maxTokens: DEFAULT_MAX_TOKENS,
-  turnTimeoutMs: DEFAULT_TURN_TIMEOUT_MS,
-  streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
-  streamMaxAttempts: DEFAULT_STREAM_MAX_ATTEMPTS,
-  truncationNudges: DEFAULT_TRUNCATION_NUDGES,
-});
-
-/**
- * 推理强度：**能关掉**。
- *
- * 此前是 `cfg.reasoning_effort || 'medium'` —— 配置里留空也回落 `medium`，于是「网关不接受
- * `reasoning_effort` 字段」的用户**无法**让它消失（每次请求都被 400 拒掉），这是实测复现的短板。
- * 现在的口径：
- *   键**不存在**      → 出厂默认 `medium`（既有行为不变）
- *   显式留空 / none / off / false / no / - / null → `null`（请求体里**不带**这个字段）
- *   其他值            → 原样下发
- */
-const REASONING_EFFORT_DEFAULT = 'medium';
-const REASONING_EFFORT_OFF = new Set(['none', 'off', 'false', 'no', '-', 'null', 'disabled']);
-function parseReasoningEffort(raw) {
-  if (raw == null) return REASONING_EFFORT_DEFAULT;
-  const value = String(raw).trim();
-  if (!value) return null; // 显式留空 = 关掉
-  if (REASONING_EFFORT_OFF.has(value.toLowerCase())) return null;
-  return value;
 }
 
 function loadConfig(projectRoot) {
@@ -261,27 +204,6 @@ function parseToolsConfig(cfg) {
      */
     toolProfile: String(cfg['agent.tool_profile'] == null ? 'auto' : cfg['agent.tool_profile']).trim(),
   };
-}
-
-function configInteger(cfg, key, fallback, min, max) {
-  const raw = cfg[key];
-  const n = Number(typeof raw === 'string' ? raw.replace(/\s+#.*$/, '').trim() : raw);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, Math.floor(n)));
-}
-
-function configNumber(cfg, key, fallback, min, max) {
-  const raw = cfg[key];
-  const n = Number(typeof raw === 'string' ? raw.replace(/\s+#.*$/, '').trim() : raw);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
-
-function configList(cfg, key) {
-  return String(cfg[key] || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 /** 本地 Agentic RAG 配置；默认启用，只有 Agent 调用工具时才建立索引。 */
@@ -443,45 +365,6 @@ function parseSubagentConfig(cfg) {
   };
 }
 
-/** 瞬时模型错误重试配置：只重试网络错误与明确的 408/429/5xx。 */
-function parseReliabilityConfig(cfg) {
-  return {
-    maxAttempts: configInteger(cfg, 'agent.request_max_attempts', 3, 1, 5),
-    retryBaseMs: configInteger(cfg, 'agent.retry_base_ms', 400, 50, 5000),
-    retryMaxMs: configInteger(cfg, 'agent.retry_max_ms', 5000, 250, 30000),
-    // 单轮（一次模型请求，含流式中断后的重发）的总时长上限。旧行为是写死的 180s：
-    // 思考链 + 长上下文下很容易撞到，撞到就整轮作废（半截回答 + 英文报错）。
-    turnTimeoutMs: configInteger(cfg, 'agent.turn_timeout_ms', DEFAULT_TURN_TIMEOUT_MS, 10000, 3600000),
-    // 流式停滞超时：连续这么久没收到任何分片才判定「卡死」（有数据就重置）。
-    streamIdleTimeoutMs: configInteger(cfg, 'agent.stream_idle_timeout_ms', DEFAULT_STREAM_IDLE_TIMEOUT_MS, 10000, 600000),
-    // 流中途断线（网络重置 / 停滞）后**整轮重发**的次数：0 = 不重发（旧行为，半截输出 + 报错）。
-    // 重发是「丢弃半截、从头再生成」，不是拼接续写 —— 拼接会得到前后不一致的答案。
-    streamMaxAttempts: configInteger(cfg, 'agent.stream_max_attempts', DEFAULT_STREAM_MAX_ATTEMPTS, 0, 4),
-    // finish_reason=length（触到 max_tokens）时最多补问几次，让模型从断点接着写。
-    truncationNudges: configInteger(cfg, 'agent.truncation_nudges', DEFAULT_TRUNCATION_NUDGES, 0, 8),
-  };
-}
-
-/**
- * 执行隔离策略（sandbox.*）：真正的能力探测与命令包装在 electron/sandbox.cjs。
- * mode=off 关闭；best-effort 尽可能隔离、不可用时降级并留审计；strict 要求隔离，不满足则拒绝执行。
- */
-function parseSandboxConfig(cfg) {
-  const requireFilesystem = /^(1|true|yes|on)$/i.test(String(cfg['sandbox.require_filesystem'] || ''));
-  return {
-    mode: String(cfg['sandbox.mode'] || 'best-effort').trim().toLowerCase(),
-    // 出厂断网（对齐 Codex 的 workspace-write：默认不给网络）。理由：Windows 后端**不隔离网络**也没有
-    // 文件系统兜底，静态审计是唯一防线；而出厂 allow 等于「默认放行一切联网命令」。要联网显式设
-    // sandbox.network=inherit（Linux bwrap / macOS sandbox-exec 会真的按策略断网，Windows 只做命令级拒绝）。
-    network: String(cfg['sandbox.network'] || 'deny').trim().toLowerCase(),
-    requireFilesystem,
-    maxProcesses: configInteger(cfg, 'sandbox.max_processes', 0, 0, 4096),
-    maxMemoryMB: configInteger(cfg, 'sandbox.max_memory_mb', 0, 0, 1024 * 1024),
-    cpuSeconds: configInteger(cfg, 'sandbox.cpu_seconds', 0, 0, 86400),
-    allowWrite: configList(cfg, 'sandbox.allow_write'),
-  };
-}
-
 /**
  * 统一成本记账：主模型 / 结果压缩 / 子代理 / 嵌入都写同一本账（electron/costLedger.cjs）。
  * 账本由主进程注入（cfg.costLedger），未注入时为空操作 —— 不编造数据。
@@ -497,41 +380,6 @@ function recordCost(cfg, entry) {
   } catch {
     return null;
   }
-}
-
-/** 单次运行与进程级资源上限，避免上下文/工具 fan-out 失控。 */
-function parseLimitsConfig(cfg) {
-  return {
-    /**
-     * 进度检查层（对齐 Java 版「每 3 步注入任务清单」）：每 N 轮注入一条**只讲事实**的进度清单，
-     * 逼模型在长任务里交代目标/已完成/下一步，减少空转与目标漂移。0 = 关闭。
-     * 放在 limits 里而不是 reliability：它属于「循环预算」这一族（与 maxToolIterations 同类），
-     * 与重试策略无关 —— 放错地方会导致主循环读不到（接线错误，用例已锁）。
-     */
-    progressEvery: configInteger(cfg, 'agent.progress_every', 3, 0, 50),
-    /**
-     * P2-1：按阶段分配**输出预算**（两档）。审计的证据是「reasoning 会吃掉正文额度，并触发多次续写」，
-     * 所以不能简单把主模型全局 max_tokens 从 32k 降到 8k，而是：
-     *   「选择工具」的轮次 8k~12k（出厂 12k），最终交付/续写轮 24k~32k（出厂 32k）。
-     * 开关关掉即完全回到旧行为（请求体逐字节一致）——这是负向判据。
-     */
-    outputTiers: cfg['agent.output_budget_tiers'] == null ? true : String(cfg['agent.output_budget_tiers']).toLowerCase() !== 'false',
-    toolMaxTokens: configInteger(cfg, 'agent.output_budget_tool', 12000, 1000, 200000),
-    finalMaxTokens: configInteger(cfg, 'agent.output_budget_final', 32000, 1000, 200000),
-    /** 正文为空却被截断时，允许「加预算重试」的次数（不是无限补问） */
-    truncationBumps: configInteger(cfg, 'agent.truncation_budget_bumps', 1, 0, 5),
-    maxConcurrentRuns: configInteger(cfg, 'agent.max_concurrent_runs', 2, 1, 8),
-    // 单次运行的累计 token 上限。带图对话的输入会明显变大，默认给到 60 万；
-    // 真正防止"算错"的是 requestBudget 的估算口径（图片按 token 规则折算，不按 base64 字节）。
-    maxTotalTokens: configInteger(cfg, 'agent.max_total_tokens', 600000, 10000, 4000000),
-    // One retry quota is shared by the supervisor, helpers, and child agents.
-    maxTotalRetries: configInteger(cfg, 'agent.max_total_retries', 12, 0, 100),
-    maxCostUsd: require('./costBudget.cjs').parseCostLimit(cfg['agent.max_cost_usd']),
-    // 循环硬上限（此前是 agent.cjs 里的源码常量，无法按项目调整）——默认值与旧常量一致。
-    maxToolIterations: configInteger(cfg, 'agent.max_tool_iterations', 12, 1, 200),
-    maxTotalToolCalls: configInteger(cfg, 'agent.max_total_tool_calls', 100, 1, 2000),
-    dataTruncateCap: configInteger(cfg, 'agent.data_truncate_cap', 120000, 2000, 2000000),
-  };
 }
 
 /**

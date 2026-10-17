@@ -38,7 +38,7 @@ class BackendPort {
       const abort=()=>{void this.driver.close();};context.signal?.addEventListener('abort',abort,{once:true});
       try {
         if(context.signal?.aborted)throw portError('启动已取消','BACKEND_CANCELLED');
-        if(this.name!=='builtin')await this.driver.connect(root);
+        if(this.name!=='builtin')await this.driver.connect(root,context);
         if(context.signal?.aborted)throw portError('启动已取消','BACKEND_CANCELLED');
         this.runtime={state:'ready',available:true,error:null};return this.status();
       } catch(error){this.runtime={state:'failed',available:false,error:String(redact(error.message))};await this.driver.close();throw error;}
@@ -47,7 +47,10 @@ class BackendPort {
     return this.starting;
   }
   async health(context={}) {
-    try{await this.start(context);return {...this.driver.capabilitySnapshot(),...this.describe(),backend:this.name,available:true,state:this.runtime.state};}
+    try{await this.start(context);const policy=context.sandboxPolicy,caps=policy?.capabilities||{};
+      const externalAgentIsolation=this.name==='builtin'?null:{backend:caps.backend||'none',mode:policy?.mode||'off',access:policy?.access||this.settings.sandbox,
+        processIsolation:caps.isolation?.lifetime===true,filesystemIsolation:caps.isolation?.filesystem===true,degraded:policy?.degraded||[]};
+      return {...this.driver.capabilitySnapshot(),...this.describe(),backend:this.name,available:true,state:this.runtime.state,...(externalAgentIsolation?{externalAgentIsolation}:{})};}
     catch(error){return {...this.describe(),backend:this.name,available:false,state:'failed',error:String(redact(error.message))};}
   }
   status(taskId, context={}) {

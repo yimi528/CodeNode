@@ -1,0 +1,120 @@
+name: CodeNode Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在、且指向 main 提交的版本标签（例如 v0.13.0）'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: git fetch origin main --no-tags
+      - name: 校验标签、package 版本与 main 归属
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/validate-release-tag.cjs "$RELEASE_TAG"
+      - run: npm ci
+      - name: 构建、静态检查与完整核心门禁
+        run: npm run verify
+
+  package:
+    name: Package ${{ matrix.platform }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win
+            os: windows-latest
+            command: npm run dist:win
+          - platform: mac
+            os: macos-latest
+            command: npm run dist:mac
+          - platform: linux
+            os: ubuntu-latest
+            command: npm run dist:linux
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: 打包
+        run: ${{ matrix.command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'mac' && 'false' || '' }}
+      - name: Windows Authenticode 签名与 manifest（缺凭据即失败）
+        if: matrix.platform == 'win'
+        shell: pwsh
+        env:
+          CODENODE_REQUIRE_SIGNING: '1'
+          CODENODE_WIN_CERT_PFX_BASE64: ${{ secrets.CODENODE_WIN_CERT_PFX_BASE64 }}
+          CODENODE_WIN_CERT_PASSWORD: ${{ secrets.CODENODE_WIN_CERT_PASSWORD }}
+          CODENODE_TIMESTAMP_URL: ${{ vars.CODENODE_TIMESTAMP_URL }}
+        run: |
+          if (-not $env:CODENODE_WIN_CERT_PFX_BASE64 -or -not $env:CODENODE_WIN_CERT_PASSWORD) {
+            throw '缺少 Windows 发布签名凭据；拒绝发布未签名制品。'
+          }
+          npm run release:sign
+      - name: 上传待发布制品
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/*.yml
+            release/manifest.json
+
+  publish:
+    name: Publish GitHub Release
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: 生成统一 SHA-256 清单
+        working-directory: release-assets
+        run: find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+      - name: 创建不可变 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release-assets/* --verify-tag --generate-notes --title "CodeNode $RELEASE_TAG"

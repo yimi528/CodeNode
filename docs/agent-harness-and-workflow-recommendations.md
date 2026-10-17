@@ -558,3 +558,12 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 **打包自检。** 已覆盖固定目录 `E:\CodeNode\release\win-unpacked`，覆盖前确认 CodeNode 未运行，不保留旧包备份；暂存目录 `.stage-bright-theme`、临时打包配置与隔离自检数据均已清理。app.asar SHA-256：`6AA5852AD0DFB54D1FB354C89EC69202FA407EB9FE732C12215BE8E31EC34377`；CodeNode.exe SHA-256：`9A931D4ECE0281E171D7D4087AE3687B399E443088E190D4F7405F81A8BFCC59`（与替换前逐字节一致，本次交付只更新包内容）；便携版 CodeNode-0.13.0.exe SHA-256：`C414030DCB009FDAC8CB1BDC7E201AB5F1CECAABCE70DC5A4418D699DADA89A1`。用户本地未提交的 Soul 修改与私有配置未提交、未被改写。
 
+### 2026-10-17 外部 Agent 主进程接入系统隔离层
+
+此前 ACP/MSP 客户端提供的文件与终端方法受项目边界、审批和沙箱约束，但外部 Agent 主进程仍由原生 `spawn` 启动。Agent 使用自己的原生工具时可以绕开客户端方法，因此事后文件指纹只能发现副作用，不能提前阻止。
+
+本轮把 `StdioRpc` 的生产启动路径接入 `guardedInteractiveSpawn`，ACP、Muse MSP、连接检查和会话管理均传递同一份外部运行策略。外部策略强制请求文件系统隔离，同时保留模型联网：只读模式从 OS 沙箱可写根中移除项目及其子目录，工作区写入模式保留声明的写根。Run 开始时写入 `backend_info.externalAgentIsolation`，运行记录保存实际后端、进程树隔离、文件系统隔离和降级项；连接检查也返回同一快照。Pi 仍如实标为“不支持协议权限请求”，但不再把这件事与外层 OS 沙箱混为一谈。
+
+同时修正 macOS 两处能力判断：`deny default` 下的联网必须显式 `(allow network*)`；`sandbox-exec` 探针改用生产同强度的 deny-default profile，任意非零退出都判为不可用。当前 Codex 宿主中真实探针返回 `sandbox_apply: Operation not permitted`，现在会诚实报告 `backend=none`；best-effort 明确降级，strict 直接拒绝，不再虚报已隔离。Linux bubblewrap 与可用的 macOS sandbox-exec 才能提供整个外部进程树的文件边界。Windows Job helper 升级为双向 stdio broker：用逐行 JSON 与 base64 转发 ACP/MSP/MCP stdin/stdout，因此外部 Agent 也能进入 Job Object，获得内核级进程树清理和资源上限；Windows 文件系统边界仍作为未完成项如实报告。
+
+Electron UI 回归还暴露并修复了一个独立问题：macOS 临时目录可能以 `/var/...` 和 `/private/var/...` 两种真实等价路径出现，绝对路径字符串比较会让外部 Agent 读不到编辑器未保存草稿。主进程现在对工程与目标文件先做真实路径规范化，再把可信项目相对路径传给渲染端匹配；UI 用例新增草稿状态与桥接请求证据，确认返回 `unsaved` 而不是磁盘旧值。

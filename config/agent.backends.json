@@ -117,7 +117,7 @@
     "codex": "Requires installed codex-acp adapter and Codex native authentication. No automatic install.",
     "claude": "Requires an installed Claude Code ACP adapter (claude-agent-acp, legacy claude-code-acp) and Claude Code authentication. No automatic install.",
     "deepseek-harness": "Requires installed dsh with native ACP profile. DSH_HOME is optional; authentication remains in Harness.",
-    "pi": "Requires pi and the community pi-acp adapter. pi has no built-in sandbox and pi-acp does not implement ACP permission requests, so CodeNode cannot enforce read-only for this backend.",
+    "pi": "Requires pi and the community pi-acp adapter. Pi has no built-in sandbox and pi-acp does not implement ACP permission requests; protocol-level read-only is unavailable. CodeNode's outer OS sandbox applies only when externalAgentIsolation reports filesystemIsolation=true.",
     "muse": "Requires installed Muse Code reachable through its Muse Session Protocol service (`muse serve`). Windows deployments usually run Muse inside WSL2.",
     "acp": "Connect an already installed ACP stdio Agent using command and arguments."
   },
@@ -134,6 +134,8 @@
   "interruptTimeoutMs": 10000,
   "shutdownTimeoutMs": 5000,
   "maxMessageBytes": 8388608,
+  "maxStdoutNoiseLines": 512,
+  "maxStdoutNoiseBytes": 262144,
   "acpLimits": {
     "fileBytes": 2097152,
     "contentBytes": 4194304,

@@ -187,10 +187,14 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(projectRoot,'source.txt'),'disk\nsecond\nthird');
     await js(`window.__codenodeProject.getState().openFile('source.txt')`);
     await js(`window.__codenodeProject.getState().updateDraft(${JSON.stringify('draft\nunsaved\nthird')})`);
+    assert.deepEqual(JSON.parse(await js(`JSON.stringify({root:window.__codenodeProject.getState().root,selected:window.__codenodeProject.getState().selected?.relPath,draft:window.__codenodeProject.getState().draft})`)),
+      {root:projectRoot,selected:'source.txt',draft:'draft\nunsaved\nthird'},'editor fixture must contain an unsaved selected-file draft before ACP starts');
+    await js(`(()=>{window.__editorReadRequests=[];window.__offEditorReadTrace=window.codenode.onToolRequest(r=>{if(r.type==='editor_read')window.__editorReadRequests.push(r);});return true;})()`);
     await js(`window.__codenodeSession.getState().beginTurn()`);
     const actual = await win.webContents.executeJavaScript(`(async()=>{const approve=window.codenode.onToolRequest(r=>{if(r.type==='confirm')window.codenode.respondToolRequest(r.id,{ok:true});});const off=window.codenode.onAgentDelta(d=>window.__codenodeSession.getState().streamDelta(d));try{return await window.codenode.agentChat({projectRoot:${JSON.stringify(projectRoot)},prompt:'Full ACP UI test',requestId:'full-acp-ui',document:window.__codenodeSession.getState().getDocument()});}finally{off();approve();}})()`);
     assert.equal(actual.state,'COMPLETED',actual.error);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(projectRoot,'report.json'),'utf8')).read.result.content,'unsaved','client reads live editor draft via renderer bridge');
+    const editorReadRequests=JSON.parse(await js(`JSON.stringify(window.__editorReadRequests)`));await js(`(()=>{window.__offEditorReadTrace();delete window.__offEditorReadTrace;return true;})()`);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(projectRoot,'report.json'),'utf8')).read.result.content,'unsaved','client reads live editor draft via renderer bridge: '+JSON.stringify(editorReadRequests));
     assert.equal(JSON.parse(fs.readFileSync(path.join(projectRoot,'report.json'),'utf8')).mcpRead.result.isError,false,'MCP relay executes the real CodeNode workbench tool');
     await js(`window.__codenodeSession.getState().stopTurn()`);
     for(const theme of ['light','dark']) { await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`); await sleep(80); assert.equal(await js(`document.querySelectorAll('.cs-msg-agent audio').length > 0`),true,'audio events render in '+theme); assert.equal(await js(`document.querySelectorAll('.cs-msg-agent details').length > 0`),true,'ACP events render in '+theme); }

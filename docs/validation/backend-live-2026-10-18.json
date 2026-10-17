@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-18",
+  "platform": "darwin",
+  "backend": "hermes",
+  "version": "0.18.2",
+  "acpCheck": "pass",
+  "readOnlySmoke": {
+    "state": "COMPLETED",
+    "sentinel": true,
+    "changedFiles": [],
+    "snapshotComplete": true
+  },
+  "fileWorkflow": {
+    "state": "COMPLETED",
+    "sentinel": true,
+    "verified": true,
+    "changedFiles": ["math.cjs"],
+    "goalScopeViolations": [],
+    "fileApprovals": 4,
+    "independentCheck": "node --test math.test.cjs"
+  },
+  "observations": [
+    "The npm trailing --backends override now wins over its default list.",
+    "The smoke launches Hermes with its declared `acp` argument.",
+    "Hermes edit approvals use toolCall.kind plus rawInput.tool/rawInput.arguments and may use realpath aliases.",
+    "Hermes used its own terminal tool while producing the approved file diff; the acceptance claim is scoped file approval plus an independent test, not a claim that no command ran.",
+    "Only Hermes was installed on this host; other configured external backends remain fixture-validated rather than live-validated here."
+  ]
+}

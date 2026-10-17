@@ -82,6 +82,7 @@ interface ToolRequestDto {
   id: string;
   type: 'confirm' | 'ask' | 'ui' | 'cancel' | 'editor_read';
   path?: string;
+  relPath?: string;
   level?: string;
   what?: string;
   detail?: string;

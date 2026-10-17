@@ -92,7 +92,13 @@ export function installToolListener(): () => void {
     if (req.type === 'editor_read') {
       const state = useProjectStore.getState();
       const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase();
-      const matches = state.root && state.selected && normalize(state.root + '/' + state.selected.relPath) === normalize(String(req.path || ''));
+      const selectedPath = normalize(state.selected?.relPath || '');
+      const requestRelativePath = normalize(String(req.relPath || ''));
+      // 主进程已经在受信任的 projectRoot 下计算相对路径。优先比较相对路径，避免 macOS
+      // `/var` 与 `/private/var`、Windows 短路径等真实路径别名让未保存草稿被误判为未打开。
+      const matches = !!(state.selected && requestRelativePath && requestRelativePath !== '..' && !requestRelativePath.startsWith('../')
+        ? selectedPath === requestRelativePath
+        : state.root && state.selected && normalize(state.root + '/' + state.selected.relPath) === normalize(String(req.path || '')));
       api.respondToolRequest(req.id, { content: matches ? state.draft : null });
       return;
     }

@@ -35,7 +35,7 @@ npm ci
 npm run dev
 ```
 
-`npm run dev` starts Vite and Electron together. The packaged Windows build runs from `release/win-unpacked/CodeNode.exe`; macOS and Linux targets exist in the build config (`npm run dist:mac`, `npm run dist:linux`) but are not published as releases today.
+`npm run dev` starts Vite and Electron together. Local packages are written under `release/`; version tags trigger the fail-closed three-platform GitHub Release workflow documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### First run
 
@@ -83,6 +83,7 @@ npm run dist:win    # Windows packaging; dist:mac / dist:linux as well
 | --- | --- |
 | `src/` | React UI, canvas and state management |
 | `electron/` | Main process: agent loop, tools, sandbox, checkpoints, costs |
+| `docs/development-log/` | 按完整日期记录 Bug 修复、更新内容与验证结果 |
 | `scripts/` | Regression and gate scripts; `npm run test:list` prints the set |
 | `docs/` | Design notes, architecture images and evaluation data |
 

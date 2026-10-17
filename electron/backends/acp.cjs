@@ -27,9 +27,9 @@ class AcpBackend {
   permissionWarning() {
     if (this.permissionEnforcement !== 'unavailable') return null;
     return { permissionEnforcement: 'unavailable', sandbox: this.settings.sandbox,
-      warning: '该 Agent 不实现 ACP 权限请求（session/request_permission），CodeNode 的'
+      warning: '该 Agent 不实现 ACP 权限请求（session/request_permission），CodeNode 的协议级'
         + (this.settings.sandbox === 'read-only' ? '只读' : '逐次审批')
-        + '策略无法约束它的文件与命令操作' };
+        + '策略无法约束它的文件与命令操作；是否存在外层系统隔离以本轮 externalAgentIsolation 为准' };
   }
   command() {
     const command = this.settings.executable || config.commands[this.settings.backend];
@@ -45,10 +45,12 @@ class AcpBackend {
       return this.rpc.request(method, { ...params, mcpServers: [] });
     }
   }
-  async connect(cwd) {
+  async connect(cwd, context = {}) {
     if(this.rpc) return {protocolVersion:1,agentCapabilities:this.capabilityInfo,agentInfo:this.agentInfo};
     const { command, args } = this.command();
-    this.rpc = new (this.deps.StdioRpc || StdioRpc)(command, args, cwd, {...this.deps,env:{...this.deps.env,...(this.settings.home?{DSH_HOME:this.settings.home}:{})}});
+    this.rpc = new (this.deps.StdioRpc || StdioRpc)(command, args, cwd, {...this.deps,
+      policy:context.sandboxPolicy,context:context.sandboxContext,
+      env:{...this.deps.env,...(this.settings.home?{DSH_HOME:this.settings.home}:{})}});
     this.rpc.on('notification', message => this.notification(message));
     this.rpc.on('request', message => { void this.dispatch(message); });
     this.rpc.on('disconnect', error => this.fail(error));
@@ -84,7 +86,7 @@ class AcpBackend {
     input.signal?.addEventListener('abort', abort, { once: true });
     try {
       if (input.signal?.aborted) return { content: '', state: 'CANCELLED', aborted: true, stopReason: 'cancelled' };
-      await this.connect(input.projectRoot);
+      await this.connect(input.projectRoot, input);
       const permission = this.permissionWarning();
       if (permission) this.emit({ kind: 'backend_info', info: permission });
       if (this.settings.acp?.authMethodId) await this.control('authenticate', { methodId: this.settings.acp.authMethodId });

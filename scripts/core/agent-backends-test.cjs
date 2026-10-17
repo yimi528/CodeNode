@@ -13,11 +13,24 @@ const external = require('../../electron/backends/runExternal.cjs');
 const runStore = require('../../electron/runStore.cjs');
 const { capture, compare } = require('../../electron/backends/workspaceDiff.cjs');
 const { launchEnvironment } = require('../../electron/backends/network.cjs');
+const sandbox = require('../../electron/sandbox.cjs');
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'codenode-backends-')));
 const userData = path.join(root, '.userdata');
 const fixture = path.join(__dirname, '../fixtures/acp-workflow.cjs');
+const preambleFixture = path.join(__dirname, '../fixtures/acp-preamble.cjs');
+for (const liveScript of ['agent-backend-live-smoke.cjs', 'agent-backend-live-workflow.cjs']) {
+  const source=fs.readFileSync(path.join(__dirname, '../tools', liveScript), 'utf8');
+  assert.match(source, /filter\(arg=>arg\.startsWith\('--backends='\)\)\.at\(-1\)/,
+    `${liveScript} must let the explicit trailing --backends flag override the npm default`);
+}
+assert.match(fs.readFileSync(path.join(__dirname,'../tools/agent-backend-live-smoke.cjs'),'utf8'),/args:\[\.\.\.\(config\.defaultArgs\[name\]\|\|\[\]\)\]/,
+  'live smoke must launch each backend with its declared default ACP arguments');
+const fixtureRpcOptions = [];
 class FixtureRpc extends StdioRpc {
-  constructor(command, args, cwd) { super(process.execPath, [fixture], cwd, { spawn: (_file, _args, options) => spawn(process.execPath, [fixture], options) }); }
+  constructor(command, args, cwd, options = {}) {
+    fixtureRpcOptions.push(options);
+    super(process.execPath, [fixture], cwd, { ...options, spawn: (_file, _args, spawnOptions) => spawn(process.execPath, [fixture], spawnOptions) });
+  }
 }
 const selected = { ...settings.config.defaults, backend: 'codex', executable: process.execPath, sandbox: 'workspace-write' };
 const create = () => new BackendPort('codex',selected,new AcpBackend(selected,{StdioRpc:FixtureRpc}));
@@ -44,6 +57,23 @@ async function main() {
   assert.equal(inherited.env.HTTPS_PROXY, 'http://explicit:8080'); assert.equal(inherited.env.NO_PROXY, 'private.local');
   const separate = await launchEnvironment({ platform: 'win32', env: {}, readProxy: async () => ({ enabled: 1, server: 'http=127.0.0.1:8080;https=127.0.0.1:8443' }) });
   assert.equal(separate.env.HTTP_PROXY, 'http://127.0.0.1:8080/'); assert.equal(separate.env.HTTPS_PROXY, 'http://127.0.0.1:8443/');
+  /** @type {any} */
+  let guardedLaunch = null;
+  const rpcPolicy = { mode: 'best-effort', externalAgent: true, capabilities: { backend: 'fixture', isolation: { lifetime: true, filesystem: true } } };
+  const guardedRpc = new StdioRpc(process.execPath, [fixture], root, { policy: rpcPolicy,
+    guardedInteractiveSpawn: (spec, options) => { guardedLaunch = { spec, options }; return spawn(spec.file, spec.args, { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); } });
+  await guardedRpc.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'isolation-test', version: '1' } });
+  await guardedRpc.close();
+  assert(guardedLaunch, 'StdioRpc did not call guardedInteractiveSpawn');
+  assert.equal(guardedLaunch?.options.policy, rpcPolicy, 'StdioRpc must launch external runtimes through guardedInteractiveSpawn');
+  const preambleRpc = new StdioRpc(process.execPath, [preambleFixture], root);
+  const preambleResult = await preambleRpc.request('initialize', { protocolVersion: 1 });
+  assert.equal(preambleResult.protocolVersion, 1, 'bounded startup preamble must not break ACP initialization');
+  assert.equal((await preambleRpc.request('ping', {})).pong, true, 'bounded stdout status after initialization must not desynchronize JSON-RPC');
+  assert.match(preambleRpc.stderrTail.join('\n'), /stdout noise.*Rich status after initialize/);
+  assert.equal(require('../../config/agent.backends.json').maxStdoutNoiseLines, 512);
+  assert.equal(require('../../config/agent.backends.json').maxStdoutNoiseBytes, 262144);
+  await preambleRpc.close();
   console.log('BACKEND TEST STAGE: proxy/settings');
   assert.equal(settings.read(root, userData).settings.backend, 'builtin');
   settings.write(root, userData, 'machine', selected);
@@ -82,7 +112,9 @@ async function main() {
   fs.writeFileSync(path.join(root, 'math.cjs'), 'module.exports = (a,b) => a - b;\n');
   fs.writeFileSync(path.join(root, 'math.test.cjs'), "require('assert').strictEqual(require('./math.cjs')(2,3),5);\n");
   const events = []; const controller = new AbortController();
-  const common = { projectRoot: root, settings: selected, cfg, history: [], canvasSummary: 'task → end',
+  const fakeCaps = { platform: 'fixture', backend: 'sandbox-exec', isolation: { lifetime: true, processCount: false, memory: false, cpu: false, filesystem: true, network: true }, detail: 'fixture' };
+  const sandboxPolicy = sandbox.resolvePolicy({ mode: 'best-effort', network: 'deny' }, { projectRoot: root, userDataDir: userData, capabilities: fakeCaps });
+  const common = { projectRoot: root, settings: selected, cfg, history: [], canvasSummary: 'task → end', sandboxPolicy,
     sessionId: 'canvas-session', onDelta: event => {
       events.push(event);
       if (event.kind === 'start' || event.kind === 'backend_approval' || (event.kind === 'state' && ['RUNNING','WAITING_USER','CANCELLED'].includes(event.state))) {
@@ -100,6 +132,10 @@ async function main() {
   assert.equal(fs.existsSync(path.join(root, 'denied.txt')), false);
   assert(events.some(e => e.kind === 'backend_approval' && e.phase === 'denied'));
   assert(!events.some(e => e.kind === 'command'), 'Protocol fields must not overwrite host event kind');
+  assert(fixtureRpcOptions.some(options => options.policy?.externalAgent === true && options.policy.network === 'inherit'), 'External runtime policy was not passed to the ACP transport');
+  const isolationEvent = events.find(event => event.kind === 'backend_info' && event.info?.externalAgentIsolation);
+  assert.equal(isolationEvent.info.externalAgentIsolation.filesystemIsolation, true);
+  assert.equal(isolationEvent.info.externalAgentIsolation.osSandboxEnforcedByCodeNode, true);
   console.log('BACKEND TEST STAGE: cancelled run persisted');
   const record = external.sessionFromRun(root, 'first');
   assert.equal(record.session.sessionId,'acp-workflow');assert.equal(record.session.protocol,'acp');

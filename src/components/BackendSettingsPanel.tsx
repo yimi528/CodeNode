@@ -91,7 +91,7 @@ export default function BackendSettingsPanel() {
       {<label className="settings-row"><span>启动参数（JSON 数组）</span><textarea aria-label="后端启动参数" value={argsText} disabled={disabled} rows={3} onChange={e => setArgsText(e.target.value)} /></label>}
       {settings.backend==='deepseek-harness' && <label className="settings-row"><span>Harness home（留空跟随 Agent）</span><input aria-label="Harness home" value={settings.home} disabled={disabled} onChange={e=>setSettings(s=>({...s,home:e.target.value}))}/></label>}
       {external && <label className="settings-row"><span>{permissionLabel}</span><select aria-label={permissionLabel} value={settings.sandbox} disabled={disabled} onChange={e => setSettings(s => ({ ...s, sandbox: e.target.value as AgentBackendSettings['sandbox'] }))}><option value="read-only">只读／拒绝扩权请求</option><option value="workspace-write">允许项目修改／逐次审批</option></select></label>}
-      {permissionEnforcement === 'unavailable' && <p className="settings-scope backend-permission-warning" role="note">该 Agent 不实现权限请求，只读与逐次审批都无法约束它的文件、命令和网络操作；选择它即代表信任其自身沙箱配置。</p>}
+      {permissionEnforcement === 'unavailable' && <p className="settings-scope backend-permission-warning" role="note">该 Agent 不实现协议权限请求，无法提供逐次审批。CodeNode 仅在连接检查显示文件系统隔离已生效时提供外层写入边界；隔离降级时只应在可信项目中使用。</p>}
       {isMsp && <>
         <label className="settings-row"><span>MSP 模型（留空跟随 Muse）</span><input aria-label="MSP 模型" value={settings.model} disabled={disabled} onChange={e => setSettings(s => ({ ...s, model: e.target.value }))} /></label>
         <p className="settings-scope">Muse Code 通过 Muse Session Protocol（MSP）接入：CodeNode 启动 <code>muse serve</code> 子进程，把执行项、权限请求、补充输入、取消和最终消息映射到统一后端契约。Muse 的会话编号不跨重启保存，也不注入 CodeNode 工具；工作区改动保留在所选项目中，由 CodeNode 独立核对文件差异。</p>

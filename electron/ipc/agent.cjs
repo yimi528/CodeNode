@@ -252,8 +252,12 @@ function register(ctx) {
     try {
       const saved = backendSettings.read(projectRoot, userDataDir());
       const checkedSettings = input == null ? saved.settings : backendSettings.normalize(input);
+      const runtimeRoot = projectRoot || userDataDir();
+      const cfg = agent.loadConfig(runtimeRoot);
+      const basePolicy = sandbox.resolvePolicy(cfg.sandbox, { projectRoot: runtimeRoot, userDataDir: userDataDir() });
+      const sandboxPolicy = sandbox.externalAgentPolicy(basePolicy, { projectRoot: runtimeRoot, access: checkedSettings.sandbox });
       const backend = agentBackends.createBackend(checkedSettings.backend, checkedSettings);
-      return { ok: true, ...saved, checkedSettings, capabilities: await backend.health({projectRoot:projectRoot || userDataDir()}).finally(()=>backend.close()) };
+      return { ok: true, ...saved, checkedSettings, capabilities: await backend.health({projectRoot:runtimeRoot,sandboxPolicy}).finally(()=>backend.close()) };
     } catch (error) { return { ok: false, error: error.message }; }
   });
   ipcMain.handle('agent:backend-control', async (_event, projectRoot, input, method, params) => {
@@ -265,7 +269,10 @@ function register(ctx) {
       if (!['inspect', 'authenticate', 'logout', 'session/list', 'session/delete', 'session/close'].includes(method)) throw new Error('不支持的管理方法');
       backend=agentBackends.createBackend(settings.backend,settings);
       if(['session/delete','session/close'].includes(method)&&typeof params?.sessionId!=='string')throw new Error('缺少会话编号');
-      return {ok:true,value:await backend.control(method,params||{},{projectRoot:projectRoot||userDataDir()})};
+      const runtimeRoot=projectRoot||userDataDir(),cfg=agent.loadConfig(runtimeRoot);
+      const basePolicy=sandbox.resolvePolicy(cfg.sandbox,{projectRoot:runtimeRoot,userDataDir:userDataDir()});
+      const sandboxPolicy=sandbox.externalAgentPolicy(basePolicy,{projectRoot:runtimeRoot,access:settings.sandbox});
+      return {ok:true,value:await backend.control(method,params||{},{projectRoot:runtimeRoot,sandboxPolicy})};
     } catch (error) { return { ok: false, error: error.message }; }
     finally { await backend?.close(); }
   });
@@ -839,7 +846,9 @@ function register(ctx) {
             settings: savedBackend.settings, backendEpoch:binding?.epoch||null,sandboxPolicy, signal: externalController.signal,
             goalContextRevision, goalAcceptanceRevision,
             toolRegistry: externalRegistry, toolContext: externalContext,
-            readEditorText: async file => { const result = await externalBridge.request('editor_read', { path: file }); return result?.content; },
+            readEditorText: async file => { const result = await externalBridge.request('editor_read', {
+              path: file, relPath: path.relative(sandbox.canonicalPath(projectRoot), sandbox.canonicalPath(file)).replace(/\\/g, '/')
+            }); return result?.content; },
             onDelta: sendDelta, confirm: externalBridge.confirm, askUser: externalBridge.askUser, goalWriteScope, onStart: () => admitGoalTask(externalId,{external:true}) });
           if (goalAdmission) settleGoalTask(externalResult?.state === 'COMPLETED' ? 'completed' : externalResult?.state === 'CANCELLED' ? 'cancelled' : 'failed', externalResult);
           return { ...externalResult, document: externalModel.doc };

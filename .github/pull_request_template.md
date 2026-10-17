@@ -12,6 +12,8 @@
 
 ## Verification — must really be run, paste evidence / 验证（必须真实跑过，请贴证据）
 
+- [ ] `docs/development-log/YYYY-MM-DD.md` 已追加本次 Bug 修复、更新内容与验证结果
+- [ ] `npm run test:development-log`
 - [ ] `npm run verify`（= build + check:js + full core regression and gates / 全量回归与门禁，core 套件）
 - [ ] `npm run test:display`（touches UI / Electron window / canvas 时 / 涉及 UI、Electron 窗口、画布）
 - [ ] Manual path / 手测路径：<!-- e.g. open xxx project → trigger xxx → expect yyy -->

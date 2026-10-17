@@ -54,7 +54,7 @@ interface ProjectState {
   revertDraft: () => void;
   setFileFilter: (value: string) => void;
   searchProject: (query: string) => Promise<void>;
-  loadRoot: (root: string) => Promise<void>;
+  loadRoot: (root: string, projectFile?: string | null) => Promise<void>;
   setDoc: (doc: DocMeta) => void;
   setProjectFile: (filePath: string | null) => void;
 }
@@ -132,8 +132,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (res.ok && res.root) await get().loadRoot(res.root);
   },
 
-  loadRoot: async (root) => {
-    set({ root, projectFile: null, loading: true, selected: null, draft: '', dirty: false, conflict: null, searchMatches: [], error: null });
+  loadRoot: async (root, projectFile = null) => {
+    // 新建/直接打开 .cnode 时调用方已经知道工程文件。root 与 projectFile 必须在同一次
+    // store 更新中公开，避免更快的按需 UI 观察到「目录已打开但工程文件仍是 null」。
+    set({ root, projectFile, loading: true, selected: null, draft: '', dirty: false, conflict: null, searchMatches: [], error: null });
     if (!window.codenode) {
       set({ tree: [], loading: false, error: '需要 Electron 环境' });
       return;

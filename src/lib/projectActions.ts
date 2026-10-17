@@ -189,7 +189,7 @@ export async function newProject(): Promise<void> {
   localStorage.setItem(LAST_ROOT_KEY, root);
   localStorage.setItem(LAST_FILE_KEY, res.filePath);
   rememberRecentProject({ root, file: res.filePath });
-  await useProjectStore.getState().loadRoot(root);
+  await useProjectStore.getState().loadRoot(root, res.filePath);
   useCheckpointStore.getState().setProjectRoot(root, []);
   useProjectStore.getState().setProjectFile(res.filePath);
   useProjectStore.getState().setDoc({});
@@ -255,7 +255,7 @@ export async function openProjectFile(): Promise<void> {
   localStorage.setItem(LAST_ROOT_KEY, root);
   localStorage.setItem(LAST_FILE_KEY, res.filePath);
   rememberRecentProject({ root, file: res.filePath });
-  await useProjectStore.getState().loadRoot(root);
+  await useProjectStore.getState().loadRoot(root, res.filePath);
   useCheckpointStore.getState().setProjectRoot(root);
   useProjectStore.getState().setProjectFile(res.filePath);
   if (res.data) applyLoaded(root, res.data);
@@ -342,7 +342,7 @@ export async function openRecentProject(entry: { root: string; file?: string; na
   if (!target) return;
 
   const root = entry.file ? dirOf(entry.file) : entry.root;
-  await useProjectStore.getState().loadRoot(root);
+  await useProjectStore.getState().loadRoot(root, entry.file || null);
   const st = useProjectStore.getState();
   if (!st.root) {
     useUiStore.getState().setToast('打开失败：' + (st.error || '目录不可用'));

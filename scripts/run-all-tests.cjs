@@ -21,6 +21,7 @@ const os = require('os');
 
 // 核心套件：全部为纯 Node 断言，不弹窗、不联网、可在三平台无显示环境运行。
 const CORE = [
+  'test:development-log',
   'test:trellis',
   'test:trellis-write-canvas',
   'test:trellis-cli',
@@ -41,6 +42,12 @@ const CORE = [
   'test:goal-plan-ipc',
   'test:goal-scope',
   'test:release-sign',
+  'test:release-workflow',
+  'test:workflow-roles',
+  'test:design-system',
+  'test:lazy-surfaces',
+  'test:module-boundaries',
+  'test:backend-live-harness',
   'test:goal-ipc-recovery',
   'test:goal-github-actions',
   'test:agent-eval-wait',

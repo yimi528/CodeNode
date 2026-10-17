@@ -7,7 +7,8 @@ const {createBackend}=require('../../electron/backends/index.cjs');
 const {capture,compare}=require('../../electron/backends/workspaceDiff.cjs');
 const {redact}=require('../../electron/redaction.cjs');
 
-const requested=process.argv.find(arg=>arg.startsWith('--backends='))?.slice('--backends='.length);
+// npm script provides a default; an explicit user flag appended after `--` must win.
+const requested=process.argv.filter(arg=>arg.startsWith('--backends=')).at(-1)?.slice('--backends='.length);
 const backends=(requested||'hermes,opencode').split(',').map(value=>value.trim()).filter(Boolean);
 const liveBackends=['qwen','opencode','openclaw','qoder','minimax','kimi','hermes','codebuddy','claude','pi','acp'];
 if(!backends.length||backends.some(name=>!liveBackends.includes(name))){
@@ -19,7 +20,7 @@ async function main(){
   const results=[];
   try{
     for(const name of backends){
-      const settings={...config.defaults,backend:name,sandbox:'read-only',turnTimeoutMs:45000};
+      const settings={...config.defaults,backend:name,args:[...(config.defaultArgs[name]||[])],sandbox:'read-only',turnTimeoutMs:45000};
       const backend=createBackend(name,settings);
       const controller=new AbortController();
       const watchdog=setTimeout(()=>controller.abort(),60000);

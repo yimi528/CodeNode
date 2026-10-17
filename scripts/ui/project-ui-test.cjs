@@ -663,7 +663,7 @@ app.whenReady().then(async () => {
       assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".project-session-row").length'), 0);
       await win.webContents.executeJavaScript('document.querySelector(".project-group-name").click()');
       await sleep(80);
-      await win.webContents.executeJavaScript(`document.querySelector('.project-row-menu summary').click(); Array.from(document.querySelectorAll('.project-row-menu button')).find(b=>b.textContent==='置顶').click()`);
+      await win.webContents.executeJavaScript(`(()=>{const menu=document.querySelector('.project-row-menu');menu.open=true;const button=Array.from(menu.querySelectorAll('button')).find(b=>b.textContent==='置顶');if(!button)throw new Error('项目菜单缺少置顶按钮');button.click();})()`);
       await sleep(80);
       assert.ok(await win.webContents.executeJavaScript('document.querySelector(".project-group-name").textContent.includes("置顶")'));
       const originalSession = await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId');
@@ -717,7 +717,7 @@ app.whenReady().then(async () => {
       await waitFor(async () => await win.webContents.executeJavaScript(`!!document.querySelector('.pp-input') && window.__codenodeSession?.getState().sessions['${originalSession}']?.archived === true`).catch(()=>false), '重启后保留归档');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'project order must survive reload and reopening');
       await win.webContents.executeJavaScript('document.querySelector(".global-settings-trigger").click()');
-      await sleep(100);
+      await waitFor(async () => await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-layout nav button')).some(b=>b.textContent==='已归档聊天')`), '按需加载设置');
       await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-layout nav button')).find(b=>b.textContent==='已归档聊天').click()`);
       await sleep(100);
       assert.ok(await win.webContents.executeJavaScript('document.querySelector(".settings-content").textContent.includes("画布1")'));
@@ -736,7 +736,7 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript('document.querySelector(".settings-close").click()');
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".toolbar button")).some(b=>b.textContent.trim()==="终端")'), false);
       await win.webContents.executeJavaScript('window.__codenodeUi.getState().openDock("terminal")');
-      await sleep(100);
+      await waitFor(async () => await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".dock-tabs button")).some(b=>b.textContent==="终端")'), '按需加载工作台 Dock');
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".dock-tabs button")).filter(b=>b.textContent==="终端").length'), 1);
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".dock-tabs button")).some(b=>["检索设置","扩展"].includes(b.textContent))'), false);
       await win.webContents.executeJavaScript('window.__codenodeUi.getState().closeDock()');

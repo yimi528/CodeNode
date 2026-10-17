@@ -11,6 +11,7 @@ import { useProjectStore } from './store/projectStore';
 import { useReplayStore } from './store/replayStore';
 import { getActiveVectorNode, getVectorStore, useVectorStore } from './vector/vectorStore';
 import '@xyflow/react/dist/style.css';
+import './design-system.css';
 import './styles.css';
 import './trellis.css';
 import './workflow-canvas.css';
