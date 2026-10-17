@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import './ProjectGate.css';
 import { useProjectStore } from '../store/projectStore';
 import { newProject, openProject, openProjectFile, openRecentProject } from '../lib/projectActions';
 import {
