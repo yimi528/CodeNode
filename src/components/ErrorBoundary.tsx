@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import './ErrorBoundary.css';
 
 type Props = { children: ReactNode };
 type State = { error: Error | null; info: ErrorInfo | null };

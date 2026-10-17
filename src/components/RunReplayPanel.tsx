@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import './RunReplayPanel.css';
 import { useProjectStore } from '../store/projectStore';
 import { useReplayStore } from '../store/replayStore';
 import type { ReplayEvent } from '../store/replayStore';
