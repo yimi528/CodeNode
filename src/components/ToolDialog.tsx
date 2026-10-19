@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import './ToolDialog.css';
 import { useToolStore } from '../store/toolStore';
 
 /**

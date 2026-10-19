@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import './ModelManager.css';
 import { useUiStore } from '../store/uiStore';
 import { useUsageStore, type ModelSpec } from '../store/usageStore';
 
