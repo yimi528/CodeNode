@@ -58,6 +58,7 @@ ModuleAny._resolveFilename = function patchedResolve(request, parent, isMain, op
 
 const originalCompile = ModuleAny.prototype._compile;
 ModuleAny.prototype._compile = function patchedCompile(content, filename) {
+  if (filename.endsWith('.css')) return originalCompile.call(this, '', filename);
   if (filename.endsWith('.ts') || filename.endsWith('.tsx')) {
     const out = ts.transpileModule(content, { compilerOptions: COMPILER_OPTIONS, fileName: filename });
     return originalCompile.call(this, out.outputText, filename);

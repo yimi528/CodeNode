@@ -32,10 +32,9 @@ function changedPaths() {
     }
   }
   try {
-    return git(['status', '--porcelain=v1', '--untracked-files=all'])
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => line.slice(3).split(' -> ').pop());
+    // Local ownership is defined by the staged payload, not every dirty file in the shared
+    // worktree. This prevents a completed/committed log entry from claiming unrelated user edits.
+    return git(['diff', '--cached', '--name-only', '--diff-filter=ACMRDTUXB']).split(/\r?\n/).filter(Boolean);
   } catch {
     return [];
   }
@@ -78,7 +77,7 @@ if (developmentChanges.length > 0) {
     assert.ok(changedLogs.size > 0, '当前 push / PR 包含开发改动，但没有同步更新 docs/development-log/');
   } else {
     const today = `${LOG_PATH}${shanghaiDay()}.md`;
-    assert.ok(changedLogs.has(today), `工作区包含开发改动，但今天的日志未更新：${today}`);
+    assert.ok(changedLogs.has(today), `暂存区包含开发改动，但今天的日志未同步暂存：${today}`);
   }
 }
 
