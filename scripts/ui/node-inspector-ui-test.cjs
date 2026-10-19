@@ -27,6 +27,8 @@ app.whenReady().then(async () => {
       for (let i = 0; !window.__codenodeProject && i < 120; i++) await new Promise(r => setTimeout(r, 50));
       await window.__codenodeProject.getState().loadRoot(${JSON.stringify(root)});
       if (!window.__codenodeSession.getState().current()) window.__codenodeSession.getState().newCanvas();
+      for (let i = 0; !document.querySelector('.toolbar-vector') && i < 120; i++) await new Promise(r => setTimeout(r, 50));
+      if (!document.querySelector('.toolbar-vector')) throw Error('Lazy toolbar did not finish loading');
     })()`);
     const reports = [];
     for (const theme of ['light', 'dark']) {
