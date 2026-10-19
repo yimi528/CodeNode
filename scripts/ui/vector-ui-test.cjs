@@ -17,7 +17,22 @@ const path = require('node:path');
 let BASE = process.env.VECTOR_TEST_URL || '';
 // 默认由操作系统分配空闲端口，避免并发回归撞上旧调试进程。
 let PORT = Number(process.env.VECTOR_TEST_PORT) || 0;
-const EDGE = process.env.VECTOR_TEST_EDGE || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+function browserExecutable() {
+  const candidates = [process.env.VECTOR_TEST_EDGE];
+  if (process.platform === 'win32') candidates.push(
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
+  else if (process.platform === 'darwin') candidates.push(
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium');
+  else for (const command of ['microsoft-edge', 'google-chrome', 'chromium', 'chromium-browser']) {
+    const found = spawnSync('which', [command], { encoding: 'utf8' });
+    if (found.status === 0) candidates.push(String(found.stdout).trim());
+  }
+  return candidates.find(candidate => candidate && fs.existsSync(candidate)) || '';
+}
+const EDGE = browserExecutable();
 const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'edge-vec-'));
 const ROOT_DIR = path.join(__dirname, "../..");
 
@@ -107,7 +122,7 @@ function sleep(ms) {
 }
 
 async function startBrowser() {
-  if (!fs.existsSync(EDGE)) throw new Error('Edge 可执行文件不存在：' + EDGE);
+  if (!EDGE) throw new Error('没有找到可用的 Edge、Chrome 或 Chromium；可用 VECTOR_TEST_EDGE 指定浏览器');
   if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) throw new Error('VECTOR_TEST_PORT 必须是有效端口');
   if (!PORT) {
     const net = require('node:net');
@@ -460,7 +475,7 @@ async function main() {
     ok(`门禁页提供打开/新建工程入口（${JSON.stringify(gateBtns)}）`, gateBtns.length >= 2 && gateBtns[0].includes('打开工程') && gateBtns[1].includes('新建工程'));
     // 等价于「打开工程」：直接把工程根目录载入，放行到工作台
     await cdp.eval(`window.__codenodeProject.getState().loadRoot('E:\\\\demo')`);
-    await waitFor(cdp, `document.querySelector('.toolbar') && !!window.__codenodeVectorNode`);
+    await waitFor(cdp, `document.querySelector('.toolbar-vector') && !!window.__codenodeVectorNode`, 9000, '按需工具栏与画布 store 就绪');
     out('— Agent 工作台已加载，画布节点 store 工厂已挂载');
 
     /* ========== 1. 在画布上新增画布节点（不再单独占一栏） ========== */

@@ -14,8 +14,8 @@ for (const component of ['GlobalSettings', 'ModelManager', 'WorkbenchDock', 'Plu
 assert.match(app, /settingsOpen \? <GlobalSettings \/>/, 'settings chunk must mount only while open');
 assert.match(app, /modelManagerOpen \? <ModelManager \/>/, 'model manager chunk must mount only while open');
 assert.match(app, /dockOpen && appPage === 'workbench' \? <WorkbenchDock \/>/, 'dock chunk must mount only while visible');
-assert.match(app, /appPage === 'plugins' \? <PluginWorkspace \/>/, 'plugin workspace must load only on its page');
-assert.match(app, /appPage === 'tasks' \? <TaskWorkspace hidden=\{false\} \/>/, 'task workspace must load only on its page');
+assert.match(app, /loadedPages\.tasks \? <TaskWorkspace hidden=\{appPage !== 'tasks'\} \/>/, 'task workspace must remain mounted after its first lazy load');
+assert.match(app, /loadedPages\.plugins \? <div hidden=\{appPage !== 'plugins'\}/, 'plugin workspace must remain mounted after its first lazy load');
 assert.match(app, /sideTab === 'project' \|\| sideTab === 'preview'\) \? <FileWorkspace \/>/, 'file workspace must load only on file tabs');
 assert.match(app, /<Suspense fallback=\{null\}>/, 'lazy surfaces need a non-disruptive suspense boundary');
 

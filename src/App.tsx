@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { themeTokens, themeColorScheme } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
@@ -82,6 +82,10 @@ export default function App() {
   const createScopeFromSelection = useGraphStore((s) => s.createScopeFromSelection);
   useProjectAutoSave();
   const appPage = useUiStore(s => s.appPage);
+  const [loadedPages, setLoadedPages] = useState(() => ({ tasks: appPage === 'tasks', plugins: appPage === 'plugins' }));
+  useEffect(() => {
+    if (appPage === 'tasks' || appPage === 'plugins') setLoadedPages(current => current[appPage] ? current : { ...current, [appPage]: true });
+  }, [appPage]);
   const sideOpen = useUiStore((s) => s.sideOpen);
   const sideTab = useUiStore(s => s.sideTab);
   const workbenchView=useUiStore(s=>s.preferences.workbenchView);
@@ -300,8 +304,8 @@ export default function App() {
       <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Suspense fallback={<div className="toolbar toolbar-loading" aria-hidden="true" />}>{appPage === 'workbench' ? <Toolbar /> : null}</Suspense></div>
       <div className={`app-body side-left${dockOpen && appPage==='workbench' ? ' has-dock' : ''}`}>
         <Suspense fallback={null}>
-          {appPage === 'plugins' ? <PluginWorkspace /> : null}
-          {appPage === 'tasks' ? <TaskWorkspace hidden={false} /> : null}
+          {loadedPages.plugins ? <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'}><PluginWorkspace /></div> : null}
+          {loadedPages.tasks ? <TaskWorkspace hidden={appPage !== 'tasks'} /> : null}
         </Suspense>
         <div className="app-workbench-layer" data-inactive={appPage!=='workbench'} aria-hidden={appPage!=='workbench'} inert={appPage!=='workbench'}>
         <div className="app-project-navigation"><ProjectNavigation /></div>

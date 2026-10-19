@@ -94,7 +94,9 @@ app.whenReady().then(async () => {
     }
     const settings = await win.webContents.executeJavaScript(`(async () => {
       const ui = window.__codenodeUi;
-      ui.getState().openSettings('layout'); await new Promise(r => setTimeout(r, 100));
+      ui.getState().openSettings('layout');
+      for (let i = 0; !document.querySelector('.settings-menu-actions') && i < 120; i++) await new Promise(r => setTimeout(r, 50));
+      if (!document.querySelector('.settings-menu-actions')) throw Error('Layout settings did not finish loading');
       // 画布菜单的可见操作在「界面 → 画布菜单」折叠项里，必须先展开。
       const advanced = document.querySelector('.settings-advanced'); if (advanced) advanced.open = true;
       await new Promise(r => setTimeout(r, 60));
