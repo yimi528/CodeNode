@@ -356,7 +356,7 @@
     "electron-builder": "^24.13.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
-    "wait-on": "^8.0.1",
+    "wait-on": "^9.5.1",
     "@electron/asar": "3.4.1"
   }
 }
