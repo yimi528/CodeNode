@@ -18,8 +18,9 @@ assert.ok(lines('src/components/EditorPanel.tsx') <= 180, 'EditorPanel exceeded 
 
 // Existing large legacy modules remain tracked explicitly: this prevents silent growth while later splits
 // reduce the ceilings instead of accepting a new, larger baseline.
-assert.ok(lines('electron/agent.cjs') <= 4450, 'electron/agent.cjs grew beyond the current migration ceiling');
+assert.ok(lines('electron/agent.cjs') <= 4280, 'electron/agent.cjs grew beyond the current migration ceiling');
 assert.ok(lines('electron/agentRuntimeConfig.cjs') <= 120, 'agent runtime config module lost its focused boundary');
+assert.ok(lines('electron/agentGrounding.cjs') <= 190, 'agent grounding module lost its focused boundary');
 assert.ok(lines('electron/ipc/agent.cjs') <= 1880, 'electron/ipc/agent.cjs grew beyond the current migration ceiling');
 assert.ok(lines('electron/ipc/backend.cjs') <= 80, 'backend IPC module lost its focused boundary');
 assert.ok(lines('src/styles.css') <= 3910, 'src/styles.css grew beyond the current migration ceiling');
