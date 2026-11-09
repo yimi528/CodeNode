@@ -339,23 +339,23 @@
     }
   },
   "dependencies": {
-    "@xyflow/react": "^12.12.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "zustand": "^5.0.15",
+    "@xyflow/react": "^12.12.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.0.16",
     "@typescript/typescript6": "^6.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@vitejs/plugin-react": "^6.2.1",
     "concurrently": "^10.0.6",
     "cross-env": "^10.1.0",
     "electron": "^44.7.0",
     "electron-builder": "^24.13.3",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4",
+    "vite": "^8.3.6",
     "wait-on": "^8.0.1",
     "@electron/asar": "3.4.1"
   }
