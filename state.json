@@ -1,0 +1,957 @@
+{
+  "schemaVersion": 1,
+  "ledger": {
+    "schemaVersion": 1,
+    "ledgerId": "2655e414-d88e-4b3e-a250-2ebcb7c9eaaa",
+    "limit": 1000000,
+    "charged": 882845,
+    "reported": 482782,
+    "reservations": {},
+    "attempts": [
+      {
+        "id": "3bca8680-bf24-404d-bb3d-1e2651ffefa6",
+        "identity": "3271d3af-576b-412d-97b7-76ec0bf959a0",
+        "reserved": 35238,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:46.285Z",
+        "reported": 3844,
+        "charged": 3844
+      },
+      {
+        "id": "585984c4-980f-4f87-8501-9fc796106eb1",
+        "identity": "3271d3af-576b-412d-97b7-76ec0bf959a0",
+        "reserved": 35885,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:47.088Z",
+        "reported": 4083,
+        "charged": 4083
+      },
+      {
+        "id": "06e2f60a-b9e4-4a3b-9f4b-73009159de9e",
+        "identity": "3271d3af-576b-412d-97b7-76ec0bf959a0",
+        "reserved": 37189,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:48.203Z",
+        "reported": 4432,
+        "charged": 4432
+      },
+      {
+        "id": "d36719ae-5783-449c-b804-fd9edde588a5",
+        "identity": "3271d3af-576b-412d-97b7-76ec0bf959a0",
+        "reserved": 40794,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:49.496Z",
+        "reported": 5544,
+        "charged": 5544
+      },
+      {
+        "id": "92764a3a-2749-4342-9834-232a2fa18305",
+        "identity": "3271d3af-576b-412d-97b7-76ec0bf959a0",
+        "reserved": 43328,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:50.555Z",
+        "reported": 6293,
+        "charged": 6293
+      },
+      {
+        "id": "7901e660-3447-44a3-afc8-66395839100a",
+        "identity": "3271d3af-576b-412d-97b7-76ec0bf959a0",
+        "reserved": 43920,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:51.449Z",
+        "reported": 6479,
+        "charged": 6479
+      },
+      {
+        "id": "b71c948c-de78-4baa-b0f6-0f10868ce0fa",
+        "identity": "d067b92f-7cc5-4a3a-9408-c8e6e238c301",
+        "reserved": 35499,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:53.258Z",
+        "reported": 3985,
+        "charged": 3985
+      },
+      {
+        "id": "4f1d8df4-916e-4aca-93ba-8af76fc87b75",
+        "identity": "d067b92f-7cc5-4a3a-9408-c8e6e238c301",
+        "reserved": 37520,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:54.333Z",
+        "reported": 4527,
+        "charged": 4527
+      },
+      {
+        "id": "cb2a479c-2455-4725-9967-cd8bbafe7f86",
+        "identity": "d067b92f-7cc5-4a3a-9408-c8e6e238c301",
+        "reserved": 40517,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:55.024Z",
+        "reported": 5487,
+        "charged": 5487
+      },
+      {
+        "id": "fa3eeb18-685e-405d-b21e-2316dbcf95c5",
+        "identity": "d067b92f-7cc5-4a3a-9408-c8e6e238c301",
+        "reserved": 43604,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:56.111Z",
+        "reported": 6389,
+        "charged": 6389
+      },
+      {
+        "id": "ba5eb744-52cc-45f5-8190-bfe70730b525",
+        "identity": "d067b92f-7cc5-4a3a-9408-c8e6e238c301",
+        "reserved": 44187,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:57.018Z",
+        "reported": 6635,
+        "charged": 6635
+      },
+      {
+        "id": "085c5676-b68d-4a35-a1ec-f6f6436213ff",
+        "identity": "af706c46-cc2f-4f06-917b-ffad2cff4a75",
+        "reserved": 35291,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:59.071Z",
+        "reported": 3887,
+        "charged": 3887
+      },
+      {
+        "id": "86d4a2af-3b2f-49d1-8500-eefa30cd97d6",
+        "identity": "af706c46-cc2f-4f06-917b-ffad2cff4a75",
+        "reserved": 36596,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:25:59.940Z",
+        "reported": 4214,
+        "charged": 4214
+      },
+      {
+        "id": "a7594802-a347-49bd-abe8-f6feaef2414a",
+        "identity": "af706c46-cc2f-4f06-917b-ffad2cff4a75",
+        "reserved": 39444,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T14:26:00.694Z",
+        "reported": null,
+        "charged": 39444
+      },
+      {
+        "id": "177353cc-2206-4782-a98e-465ed0dbd344",
+        "identity": "096cfa8c-2e1c-496a-97fe-b93d65aafffe",
+        "reserved": 35552,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:28.201Z",
+        "reported": 3954,
+        "charged": 3954
+      },
+      {
+        "id": "3fce6d62-15b8-4e2b-858c-c8d41e5aa65b",
+        "identity": "096cfa8c-2e1c-496a-97fe-b93d65aafffe",
+        "reserved": 38442,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:33.145Z",
+        "reported": 4927,
+        "charged": 4927
+      },
+      {
+        "id": "b1564d1f-2315-4b40-b811-85aef7e7c958",
+        "identity": "096cfa8c-2e1c-496a-97fe-b93d65aafffe",
+        "reserved": 41185,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:34.547Z",
+        "reported": 5678,
+        "charged": 5678
+      },
+      {
+        "id": "09667f97-dfbd-4c3b-b6f2-2aa746f901ed",
+        "identity": "096cfa8c-2e1c-496a-97fe-b93d65aafffe",
+        "reserved": 42403,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:35.534Z",
+        "reported": 6012,
+        "charged": 6012
+      },
+      {
+        "id": "a0fd7fd8-451d-4e70-9d0a-111dbf655992",
+        "identity": "63535f15-c873-40b9-9953-223c3c629054",
+        "reserved": 35342,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:37.128Z",
+        "reported": 3887,
+        "charged": 3887
+      },
+      {
+        "id": "011fa921-a3d0-4f0e-9e95-fe85b7e14814",
+        "identity": "63535f15-c873-40b9-9953-223c3c629054",
+        "reserved": 36288,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:38.040Z",
+        "reported": 4170,
+        "charged": 4170
+      },
+      {
+        "id": "24fa2d1f-71ff-49d1-b2b8-68f4722ce8d5",
+        "identity": "63535f15-c873-40b9-9953-223c3c629054",
+        "reserved": 39120,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:39.163Z",
+        "reported": 5075,
+        "charged": 5075
+      },
+      {
+        "id": "48452ece-441d-4dae-b10b-38aa5348ae90",
+        "identity": "63535f15-c873-40b9-9953-223c3c629054",
+        "reserved": 42507,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:40.327Z",
+        "reported": 6054,
+        "charged": 6054
+      },
+      {
+        "id": "5fabe3ef-9b66-48db-8aac-7f629b25ee5c",
+        "identity": "63535f15-c873-40b9-9953-223c3c629054",
+        "reserved": 43228,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:41.385Z",
+        "reported": 6275,
+        "charged": 6275
+      },
+      {
+        "id": "edc22656-f7db-4633-aab9-0cd35b291366",
+        "identity": "ff6463ba-de54-4f56-9282-7285799872a8",
+        "reserved": 35603,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:43.553Z",
+        "reported": 3966,
+        "charged": 3966
+      },
+      {
+        "id": "c805b4ac-74b8-4057-ba40-7aee3f819b03",
+        "identity": "ff6463ba-de54-4f56-9282-7285799872a8",
+        "reserved": 38480,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:44.555Z",
+        "reported": 4962,
+        "charged": 4962
+      },
+      {
+        "id": "a82b445c-3b06-4fb7-b3b3-3691dbee1c3f",
+        "identity": "ff6463ba-de54-4f56-9282-7285799872a8",
+        "reserved": 41217,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:45.959Z",
+        "reported": 5688,
+        "charged": 5688
+      },
+      {
+        "id": "22af9092-09a9-48aa-bf43-7b924820fd01",
+        "identity": "ff6463ba-de54-4f56-9282-7285799872a8",
+        "reserved": 42426,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:46.887Z",
+        "reported": 6108,
+        "charged": 6108
+      },
+      {
+        "id": "885b3676-01d4-4030-9ea5-ae3aabd09feb",
+        "identity": "04597624-8d47-4867-9950-e454bc28861b",
+        "reserved": 35238,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:49.154Z",
+        "reported": 3904,
+        "charged": 3904
+      },
+      {
+        "id": "1e0e81ec-5593-4a04-998c-4786e22fddd9",
+        "identity": "04597624-8d47-4867-9950-e454bc28861b",
+        "reserved": 37083,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:50.152Z",
+        "reported": 4396,
+        "charged": 4396
+      },
+      {
+        "id": "8ed62165-186d-44ba-b534-d74d28a84d7f",
+        "identity": "04597624-8d47-4867-9950-e454bc28861b",
+        "reserved": 39184,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:51.340Z",
+        "reported": 4987,
+        "charged": 4987
+      },
+      {
+        "id": "d713b0b1-4186-4b04-a4ca-0bcca611826b",
+        "identity": "04597624-8d47-4867-9950-e454bc28861b",
+        "reserved": 42828,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:52.241Z",
+        "reported": 6132,
+        "charged": 6132
+      },
+      {
+        "id": "a87d344a-4eab-4c33-9647-02fd5c8c87af",
+        "identity": "04597624-8d47-4867-9950-e454bc28861b",
+        "reserved": 45391,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:53.605Z",
+        "reported": 6887,
+        "charged": 6887
+      },
+      {
+        "id": "500c2152-9d13-42ae-b0a8-56c3962ee7b7",
+        "identity": "04597624-8d47-4867-9950-e454bc28861b",
+        "reserved": 45983,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:54.785Z",
+        "reported": 7068,
+        "charged": 7068
+      },
+      {
+        "id": "d182e189-a778-4ba6-a7e1-c6057e87e2e5",
+        "identity": "79757dcb-c459-45b4-9cff-3fb456a56803",
+        "reserved": 35499,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:56.566Z",
+        "reported": 3973,
+        "charged": 3973
+      },
+      {
+        "id": "5f066d55-9f34-472b-ada1-efca2e76a781",
+        "identity": "79757dcb-c459-45b4-9cff-3fb456a56803",
+        "reserved": 37783,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:57.689Z",
+        "reported": 4632,
+        "charged": 4632
+      },
+      {
+        "id": "26ef784b-7c09-44f7-91fa-fa92176ca01f",
+        "identity": "79757dcb-c459-45b4-9cff-3fb456a56803",
+        "reserved": 40780,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:58.499Z",
+        "reported": 5565,
+        "charged": 5565
+      },
+      {
+        "id": "d8e02db6-de24-4aba-a41e-62f352f5a325",
+        "identity": "79757dcb-c459-45b4-9cff-3fb456a56803",
+        "reserved": 43816,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:41:59.698Z",
+        "reported": 6470,
+        "charged": 6470
+      },
+      {
+        "id": "8078864a-9b83-4da0-97fd-09afb722a0ab",
+        "identity": "79757dcb-c459-45b4-9cff-3fb456a56803",
+        "reserved": 44399,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:00.634Z",
+        "reported": 6657,
+        "charged": 6657
+      },
+      {
+        "id": "82741ecf-90da-45e5-b764-a585e2ce5252",
+        "identity": "371d7284-7eae-4671-b2f1-c64fd59f67d2",
+        "reserved": 35552,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:02.149Z",
+        "reported": 3967,
+        "charged": 3967
+      },
+      {
+        "id": "ef907d29-583f-4387-88ff-3e79900c8047",
+        "identity": "371d7284-7eae-4671-b2f1-c64fd59f67d2",
+        "reserved": 37791,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:03.808Z",
+        "reported": 4588,
+        "charged": 4588
+      },
+      {
+        "id": "2b2b4173-af95-474a-942d-915a8d8eaa4b",
+        "identity": "371d7284-7eae-4671-b2f1-c64fd59f67d2",
+        "reserved": 39341,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:04.817Z",
+        "reported": 5255,
+        "charged": 5255
+      },
+      {
+        "id": "3216183f-220b-411c-ae72-3d9095f05c10",
+        "identity": "371d7284-7eae-4671-b2f1-c64fd59f67d2",
+        "reserved": 42629,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:06.630Z",
+        "reported": 6074,
+        "charged": 6074
+      },
+      {
+        "id": "f14b859a-a561-4e9b-95f4-2fb6a3780b8d",
+        "identity": "371d7284-7eae-4671-b2f1-c64fd59f67d2",
+        "reserved": 43479,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:07.739Z",
+        "reported": 6298,
+        "charged": 6298
+      },
+      {
+        "id": "50ba954e-a0b0-4d1d-b14d-c7c948eb9f74",
+        "identity": "ec37fb1b-30ee-4294-8438-5030a7b82d15",
+        "reserved": 35291,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:09.771Z",
+        "reported": 3895,
+        "charged": 3895
+      },
+      {
+        "id": "40bfa8b9-bcb0-41f5-9be1-4f7f1204d64f",
+        "identity": "ec37fb1b-30ee-4294-8438-5030a7b82d15",
+        "reserved": 38121,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:11.013Z",
+        "reported": 4758,
+        "charged": 4758
+      },
+      {
+        "id": "aeee3316-8f3b-4635-a12c-bc4e6f72658e",
+        "identity": "ec37fb1b-30ee-4294-8438-5030a7b82d15",
+        "reserved": 40770,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:12.390Z",
+        "reported": 5552,
+        "charged": 5552
+      },
+      {
+        "id": "e64945b9-9b32-4c80-8cb5-339d0bc7d4b6",
+        "identity": "ec37fb1b-30ee-4294-8438-5030a7b82d15",
+        "reserved": 41988,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:13.855Z",
+        "reported": 5875,
+        "charged": 5875
+      },
+      {
+        "id": "1b54e725-3a0e-43cf-9c4a-5cf55f997eda",
+        "identity": "125ead3c-788c-4de7-9b7b-9c4edac72249",
+        "reserved": 35603,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:16.192Z",
+        "reported": 3966,
+        "charged": 3966
+      },
+      {
+        "id": "5b8466b0-f7a9-456d-917e-7e8dc860a29d",
+        "identity": "125ead3c-788c-4de7-9b7b-9c4edac72249",
+        "reserved": 38417,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:16.985Z",
+        "reported": 4858,
+        "charged": 4858
+      },
+      {
+        "id": "7003011c-9c45-402f-af07-0ebc84baac40",
+        "identity": "125ead3c-788c-4de7-9b7b-9c4edac72249",
+        "reserved": 41096,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:18.302Z",
+        "reported": 5648,
+        "charged": 5648
+      },
+      {
+        "id": "8d1c4f70-b87c-48bc-874b-c748ec675397",
+        "identity": "125ead3c-788c-4de7-9b7b-9c4edac72249",
+        "reserved": 42305,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:19.623Z",
+        "reported": 6033,
+        "charged": 6033
+      },
+      {
+        "id": "d043689a-161f-4ffd-9604-3b9c218ac819",
+        "identity": "e297bcd9-d8bf-44a8-ba3b-e1b532e7eed1",
+        "reserved": 35342,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:21.585Z",
+        "reported": 3906,
+        "charged": 3906
+      },
+      {
+        "id": "1b483b65-92cc-49b5-8eb3-8a1f974f6206",
+        "identity": "e297bcd9-d8bf-44a8-ba3b-e1b532e7eed1",
+        "reserved": 38156,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:23.512Z",
+        "reported": 4791,
+        "charged": 4791
+      },
+      {
+        "id": "cb8a2568-5568-47a3-8ac2-cf28ad6036a7",
+        "identity": "e297bcd9-d8bf-44a8-ba3b-e1b532e7eed1",
+        "reserved": 40867,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:24.733Z",
+        "reported": 5587,
+        "charged": 5587
+      },
+      {
+        "id": "0c957c9e-6a9e-4c32-906a-99f64b755eca",
+        "identity": "e297bcd9-d8bf-44a8-ba3b-e1b532e7eed1",
+        "reserved": 42085,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:42:26.104Z",
+        "reported": 5948,
+        "charged": 5948
+      },
+      {
+        "id": "98cd13f4-083d-46b8-99c5-b12304022380",
+        "identity": "e640bef3-1867-4adc-981c-a501be263db0",
+        "reserved": 35319,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:40.086Z",
+        "reported": 3899,
+        "charged": 3899
+      },
+      {
+        "id": "77e0d4a1-b6e5-4347-8c3e-8770f82b49b9",
+        "identity": "e640bef3-1867-4adc-981c-a501be263db0",
+        "reserved": 38263,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:41.158Z",
+        "reported": 4844,
+        "charged": 4844
+      },
+      {
+        "id": "8e46209e-6b9c-461c-bec9-b0cf0e4f8ec1",
+        "identity": "e640bef3-1867-4adc-981c-a501be263db0",
+        "reserved": 40225,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:42.238Z",
+        "reported": 5313,
+        "charged": 5313
+      },
+      {
+        "id": "5d8f3395-0c0f-4925-a400-07047be124c6",
+        "identity": "e640bef3-1867-4adc-981c-a501be263db0",
+        "reserved": 42828,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:43.605Z",
+        "reported": 5963,
+        "charged": 5963
+      },
+      {
+        "id": "65becb70-68af-4d9c-b0e5-fc3cf37f3cd9",
+        "identity": "e640bef3-1867-4adc-981c-a501be263db0",
+        "reserved": 45441,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:45.141Z",
+        "reported": 6727,
+        "charged": 6727
+      },
+      {
+        "id": "587825b9-5552-4965-9dcd-2554a29a3aa4",
+        "identity": "e640bef3-1867-4adc-981c-a501be263db0",
+        "reserved": 46024,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:46.184Z",
+        "reported": 6923,
+        "charged": 6923
+      },
+      {
+        "id": "548e699c-eb4c-49b1-8333-1f6bc34e1bf7",
+        "identity": "e3fcb310-9e33-4d52-91e0-6b9ee65667b0",
+        "reserved": 35580,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:47.667Z",
+        "reported": 3960,
+        "charged": 3960
+      },
+      {
+        "id": "e50f44fb-113d-40c7-a89e-c97ec34868d6",
+        "identity": "e3fcb310-9e33-4d52-91e0-6b9ee65667b0",
+        "reserved": 38464,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:48.647Z",
+        "reported": 4873,
+        "charged": 4873
+      },
+      {
+        "id": "840b7251-08d3-4764-8fd4-fa3a3494d69b",
+        "identity": "e3fcb310-9e33-4d52-91e0-6b9ee65667b0",
+        "reserved": 40978,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:49.921Z",
+        "reported": 5654,
+        "charged": 5654
+      },
+      {
+        "id": "e276b5ca-16b9-4940-82ae-feaebfb68f00",
+        "identity": "e3fcb310-9e33-4d52-91e0-6b9ee65667b0",
+        "reserved": 42196,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:50.991Z",
+        "reported": 5978,
+        "charged": 5978
+      },
+      {
+        "id": "e6d9e8ff-7740-4ccb-bd35-427bb1e2c752",
+        "identity": "0ce0a9df-52e5-4f18-9008-e95e2ba7e015",
+        "reserved": 35281,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:52.562Z",
+        "reported": 3893,
+        "charged": 3893
+      },
+      {
+        "id": "e3a44255-f9af-4744-979c-0a29b8782dc3",
+        "identity": "0ce0a9df-52e5-4f18-9008-e95e2ba7e015",
+        "reserved": 38092,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:53.458Z",
+        "reported": 4853,
+        "charged": 4853
+      },
+      {
+        "id": "bf96bc3c-3bbc-41c6-9233-0beab67e2a81",
+        "identity": "0ce0a9df-52e5-4f18-9008-e95e2ba7e015",
+        "reserved": 40601,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:55.072Z",
+        "reported": 5488,
+        "charged": 5488
+      },
+      {
+        "id": "519954f9-ce28-4654-9ab5-a4beab3de15c",
+        "identity": "0ce0a9df-52e5-4f18-9008-e95e2ba7e015",
+        "reserved": 41810,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:56.279Z",
+        "reported": 5809,
+        "charged": 5809
+      },
+      {
+        "id": "5184f3c7-05f4-4a74-bb38-b9ab2dd68eba",
+        "identity": "9193e7c4-1de9-4ebc-b9f4-a212a22c7865",
+        "reserved": 35542,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:57.908Z",
+        "reported": 3952,
+        "charged": 3952
+      },
+      {
+        "id": "8573b93a-cf97-4147-a218-e62b7245fea6",
+        "identity": "9193e7c4-1de9-4ebc-b9f4-a212a22c7865",
+        "reserved": 38413,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:47:59.130Z",
+        "reported": 4797,
+        "charged": 4797
+      },
+      {
+        "id": "a66799f8-d606-430f-bf99-44b3ae5e2574",
+        "identity": "9193e7c4-1de9-4ebc-b9f4-a212a22c7865",
+        "reserved": 40931,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:48:00.319Z",
+        "reported": 5559,
+        "charged": 5559
+      },
+      {
+        "id": "fa7b527a-cc21-4b34-ad04-794c13679f21",
+        "identity": "9193e7c4-1de9-4ebc-b9f4-a212a22c7865",
+        "reserved": 42140,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:48:01.538Z",
+        "reported": 5892,
+        "charged": 5892
+      },
+      {
+        "id": "5e7a6a8b-7d5e-469d-be40-3eeba8dc3290",
+        "identity": "1f1731ba-9396-4c28-9e78-a88536bc45e1",
+        "reserved": 35319,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:48:03.803Z",
+        "reported": 3900,
+        "charged": 3900
+      },
+      {
+        "id": "79783050-1e59-4df6-b5f8-3c5c0a12cda3",
+        "identity": "1f1731ba-9396-4c28-9e78-a88536bc45e1",
+        "reserved": 38203,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:48:04.803Z",
+        "reported": 4809,
+        "charged": 4809
+      },
+      {
+        "id": "77ae82d7-741e-468a-9c3e-2c8be2adc8d8",
+        "identity": "1f1731ba-9396-4c28-9e78-a88536bc45e1",
+        "reserved": 40190,
+        "state": "reported",
+        "startedAt": "2026-11-14T14:48:05.993Z",
+        "reported": 5312,
+        "charged": 5312
+      },
+      {
+        "id": "dc8ea569-0119-4945-bb59-d58cabaab036",
+        "identity": "1f1731ba-9396-4c28-9e78-a88536bc45e1",
+        "reserved": 42802,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T14:48:07.280Z",
+        "reported": null,
+        "charged": 42802
+      },
+      {
+        "id": "66856f2c-7180-4d10-b8a3-8681e4a29a1c",
+        "identity": "b0a930df-59ea-496f-b9c8-6ec6813c823f",
+        "reserved": 35580,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:03:33.847Z",
+        "reported": null,
+        "charged": 35580
+      },
+      {
+        "id": "f89be038-e810-40db-b13c-25f25977dcb5",
+        "identity": "9d2cbb3c-237e-4303-8cf8-04727070e77e",
+        "reserved": 35281,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:03:45.079Z",
+        "reported": null,
+        "charged": 35281
+      },
+      {
+        "id": "ebdfc143-5b4f-4f42-ab49-59b47e12e347",
+        "identity": "3d751d6e-b303-43c4-8685-ead1a5e1ab06",
+        "reserved": 35542,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:03:56.254Z",
+        "reported": null,
+        "charged": 35542
+      },
+      {
+        "id": "1463e502-2b4c-43f7-b5c2-846c1a394862",
+        "identity": "3dc046f3-511d-4bfb-b678-32242c09f748",
+        "reserved": 35238,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:04:07.791Z",
+        "reported": null,
+        "charged": 35238
+      },
+      {
+        "id": "30de24b2-bace-4372-89e5-de240083180c",
+        "identity": "e06a2d1a-9855-4b23-b542-670e9f3cc68d",
+        "reserved": 35231,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:04:18.988Z",
+        "reported": null,
+        "charged": 35231
+      },
+      {
+        "id": "6d518f52-041d-4e93-a102-58dd7653a62d",
+        "identity": "ea82bb34-2277-410b-939a-2486af76990d",
+        "reserved": 35238,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:21:03.432Z",
+        "reported": null,
+        "charged": 35238
+      },
+      {
+        "id": "fcfdc2f0-68f4-4a55-aded-2428cfb86e89",
+        "identity": "78f13205-628e-4149-94e8-dad522f51e19",
+        "reserved": 35238,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:21:14.626Z",
+        "reported": null,
+        "charged": 35238
+      },
+      {
+        "id": "358b2dcf-ad1c-49d9-8817-7c761aa9d548",
+        "identity": "110c004d-9999-4216-8838-1c7be99277af",
+        "reserved": 35231,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:21:25.801Z",
+        "reported": null,
+        "charged": 35231
+      },
+      {
+        "id": "96764454-d9b2-494b-905f-07464224d7c3",
+        "identity": "cc5d0e93-f651-4231-ad53-cf56bbed2308",
+        "reserved": 35238,
+        "state": "unknown-billing",
+        "startedAt": "2026-11-14T15:21:36.989Z",
+        "reported": null,
+        "charged": 35238
+      },
+      {
+        "id": "8ccdc557-2976-4ea4-8f53-a613adf6fb10",
+        "identity": "84cf4ae6-7929-41b3-8be0-676d04c1bd5c",
+        "reserved": 35238,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:37:56.878Z",
+        "reported": 3884,
+        "charged": 3884
+      },
+      {
+        "id": "a78d1480-b9bb-4df5-9604-6c0acb995c00",
+        "identity": "84cf4ae6-7929-41b3-8be0-676d04c1bd5c",
+        "reserved": 37953,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:37:57.709Z",
+        "reported": 4665,
+        "charged": 4665
+      },
+      {
+        "id": "b1b02707-5804-4a12-bd49-95bbd10c66d1",
+        "identity": "84cf4ae6-7929-41b3-8be0-676d04c1bd5c",
+        "reserved": 40268,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:37:58.736Z",
+        "reported": 5378,
+        "charged": 5378
+      },
+      {
+        "id": "a1bb650b-7d4b-42dc-995d-4344f1190f9f",
+        "identity": "84cf4ae6-7929-41b3-8be0-676d04c1bd5c",
+        "reserved": 43385,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:37:59.669Z",
+        "reported": 6279,
+        "charged": 6279
+      },
+      {
+        "id": "de67925a-5237-40b9-909b-73924bb83167",
+        "identity": "84cf4ae6-7929-41b3-8be0-676d04c1bd5c",
+        "reserved": 43968,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:00.822Z",
+        "reported": 6481,
+        "charged": 6481
+      },
+      {
+        "id": "46285b15-b9e9-436b-857c-dcd69b1612ef",
+        "identity": "4f6355e4-f864-49c0-83f5-e9027f0a5a90",
+        "reserved": 35231,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:02.628Z",
+        "reported": 3828,
+        "charged": 3828
+      },
+      {
+        "id": "e3b39eec-14da-414a-9c70-2b3b4677e985",
+        "identity": "4f6355e4-f864-49c0-83f5-e9027f0a5a90",
+        "reserved": 35863,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:03.851Z",
+        "reported": 4069,
+        "charged": 4069
+      },
+      {
+        "id": "469f1706-3aab-4a41-a35f-7f1aff6897ca",
+        "identity": "4f6355e4-f864-49c0-83f5-e9027f0a5a90",
+        "reserved": 37167,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:05.121Z",
+        "reported": 4419,
+        "charged": 4419
+      },
+      {
+        "id": "eaee0fbc-55e4-45c6-ae0f-3307404d7493",
+        "identity": "4f6355e4-f864-49c0-83f5-e9027f0a5a90",
+        "reserved": 40772,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:05.738Z",
+        "reported": 5550,
+        "charged": 5550
+      },
+      {
+        "id": "7f110cd6-c2ae-4905-893d-06ff0a1a4d20",
+        "identity": "4f6355e4-f864-49c0-83f5-e9027f0a5a90",
+        "reserved": 43337,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:06.909Z",
+        "reported": 6300,
+        "charged": 6300
+      },
+      {
+        "id": "740390e6-5c71-45c4-8f73-cf30851a3e5b",
+        "identity": "4f6355e4-f864-49c0-83f5-e9027f0a5a90",
+        "reserved": 43929,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:07.590Z",
+        "reported": 6505,
+        "charged": 6505
+      },
+      {
+        "id": "4e7970d7-75f2-4528-8125-994780e86b4e",
+        "identity": "decdef0b-7fc7-4796-9350-d5e7fa26faeb",
+        "reserved": 35238,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:09.286Z",
+        "reported": 3876,
+        "charged": 3876
+      },
+      {
+        "id": "3e085a77-b2c8-4308-b70b-907aa16624bb",
+        "identity": "decdef0b-7fc7-4796-9350-d5e7fa26faeb",
+        "reserved": 36920,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:10.193Z",
+        "reported": 4326,
+        "charged": 4326
+      },
+      {
+        "id": "38638ec9-b357-4b80-8400-6a7844987dd5",
+        "identity": "decdef0b-7fc7-4796-9350-d5e7fa26faeb",
+        "reserved": 38164,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:11.426Z",
+        "reported": 4638,
+        "charged": 4638
+      },
+      {
+        "id": "9144d3bc-75ae-45c0-b69a-2262c79f5ace",
+        "identity": "decdef0b-7fc7-4796-9350-d5e7fa26faeb",
+        "reserved": 40335,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:11.966Z",
+        "reported": 5362,
+        "charged": 5362
+      },
+      {
+        "id": "6f83c210-af44-4464-b93d-4b76bb22b329",
+        "identity": "decdef0b-7fc7-4796-9350-d5e7fa26faeb",
+        "reserved": 41439,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:13.824Z",
+        "reported": 5686,
+        "charged": 5686
+      },
+      {
+        "id": "539c1000-4055-446e-bda4-7d74ff2a6ac3",
+        "identity": "decdef0b-7fc7-4796-9350-d5e7fa26faeb",
+        "reserved": 43840,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:14.654Z",
+        "reported": 6341,
+        "charged": 6341
+      },
+      {
+        "id": "480fab24-d36e-40a1-a8c2-37c6896af4cb",
+        "identity": "decdef0b-7fc7-4796-9350-d5e7fa26faeb",
+        "reserved": 44450,
+        "state": "reported",
+        "startedAt": "2026-11-14T18:38:15.438Z",
+        "reported": 6572,
+        "charged": 6572
+      }
+    ]
+  },
+  "lease": null,
+  "history": [],
+  "authorization": {
+    "totalLimit": 1000000,
+    "priorCharged": 882845,
+    "remainingAtHandoff": 117155,
+    "noAdditionalFunds": true
+  }
+}
