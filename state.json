@@ -4,8 +4,8 @@
     "schemaVersion": 1,
     "ledgerId": "2655e414-d88e-4b3e-a250-2ebcb7c9eaaa",
     "limit": 1000000,
-    "charged": 882845,
-    "reported": 482782,
+    "charged": 946675,
+    "reported": 546612,
     "reservations": {},
     "attempts": [
       {
@@ -943,14 +943,91 @@
         "startedAt": "2026-11-14T18:38:15.438Z",
         "reported": 6572,
         "charged": 6572
+      },
+      {
+        "id": "7e912ba6-c830-49ca-8666-0a1dab6351c4",
+        "identity": "615436f6-2fbf-47f6-8511-1c0d2733cb65",
+        "reserved": 70404,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:06:29.051Z",
+        "reported": 5725,
+        "charged": 5725
+      },
+      {
+        "id": "cff488a3-240f-44d1-b0d3-192c33f97bce",
+        "identity": "615436f6-2fbf-47f6-8511-1c0d2733cb65",
+        "reserved": 51325,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:06:30.158Z",
+        "reported": 6015,
+        "charged": 6015
+      },
+      {
+        "id": "d1f34ac0-e752-4faf-8a31-40be2a8b4992",
+        "identity": "615436f6-2fbf-47f6-8511-1c0d2733cb65",
+        "reserved": 54227,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:06:31.445Z",
+        "reported": 6911,
+        "charged": 6911
+      },
+      {
+        "id": "3cd0a754-ffcb-4619-9b8a-309402d45200",
+        "identity": "615436f6-2fbf-47f6-8511-1c0d2733cb65",
+        "reserved": 56815,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:06:32.992Z",
+        "reported": 7565,
+        "charged": 7565
+      },
+      {
+        "id": "b2ad4d6b-460b-454b-ac75-ce33a4583e15",
+        "identity": "615436f6-2fbf-47f6-8511-1c0d2733cb65",
+        "reserved": 59389,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:06:34.454Z",
+        "reported": 8332,
+        "charged": 8332
+      },
+      {
+        "id": "bc1ba8bc-207d-4b3d-afc4-a949a81cc4f2",
+        "identity": "615436f6-2fbf-47f6-8511-1c0d2733cb65",
+        "reserved": 59981,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:06:35.886Z",
+        "reported": 8510,
+        "charged": 8510
+      },
+      {
+        "id": "2cad4534-5af5-462f-941d-a546a1323bfb",
+        "identity": "e4cd1770-fbb0-40ec-8838-a130330754d0",
+        "reserved": 70665,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:07:05.693Z",
+        "reported": 5908,
+        "charged": 5908
+      },
+      {
+        "id": "09089287-a6b2-429d-85e9-e8c5387a0262",
+        "identity": "e4cd1770-fbb0-40ec-8838-a130330754d0",
+        "reserved": 54598,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:07:07.324Z",
+        "reported": 7026,
+        "charged": 7026
+      },
+      {
+        "id": "968e150a-72d5-4734-9cad-d020aa9814be",
+        "identity": "e4cd1770-fbb0-40ec-8838-a130330754d0",
+        "reserved": 57267,
+        "state": "reported",
+        "startedAt": "2026-11-15T09:07:08.960Z",
+        "reported": 7838,
+        "charged": 7838
       }
     ]
   },
-  "lease": {
-    "id": "a5177940-6fd2-4781-b890-ae741230f07f",
-    "owner": "43697561600/1",
-    "startedAt": "2026-11-15T09:06:13.833Z"
-  },
+  "lease": null,
   "history": [
     {
       "id": "3321012f-a86f-4c0e-803e-eafac55c4bc0",
@@ -959,6 +1036,14 @@
       "finishedAt": "2026-11-15T08:33:41.773Z",
       "charged": 0,
       "remaining": 117155
+    },
+    {
+      "id": "a5177940-6fd2-4781-b890-ae741230f07f",
+      "owner": "43697561600/1",
+      "startedAt": "2026-11-15T09:06:13.833Z",
+      "finishedAt": "2026-11-15T09:08:34.583Z",
+      "charged": 63830,
+      "remaining": 53325
     }
   ],
   "authorization": {
