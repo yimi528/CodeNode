@@ -946,7 +946,11 @@
       }
     ]
   },
-  "lease": null,
+  "lease": {
+    "id": "3321012f-a86f-4c0e-803e-eafac55c4bc0",
+    "owner": "zero-model-preflight-1794731618074",
+    "startedAt": "2026-11-15T08:33:39.057Z"
+  },
   "history": [],
   "authorization": {
     "totalLimit": 1000000,
