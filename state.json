@@ -956,5 +956,11 @@
       "charged": 0,
       "remaining": 117155
     }
-  ]
+  ],
+  "authorization": {
+    "totalLimit": 1000000,
+    "priorCharged": 882845,
+    "remainingAtHandoff": 117155,
+    "noAdditionalFunds": true
+  }
 }
