@@ -21,6 +21,13 @@ try{
   const ticket=reserve(ledger,200,'model-1');settle(ledger,ticket,120);
   assert.equal(persist(dir,policy,store).remaining,380);
   assert.equal(store.get().value.lease,null);
+  const livePolicy=require('../../config/eval-budget-policy.json');
+  const lowBalanceStore=fixture(),lowBalance=lowBalanceStore.get();
+  Object.assign(lowBalance.value.ledger,{ledgerId:livePolicy.ledgerId,limit:livePolicy.limit,charged:946675,reported:546612});
+  lowBalanceStore.put(lowBalance.sha,lowBalance.value);
+  const blocked=acquire(path.join(root,'measured-low-balance'),livePolicy,lowBalanceStore,'scheduled-run');
+  assert.equal(blocked.runnable,false,'the measured remaining balance must not start the native profile again');
+  assert.equal(blocked.remaining,53325);assert.equal(lowBalanceStore.get().value.lease,null);
   assert.equal(store.get().value.ledger.charged,620);
   const next=path.join(root,'next');acquire(next,policy,store,'run-2');
   assert.equal(readJson(path.join(next,'token-ledger.json')).charged,620,'CI runs share prior charges');

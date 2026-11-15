@@ -296,7 +296,9 @@
     "log:add": "node scripts/add-development-log.cjs",
     "test:development-log": "node scripts/core/development-log-test.cjs",
     "test:eval-ci": "node scripts/core/eval-ci-test.cjs",
-    "test:deepseek-reasoning": "node scripts/core/deepseek-reasoning-test.cjs"
+    "test:deepseek-reasoning": "node scripts/core/deepseek-reasoning-test.cjs",
+    "test:harbor-result": "node scripts/core/harbor-result-test.cjs",
+    "eval:reanalyze-harbor": "node scripts/eval/reanalyze-harbor.cjs"
   },
   "build": {
     "appId": "com.codenode.desktop",

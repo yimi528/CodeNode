@@ -43,18 +43,22 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
       - name: Require explicit model credentials
         run: node -e "if(!process.env.CODENODE_EVAL_API_KEY)throw Error('Missing isolated evaluation credential')"
+      - name: Acquire persistent shared budget lease
+        id: budget
+        run: node scripts/eval/eval-ci.cjs acquire
+      - name: Install application dependencies only for funded runs
+        if: steps.budget.outputs.runnable == 'true'
+        run: npm ci
       - name: Install locked Harbor SDK
+        if: steps.budget.outputs.runnable == 'true'
         run: |
           python3 -m venv /tmp/codenode-eval-tooling
           /tmp/codenode-eval-tooling/bin/pip install uv==0.9.5
           /tmp/codenode-eval-tooling/bin/uv sync --project benchmarks --locked
-      - run: docker pull node:22.23.1-bookworm-slim
-      - name: Acquire persistent shared budget lease
-        id: budget
-        run: node scripts/eval/eval-ci.cjs acquire
+      - if: steps.budget.outputs.runnable == 'true'
+        run: docker pull node:22.23.1-bookworm-slim
       - name: Freeze isolated experiment
         id: plan
         if: steps.budget.outputs.runnable == 'true'

@@ -196,3 +196,22 @@ gh workflow run capability-release.yml --repo yimi528/CodeNode -f evidence_run_i
 本轮通过供应商 `/models` 查询确认凭据有效，当前返回 `deepseek-flash` 和 `deepseek-v4-pro`；新实验固定使用 `deepseek-flash`，不把旧 `deepseek-chat` 诊断与新模型结果合并。元数据查询不产生生成 tokens。实际返回的模型标识、response ID 和 fingerprint 由请求证据记录，未提供的底层版本保持未知。
 
 当前 DeepSeek 思考工具轮次要求完整回传 reasoning_content；源码在工具结果、截断续写和校验重试中保留该字段，仅 DeepSeek 的 OpenAI 格式请求发送它，其他 OpenAI 兼容端点保持原格式。零外部调用的 test:deepseek-reasoning 先复现了字段丢失，再验证真实工具循环、无工具续写及其他模型的负向约束。契约来源：[DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)。
+
+
+## 2026-11-15 真实隔离运行与预算停止
+
+[运行 43697561600](https://github.com/yimi528/CodeNode/actions/runs/43697561600) 使用提交 f113444、deepseek-flash、native-product profile、Harbor 解题环境及独立无网络 verifier。计划为两题、两组、各两次，共 8 次；实际启动 4 次，完整交付 1 次，2 份产物独立验收 PASS。其余已启动尝试均遇到控制端预算预检拒绝，4 次未启动。不能将这些未交付记录解释为模型编码失败率或服务中断率。
+
+本轮供应商实际报告新增 63,830 tokens；累计已报告 546,612，累计保守计账 946,675，未结算预留 0，余额 53,325。已观测的 native-product 初始请求需要 70,404 tokens 预留上界，高于当前余额；预留上界不等于实际消耗。周期入口已经配置启用，低于启动门槛时先归档 budget-status.json，跳过依赖安装、模型执行和新计划准备，不重置原额度。
+
+原生错误位于 event.delta.error，且最终 result 可能只有 FAILED 状态，没有 error 字段。导入器现在优先读取原生错误，再考虑 Harbor 的命令异常；EVAL_TOKEN_BUDGET 标为 BUDGET_EXHAUSTED / budget-not-funded。原始云端报告保留，修正分析另存为带 analysisId、代码哈希、输入哈希和原实验身份的新报告，不重跑模型，不改独立评分或首个 Shell 指标。
+
+```bash
+npm run eval:reanalyze-harbor -- \
+  --input=/absolute/path/to/downloaded/live-evidence \
+  --output=/absolute/path/to/new-analysis
+```
+
+重分析核对计划封印、冻结源码、任务身份和产物哈希，支持把原 CI 的绝对路径安全映射到下载目录。输出必须是原证据之外的新目录。现有 8 次计划分母、4 次未启动和原 grade 均保留；新版分析中服务无完整响应为 0，3 次属于预算停止。正式收益确认仍为 insufficient-evidence / 未完成，不申请新增额度。
+
+[生产发布检查 43697937003](https://github.com/yimi528/CodeNode/actions/runs/43697937003) 已实际调用能力门禁并拒绝放行：确认覆盖不完整、缺人审且统计证据不足；原有发布凭据检查也未通过。工程工作流成功不等于发布获准。原 26 题人审仍待完成，独立复核 secret 未填写。后续分析修复不冒充新的解题尝试；发布检查仍严格要求证据匹配提交。
