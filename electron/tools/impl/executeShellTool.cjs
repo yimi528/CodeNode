@@ -383,10 +383,9 @@ function auditInvocation(parsed, options) {
 function register(registry) {
   registry.register(
     'execute_shell',
-      '在任务工程目录执行命令：桌面遵守程序白名单和审批，评测容器由评测器隔离并支持任意程序。' +
-      'mode=argv: program+args 原样启动程序；mode=shell: command 原文交给 /bin/sh -c，仅评测容器可用。旧 command 在评测容器也按 shell 执行，桌面为旧程序模式。cwd 默认任务目录。' +
-      '危险命令（删除/清理/强改/提交推送等）执行前需用户确认；超时自动强杀。' +
-      '【长任务】预估耗时超过约 30 秒的任务：用 async=true 后台执行（立即返回 jobId），再用 poll_job jobId=… waitSeconds=… 轮询进度与结果，不要一次性前台等待。',
+      'cwd 默认任务目录；mode=argv 原样执行 program+args。桌面受程序白名单和审批约束，旧 command 为程序模式。' +
+      '仅隔离评测容器支持任意程序及 mode=shell（command 原文交给 /bin/sh -c，旧 command 同样）。' +
+      '删除/清理/强改/提交/推送须确认，超时强杀。预计>30秒设 async=true，按返回的 jobId 用 poll_job/waitSeconds 轮询。',
     {
       type: 'object',
       properties: {

@@ -17,7 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const agent = require("../../electron/agent.cjs");
+const agent = require("../../electron/agentPrompt.cjs");
 const profiles = require("../../electron/tools/profiles.cjs");
 
 let failures = 0;
@@ -218,7 +218,7 @@ console.log('\n== E. 跨任务类型前缀（棘轮）+ 接线 ==');
   check('[E] 跨类型前缀的边界落在**任务规则/画布层**附近（不是被记忆/画布清单打断）',
     common >= agent.splitPromptSections(code).find((s) => s.id === 'runtime-rules').start + 1000, 'common=' + common);
 
-  const src = fs.readFileSync(path.join(__dirname, "../../electron/agent.cjs"), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, "../../electron/agentPrompt.cjs"), 'utf8');
   check('[E] 装配走的是登记表排序（不是随手 join）',
     /return orderPromptSections\(lines\)\.join\('\\n\\n'\)/.test(src));
   check('[E] 规则块拆两段的地方确实调了 splitRuntimeRules，且任务段进了 lines',
