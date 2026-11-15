@@ -28,6 +28,10 @@ class AgentToolContext {
   constructor(options) {
     const o = options || {};
     this.projectRootValue = o.projectRoot || '.';
+    this.benchmarkContainerValue = o.benchmarkContainer === true && process.env.CODENODE_BENCHMARK_CONTAINER === '1';
+    this.accessRootValue = o.accessRoot || this.projectRootValue;
+    if (this.benchmarkContainerValue && !require('./impl/shared.cjs').resolveInRoot(this.accessRootValue, require('path').resolve(this.projectRootValue))) throw Error('projectRoot must be inside accessRoot');
+    if (!this.benchmarkContainerValue && require('path').resolve(this.accessRootValue) !== require('path').resolve(this.projectRootValue)) throw Error('accessRoot expansion requires an evaluator-owned container');
     this.modelValue = o.model || null;
     this.confirmHandler = o.confirm || null;
     this.autoExecuteTools = o.autoExecuteTools === true;
@@ -92,6 +96,9 @@ class AgentToolContext {
   projectRoot() {
     return this.projectRootValue || '.';
   }
+
+  accessRoot() { return this.accessRootValue; }
+  benchmarkContainer() { return this.benchmarkContainerValue; }
 
   model() {
     return this.modelValue;
@@ -458,6 +465,8 @@ class AgentToolContext {
     const o = overrides || {};
     return new AgentToolContext({
       projectRoot: o.projectRoot || this.projectRootValue,
+      accessRoot: this.benchmarkContainerValue ? this.accessRootValue : (o.projectRoot || this.projectRootValue),
+      benchmarkContainer: this.benchmarkContainerValue,
       model: o.model || this.modelValue,
       confirm: this.confirmHandler,
       autoExecuteTools: this.autoExecuteTools,

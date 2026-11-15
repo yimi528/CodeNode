@@ -2,11 +2,11 @@
  * list_directory：列出项目目录内容（Windows 安全，不使用 shell）。path 为项目内相对目录，recursive=true 递归。
  */
 'use strict';
+const { resolveToolPath } = require('../paths.cjs');
 
 const fs = require('fs');
 const path = require('path');
 const { AgentToolResult } = require('../result.cjs');
-const { resolveInRoot } = require('./shared.cjs');
 const { shouldSkipDir } = require('../toolFiles.cjs');
 
 const MAX_ENTRIES = 2000;
@@ -29,10 +29,8 @@ function register(registry) {
       let p = String(args.path || '').trim();
       if (!p) p = '.';
       const recursive = args.recursive === true;
-      const root = path.resolve(context.projectRoot());
-      const dir = resolveInRoot(root, p);
+      const dir = resolveToolPath(context, p);
       if (!dir) return AgentToolResult.error('路径越过项目边界');
-      if (dir !== root && !dir.startsWith(root + path.sep)) return AgentToolResult.error('路径越过项目边界');
       if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return AgentToolResult.error('目录不存在：' + p);
 
       const lines = [];

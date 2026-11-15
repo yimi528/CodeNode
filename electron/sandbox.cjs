@@ -14,8 +14,9 @@
  *             文件系统与网络 = 本平台无等价无管理员方案，退回工具层路径边界（writeRoots 校验）。
  *   linux   → bubblewrap（bwrap）：只读根 + 工作区可写 + 可选断网，全部由内核 namespace 强制。
  *   darwin  → sandbox-exec：deny default + 全读 + 仅白名单目录可写 + 可选 deny network*。
- *   其它/后端缺失 → 能力为 none，strict 模式下拒绝执行（fail-closed），best-effort 模式下
- *             降级执行并写入审计（明确标注「未隔离」）。
+ *   其它/后端缺失 → 能力为 none；内置工具在 strict 模式下拒绝执行、best-effort 模式下
+ *             降级并写入审计。外部 Agent 自带文件/终端工具，除非用户显式关闭沙箱，
+ *             否则缺少真实文件系统隔离时一律拒绝启动。
  *
  * 三种策略模式（config/agent.properties → sandbox.mode）：
  *   off         完全关闭，走原生 spawn（等价旧行为）
@@ -29,7 +30,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
-const HELPER_VERSION = '1';
+const HELPER_VERSION = '2';
 const DEFAULT_BROKER_RESERVE_MB = 160;
 
 let cachedCapabilities = null;
@@ -186,16 +187,19 @@ function bwrapCapabilities() {
 }
 
 function sandboxExecCapabilities() {
-  const probe = spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true'], {
+  // 不能用 `(allow default)` 探针：受父级 App Sandbox 限制时它可能成功，但生产使用的
+  // deny-default profile 会在 sandbox_apply 阶段以 71 失败，造成能力虚报。
+  const probeProfile = '(version 1)(deny default)(allow process*)(allow file-read*)(allow sysctl-read)(allow mach-lookup)(allow ipc-posix-shm)(allow signal)(allow file-write* (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))';
+  const probe = spawnSync('sandbox-exec', ['-p', probeProfile, '/usr/bin/true'], {
     encoding: 'utf8',
     timeout: 10000,
   });
-  if (probe.status !== 0 && probe.error) {
+  if (probe.status !== 0) {
     return {
       platform: 'darwin',
       backend: 'none',
       isolation: { lifetime: false, processCount: false, memory: false, cpu: false, filesystem: false, network: false },
-      detail: 'sandbox-exec 不可用：' + String(probe.error.message || probe.error),
+      detail: 'sandbox-exec 生产级探针失败：' + String(probe.error?.message || probe.stderr || probe.stdout || ('exit=' + probe.status)).trim().slice(0, 300),
     };
   }
   return {
@@ -323,6 +327,55 @@ function describe(policy) {
   return parts.join('，');
 }
 
+/**
+ * 外部 Agent 自带文件/终端工具，不能只依赖 ACP/MSP 的权限请求。这里把普通工具策略
+ * 收紧成「整个 Agent 进程」的运行策略：模型联网保持可用，但文件系统隔离必须被真实
+ * 请求；read-only 会从可写根中移除项目目录及其子目录。
+ */
+function externalAgentPolicy(policy, options = {}) {
+  if (!policy || policy.mode === 'off') return policy || null;
+  const caps = policy.capabilities || {};
+  const isolation = caps.isolation || {};
+  const projectRoot = options.projectRoot ? canonicalPath(options.projectRoot) : null;
+  const readOnly = options.access === 'read-only';
+  const normalize = value => process.platform === 'win32' ? value.toLowerCase() : value;
+  const projectKey = projectRoot ? normalize(projectRoot) : null;
+  const writeRoots = (policy.writeRoots || []).filter(root => {
+    if (!readOnly || !projectKey) return true;
+    const candidate = normalize(canonicalPath(root));
+    return candidate !== projectKey && !candidate.startsWith(projectKey + path.sep);
+  });
+  const degraded = [];
+  if (!isolation.lifetime && caps.backend === 'none') degraded.push('lifetime');
+  if (!isolation.filesystem) degraded.push('filesystem');
+  const unsatisfied = [];
+  // 外部 Agent 可以绕过 CodeNode 的工具层路径检查，best-effort 降级会把整个用户文件系统
+  // 暴露给它。这里对所有启用沙箱的模式 fail-closed；需要承担风险时必须显式 mode=off。
+  if (caps.backend === 'none') unsatisfied.push('backend');
+  if (!isolation.filesystem) unsatisfied.push('filesystem');
+  return {
+    ...policy,
+    network: 'inherit',
+    requireFilesystem: true,
+    writeRoots,
+    degraded,
+    unsatisfied,
+    ok: unsatisfied.length === 0,
+    externalAgent: true,
+    access: readOnly ? 'read-only' : 'workspace-write',
+  };
+}
+
+function requiresFailClosed(policy) {
+  return !!policy && (policy.mode === 'strict' || policy.externalAgent === true);
+}
+
+function unavailablePrefix(policy, subject = '当前平台') {
+  return policy && policy.externalAgent
+    ? '外部 Agent 必须在文件系统隔离中运行，但' + subject + '无法满足：'
+    : '隔离策略为 strict，但' + subject + '无法满足：';
+}
+
 // ---------------------------------------------------------------------------
 // 命令行包装（Linux/macOS）
 // ---------------------------------------------------------------------------
@@ -343,7 +396,10 @@ function sandboxExecProfile(policy) {
     '(allow signal)',
     '(allow file-write* (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/dtracehelper") ' + allowWrite + ')',
   ];
+  // deny-default 本身也会拒绝网络；inherit 必须显式 allow，否则外部 Agent 虽然标记为
+  // 可联网，实际仍无法连接模型供应商。
   if (policy.network === 'deny') lines.push('(deny network*)');
+  else lines.push('(allow network*)');
   return lines.join('\n');
 }
 
@@ -367,9 +423,9 @@ function bwrapArgs(policy, spec) {
 function wrapCommand(policy, spec) {
   if (!policy || policy.mode === 'off') return null;
   const caps = policy.capabilities || {};
-  if (policy.mode === 'strict' && policy.unsatisfied && policy.unsatisfied.length) {
+  if (requiresFailClosed(policy) && policy.unsatisfied && policy.unsatisfied.length) {
     throw Object.assign(
-      new Error('隔离策略为 strict，但当前平台无法满足：' + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
+      new Error(unavailablePrefix(policy) + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
       { code: 'SANDBOX_UNAVAILABLE' }
     );
   }
@@ -389,9 +445,10 @@ function wrapCommand(policy, spec) {
 // ---------------------------------------------------------------------------
 
 const { EventEmitter } = require('events');
+const { PassThrough, Writable } = require('stream');
 
 class SandboxChild extends EventEmitter {
-  constructor({ broker, backend, policy, file, args }) {
+  constructor({ broker, backend, policy, file, args, interactive = false }) {
     super();
     this.broker = broker;
     this.backend = backend;
@@ -404,14 +461,33 @@ class SandboxChild extends EventEmitter {
     this.exitCode = null;
     /** windows-job 后端用到的 spec 文件路径（close 后清理） @type {string|null} */
     this.specFile = null;
-    this.stdout = new EventEmitter();
-    this.stderr = new EventEmitter();
+    this.stdout = new PassThrough();
+    this.stderr = new PassThrough();
+    this.stdin = interactive ? new Writable({
+      write: (chunk, _encoding, callback) => {
+        try {
+          const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          this.broker.stdin.write(JSON.stringify({ op: 'stdin', b64: payload.toString('base64') }) + '\n', callback);
+        } catch (error) { callback(error); }
+      },
+      final: callback => {
+        try { this.broker.stdin.write(JSON.stringify({ op: 'stdin_end' }) + '\n', callback); }
+        catch (error) { callback(error); }
+      },
+    }) : new Writable({
+      // 非交互 Job 的目标进程已拿到 EOF；保留 ChildProcess 兼容表面，但不把任意字节
+      // 误送进 broker 控制管道（旧协议中任意输入都表示终止）。
+      write: (_chunk, _encoding, callback) => callback(),
+    });
     this.attached = true;
     this._rest = '';
     broker.stdout.on('data', (chunk) => this._onBrokerData(chunk));
-    broker.stderr.on('data', (chunk) => this.stderr.emit('data', chunk));
+    broker.stderr.on('data', (chunk) => this.stderr.write(chunk));
     broker.on('error', (error) => {
+      if (this._closed) return;
+      this._closed = true;
       this.killed = true;
+      this.stdout.end(); this.stderr.end();
       this.emit('error', error);
       this.emit('close', -1);
     });
@@ -419,6 +495,7 @@ class SandboxChild extends EventEmitter {
       if (this._closed) return;
       this._closed = true;
       this.exitCode = this.exitCode == null ? code : this.exitCode;
+      this.stdout.end(); this.stderr.end();
       this.emit('close', this.exitCode);
     });
   }
@@ -440,7 +517,7 @@ class SandboxChild extends EventEmitter {
         this.emit('spawn', event.pid);
       } else if (event.ev === 'out') {
         const buffer = Buffer.from(event.b64 || '', 'base64');
-        (event.stream === 'stderr' ? this.stderr : this.stdout).emit('data', buffer);
+        (event.stream === 'stderr' ? this.stderr : this.stdout).write(buffer);
       } else if (event.ev === 'exit') {
         this.exitCode = event.code;
       } else if (event.ev === 'error') {
@@ -483,6 +560,53 @@ function plainSpawn(file, args, options) {
   return spawn(file, args, options);
 }
 
+function spawnWindowsJob(spec, options, policy, baseOptions, interactive = false) {
+  const context = options.context;
+  const helper = ensureWinJobHelper(options);
+  if (!helper.ok) {
+    if (requiresFailClosed(policy)) {
+      throw Object.assign(new Error(unavailablePrefix(policy, 'Windows Job Object helper') + helper.reason), {
+        code: 'SANDBOX_UNAVAILABLE',
+      });
+    }
+    audit(context, 'sandbox-fallback:job-helper-unavailable ' + helper.reason);
+    return plainSpawn(spec.file, spec.args, { ...baseOptions, detached: options.detached === true });
+  }
+  const dir = cacheDir(options.cacheDir);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const specFile = path.join(dir, 'run-' + process.pid + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8) + '.json');
+  const payload = {
+    file: spec.file,
+    args: (spec.args || []).map(String),
+    cwd: baseOptions.cwd || process.cwd(),
+    env: baseOptions.env || {},
+    interactive,
+    limits: {
+      maxProcesses: policy.maxProcesses || 0,
+      maxMemoryMB: policy.maxMemoryMB || 0,
+      cpuSeconds: policy.cpuSeconds || 0,
+      brokerReserveMB: policy.brokerReserveMB || DEFAULT_BROKER_RESERVE_MB,
+    },
+  };
+  try {
+    fs.writeFileSync(specFile, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
+  } catch (error) {
+    if (requiresFailClosed(policy)) {
+      throw Object.assign(new Error(unavailablePrefix(policy, 'Windows Job Object 规格文件') + error.message), {
+        code: 'SANDBOX_UNAVAILABLE',
+      });
+    }
+    audit(context, 'sandbox-fallback:spec-write-failed ' + error.message);
+    return plainSpawn(spec.file, spec.args, { ...baseOptions, detached: options.detached === true });
+  }
+  const broker = plainSpawn(helper.path, ['-spec', specFile], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const sandboxChild = new SandboxChild({ broker, backend: 'windows-job', policy, file: spec.file, args: spec.args, interactive });
+  sandboxChild.specFile = specFile;
+  sandboxChild.on('close', () => { try { fs.unlinkSync(specFile); } catch {} });
+  audit(context, 'sandbox:windows-job interactive=' + interactive + ' processes=' + (policy.maxProcesses || '∞') + ' memoryMB=' + (policy.maxMemoryMB || '∞'));
+  return sandboxChild;
+}
+
 /**
  * 受隔离策略约束地启动一条命令。
  * 返回 SandboxChild（隔离生效）或原生 ChildProcess（未隔离 / 策略关闭）。
@@ -505,60 +629,15 @@ function guardedSpawn(spec, options = {}) {
 
   const context = options.context;
   const caps = policy.capabilities || {};
-  // strict = fail-closed：策略声明必须满足的隔离项无法满足时，拒绝执行而不是静默降级
-  if (policy.mode === 'strict' && policy.unsatisfied && policy.unsatisfied.length) {
+  // strict 与外部 Agent = fail-closed：策略声明必须满足的隔离项无法满足时，拒绝执行而不是静默降级
+  if (requiresFailClosed(policy) && policy.unsatisfied && policy.unsatisfied.length) {
     throw Object.assign(
-      new Error('隔离策略为 strict，但当前平台无法满足：' + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
+      new Error(unavailablePrefix(policy) + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
       { code: 'SANDBOX_UNAVAILABLE' }
     );
   }
   if (caps.backend === 'windows-job') {
-    const helper = ensureWinJobHelper(options);
-    if (!helper.ok) {
-      if (policy.mode === 'strict') {
-        throw Object.assign(new Error('隔离策略为 strict，但 Windows Job Object helper 不可用：' + helper.reason), {
-          code: 'SANDBOX_UNAVAILABLE',
-        });
-      }
-      audit(context, 'sandbox-fallback:job-helper-unavailable ' + helper.reason);
-      return plainSpawn(spec.file, spec.args, { ...baseOptions, detached: options.detached === true });
-    }
-    const dir = cacheDir(options.cacheDir);
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-    } catch {}
-    const specFile = path.join(dir, 'run-' + process.pid + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8) + '.json');
-    const payload = {
-      file: spec.file,
-      args: (spec.args || []).map(String),
-      cwd: cwd || process.cwd(),
-      env: env || {},
-      limits: {
-        maxProcesses: policy.maxProcesses || 0,
-        maxMemoryMB: policy.maxMemoryMB || 0,
-        cpuSeconds: policy.cpuSeconds || 0,
-        brokerReserveMB: policy.brokerReserveMB || DEFAULT_BROKER_RESERVE_MB,
-      },
-    };
-    try {
-      fs.writeFileSync(specFile, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
-    } catch (error) {
-      if (policy.mode === 'strict') {
-        throw Object.assign(new Error('隔离策略为 strict，但无法写入 spec 文件：' + error.message), {
-          code: 'SANDBOX_UNAVAILABLE',
-        });
-      }
-      audit(context, 'sandbox-fallback:spec-write-failed ' + error.message);
-      return plainSpawn(spec.file, spec.args, { ...baseOptions, detached: options.detached === true });
-    }
-    const broker = plainSpawn(helper.path, ['-spec', specFile], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    const sandboxChild = new SandboxChild({ broker, backend: 'windows-job', policy, file: spec.file, args: spec.args });
-    sandboxChild.specFile = specFile;
-    sandboxChild.on('close', () => {
-      try { fs.unlinkSync(specFile); } catch {}
-    });
-    audit(context, 'sandbox:windows-job processes=' + (policy.maxProcesses || '∞') + ' memoryMB=' + (policy.maxMemoryMB || '∞'));
-    return sandboxChild;
+    return spawnWindowsJob({ ...spec, cwd, env }, options, policy, baseOptions, false);
   }
 
   const wrapped = wrapCommand(policy, { ...spec, cwd, env });
@@ -576,10 +655,8 @@ function guardedSpawn(spec, options = {}) {
 
 /**
  * MCP / 项目命令面板 / 任何需要双向 stdio 的子进程：
- * Windows Job 代理会接管 stdin（既用于父进程存活探测，也用于终止信号），
- * 无法承载 JSON-RPC 或交互式输入，因此这里只在具备「不干扰 stdio」的包装后端
- * （Linux bwrap / macOS sandbox-exec）时上隔离，其它平台退回原生 spawn
- * 并在审计里如实标注「该路径未做 OS 级隔离」——不假装隔离。
+ * Windows Job 代理用逐行 JSON + base64 多路复用子进程 stdin/stdout，因而也能承载
+ * ACP/MSP/MCP 的双向 stdio；Linux bwrap 与 macOS sandbox-exec 直接保留原始管道。
  */
 function guardedInteractiveSpawn(spec, options = {}) {
   return guardedMcpSpawn(spec, options);
@@ -593,17 +670,20 @@ function guardedMcpSpawn(spec, options = {}) {
   const baseOptions = { cwd, env, shell: false, windowsHide: true };
   if (!policy || policy.mode === 'off') return plainSpawn(spec.file, spec.args, baseOptions);
   const caps = policy.capabilities || {};
-  if (policy.mode === 'strict' && policy.unsatisfied && policy.unsatisfied.length) {
+  if (requiresFailClosed(policy) && policy.unsatisfied && policy.unsatisfied.length) {
     throw Object.assign(
-      new Error('隔离策略为 strict，但 MCP 所需的隔离项无法满足：' + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
+      new Error(unavailablePrefix(policy, policy.externalAgent ? '当前平台' : 'MCP 所需的隔离项') + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
       { code: 'SANDBOX_UNAVAILABLE' }
     );
   }
+  if (caps.backend === 'windows-job') {
+    return spawnWindowsJob({ ...spec, cwd, env }, options, policy, baseOptions, true);
+  }
   let wrapped = null;
   try {
-    wrapped = caps.backend === 'windows-job' ? null : wrapCommand(policy, { ...spec, cwd, env });
+    wrapped = wrapCommand(policy, { ...spec, cwd, env });
   } catch (error) {
-    if (policy.mode === 'strict') throw error;
+    if (requiresFailClosed(policy)) throw error;
     audit(options.context, 'sandbox-mcp-fallback:' + error.message);
     return plainSpawn(spec.file, spec.args, baseOptions);
   }
@@ -676,6 +756,7 @@ module.exports = {
   setDefaultPolicy,
   currentPolicy,
   describe,
+  externalAgentPolicy,
   wrapCommand,
   guardedSpawn,
   guardedMcpSpawn,

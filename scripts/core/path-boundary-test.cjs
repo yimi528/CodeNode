@@ -10,7 +10,7 @@
  * 普通文件不受影响（反向锁）。
  *
  * 平台说明：Windows 上创建**文件**符号链接需要开发者模式 / SeCreateSymbolicLinkPrivilege，
- * 拿不到权限时行为判据退化为「静态门禁」——断言读取路径的敏感判定确实作用在 realpath 上。
+ * 另用受控 canonical target 的真实工具调用覆盖权限受限平台，不依赖源码拼写。
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -73,10 +73,23 @@ const link = path.join(root, 'linked');
     console.log('SKIP  #17 行为判据 —— 本机无法创建文件符号链接（Windows 未开开发者模式 / 无 SeCreateSymbolicLinkPrivilege）');
   }
   {
-    // 静态门禁：权限受限平台上的替代判据 —— 敏感判定必须作用在 realpath 上
-    const src = fs.readFileSync(path.join(__dirname, "../../electron/tools/impl/readFileTool.cjs"), 'utf8');
-    check('#17 读取路径的敏感判定作用在 realpath 上（静态门禁）',
-      /path\.relative\(\s*fs\.realpathSync\(root\)\s*,\s*fs\.realpathSync\(file\)\s*\)/.test(src), '');
+    // Exercise the real tool call even when the OS cannot create a file symlink.
+    // Only canonicalization is controlled; the resolver and sensitive-file check remain real.
+    const alias = path.join(root, 'canonical-alias.md');
+    fs.writeFileSync(alias, 'SECRET=1', 'utf8');
+    const realpath = fs.realpathSync;
+    const canonicalAlias = realpath(alias);
+    const sensitiveTarget = realpath(path.join(root, '.env'));
+    const canonical = Object.assign(function(file, options) {
+      const target = path.resolve(String(file));
+      return target === alias || target === canonicalAlias ? sensitiveTarget : realpath(file, options);
+    }, { native: realpath.native });
+    try {
+      fs.realpathSync = /** @type {typeof fs.realpathSync} */ (canonical);
+      const res = await registry.execute('read_file', { path: 'canonical-alias.md' }, context);
+      check('#17 canonical target 敏感时真实 read_file 拒绝且不暴露凭据',
+        res.ok === false && /凭据保护/.test(String(res.text)) && !String(res.text).includes('SECRET=1'));
+    } finally { fs.realpathSync = realpath; }
   }
   {
     // 反向锁：普通文件照常可读（realpath 判定不能误伤）

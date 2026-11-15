@@ -60,7 +60,7 @@ function placeholderFor(toolName, originalChars) {
 
 /** 是否已经是占位符（幂等判据） */
 function isTrimmed(content) {
-  return typeof content === 'string' && content.startsWith(TRIM_MARKER);
+  return typeof content === 'string' && (content.startsWith(TRIM_MARKER) || content.startsWith(require('./toolResultArchive.cjs').MARKER) || content.startsWith(require('./toolResultJournal.cjs').CHECKPOINT_MARKER));
 }
 
 /**

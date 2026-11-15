@@ -270,7 +270,7 @@ function isToolPairingValid(messages) {
  * @param {{ reason?: string, controlState?: object }} [options]
  */
 function saveMessages(projectRoot, runId, messages, { reason, controlState } = {}) {
-  const list = Array.isArray(messages) ? messages : [];
+  const list = require('./toolResultJournal.cjs').checkpointMessages(projectRoot, Array.isArray(messages) ? messages : []);
   const trimmed = list
     .filter((message) => message && message.role)
     .slice(-MAX_CHECKPOINT_MESSAGES)

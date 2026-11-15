@@ -39,20 +39,26 @@ const toolkit = require("../../electron/tools/toolkit.cjs");
 const { AgentToolContext } = require("../../electron/tools/context.cjs");
 const { GraphModel } = require("../../electron/tools/GraphModel.cjs");
 const { getScalarStore } = require("../../electron/scalars/index.cjs");
-const { datasetVersion, tasks: TASKS, modelSubsets } = require('./agent-eval-tasks.cjs');
+const builtinDataset = require('./agent-eval-tasks.cjs');
+const protocol = require('../lib/eval-protocol.cjs');
+const { instrumentFetch } = require('../lib/eval-transport.cjs');
+const { runQualityChecks, assessmentFor, summarizeAssessments, TRACK_LABELS } = require('../lib/eval-quality.cjs');
+let datasetVersion=String(builtinDataset.datasetVersion);
+/** @type {any[]} */ let TASKS=[...builtinDataset.tasks];
+/** @type {Record<string,string[]>} */ let modelSubsets={...builtinDataset.modelSubsets};
 
 const EXIT_OK = 0;
 const EXIT_TASK_FAIL = 1;
 const EXIT_MODEL_UNCONFIGURED = 2;
 
 const DEFAULT_USAGE = { total_tokens: 120, prompt_tokens: 80, completion_tokens: 40 };
-const WORKSPACE_IGNORE = ['.codenode', 'node_modules'];
+const WORKSPACE_IGNORE = ['.codenode', 'node_modules', '.git'];
 const REPORT_DIR_REL = path.join('docs', 'eval-reports');
 
 /* ------------------------------- 参数解析 ------------------------------- */
 
 function parseArgs(argv) {
-  const opts = { mode: 'offline', requireModel: false, allowModelSkip: false, keep: false, tasks: [], subsets: [], json: false, reportDir: null };
+  const opts = { mode: 'offline', requireModel: false, allowModelSkip: false, keep: false, tasks: [], subsets: [], json: false, reportDir: null, baseline: null, cases: null };
   for (const raw of argv) {
     const arg = String(raw);
     if (arg === '--mode=offline') opts.mode = 'offline';
@@ -62,9 +68,14 @@ function parseArgs(argv) {
     else if (arg === '--allow-model-skip') opts.allowModelSkip = true;
     else if (arg === '--keep') opts.keep = true;
     else if (arg === '--json') opts.json = true;
+    else if (arg.startsWith('--token-ledger=')) opts.tokenLedger = path.resolve(arg.slice(15));
+    else if (arg === '--argv-guide') opts.argvGuide = true;
+    else if (arg.startsWith('--grader-backend=')) opts.graderBackend = arg.slice(17);
     else if (arg === '--list') opts.list = true;
     else if (arg.startsWith('--task=')) opts.tasks.push(arg.slice('--task='.length));
     else if (arg.startsWith('--subset=')) opts.subsets.push(arg.slice('--subset='.length));
+    else if (arg.startsWith('--cases=')) opts.cases=arg.slice('--cases='.length);
+    else if (arg.startsWith('--baseline=')) opts.baseline = arg.slice('--baseline='.length);
     else if (arg.startsWith('--report-dir=')) opts.reportDir = arg.slice('--report-dir='.length);
     else throw new Error('未知参数：' + arg);
   }
@@ -99,7 +110,19 @@ function gitInfo() {
     fullCommit: run(['rev-parse', 'HEAD']) || 'nogit',
     branch: run(['rev-parse', '--abbrev-ref', 'HEAD']) || 'nogit',
     dirty: !!run(['status', '--porcelain']),
+    codeFingerprint: runtimeFingerprint(),
   };
+}
+
+// Include uncommitted runtime sources in report identity without exporting source or secrets.
+function runtimeFingerprint(){
+ const hash=require('node:crypto').createHash('sha256');
+ const visit=relative=>{const file=path.join(ROOT,relative),stat=fs.lstatSync(file);if(stat.isSymbolicLink())return;
+  if(stat.isDirectory()){for(const name of fs.readdirSync(file).sort())visit(path.join(relative,name));}
+  else if(/\.(?:cjs|mjs|ts|tsx|json|jsonc|css)$/.test(relative)){hash.update(relative.replace(/\\/g,'/')+'\0');hash.update(fs.readFileSync(file));hash.update('\0');}
+ };
+ for(const name of ['electron','src','scripts','config','package.json'])visit(name);
+ return hash.digest('hex');
 }
 
 /** 从工作台源码里取硬上限常量，报告里的参数必须来自真实代码而不是复述文档。 */
@@ -292,6 +315,10 @@ function buildChecks(ctx) {
   const workspacePath = (rel) => path.resolve(ctx.workspace, rel);
 
   return {
+    'file-exact': check => ({pass:fs.readFileSync(workspacePath(check.path),'utf8')===check.text,detail:'文件完整字节比较'}),
+    'git-user-dirty': check => {const result=spawnSync('git',['status','--porcelain','--',check.path],{cwd:ctx.workspace,encoding:'utf8'});return {pass:result.status===0&&result.stdout.includes(check.path),detail:result.stdout};},
+    'steering-injected': () => ({pass:ctx.result.steeringInjected>0,detail:'steeringInjected='+ctx.result.steeringInjected}),
+    'verification-revalidated': () => ({pass:ctx.injectedMutation&&ctx.result.codeVerification?.verified===true&&ctx.verificationReports>=2,detail:'外部修改已注入；最终证据必须重新生成，不能复用旧通过状态'}),
     'registry-excludes': (check) => ({
       pass: !ctx.registry.contains(check.tool),
       detail: `工具注册表 ${ctx.registry.contains(check.tool) ? '仍包含' : '已排除'} ${check.tool}`,
@@ -321,6 +348,10 @@ function buildChecks(ctx) {
     'tool-data-match': (check) => {
       const hit = byTool(check.tool).filter((r) => r.data && r.data[check.key] === check.value);
       return { pass: hit.length > 0, detail: `${check.tool}.data.${check.key} === ${JSON.stringify(check.value)} 命中 ${hit.length} 次` };
+    },
+    'tool-success-output': (check) => {
+      const hit = byTool(check.tool).filter(r => r.ok && r.data?.exitCode === 0 && String(r.result || '').includes(check.text));
+      return { pass: hit.length > 0, detail: `${check.tool} 退出成功且输出包含「${check.text}」：${hit.length} 次（过程信号）` };
     },
     'tool-result-contains': (check) => {
       const hit = byTool(check.tool).filter((r) => String(r.result || '').includes(check.text));
@@ -449,6 +480,7 @@ function buildChecks(ctx) {
           `markRetry.ok=${retry.ok}；重试后状态=${statusAfter}`,
       };
     },
+    'coding-behavior': () => require('../lib/coding-grader.cjs').gradeCoding(ctx.workspace, ctx.task, { backend: ctx.graderBackend || 'process' }),
     'verify-shell': (check) => {
       // 评测进程独立复跑（不采信模型自述，也不只信工具返回）
       const res = spawnSync(check.command, { cwd: ctx.workspace, shell: true, encoding: 'utf8', timeout: check.timeoutMs || 60000 });
@@ -466,7 +498,9 @@ function buildChecks(ctx) {
 
 function writeFixtures(workspace, fixture) {
   for (const [rel, content] of Object.entries(fixture || {})) {
-    const file = path.join(workspace, rel);
+    const file = path.resolve(workspace, rel), relative=path.relative(workspace,file);
+    if(!relative||relative.startsWith('..')||path.isAbsolute(relative)||relative.split(path.sep).includes('.git'))throw Error('fixture 路径越界');
+    for(let current=file;current!==workspace;current=path.dirname(current)){if(fs.existsSync(current)&&fs.lstatSync(current).isSymbolicLink())throw Error('fixture 不能穿过符号链接');}
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, String(content), 'utf8');
   }
@@ -506,6 +540,8 @@ function buildConfig(task, workspace, opts) {
   if (budget && budget.maxTotalTokens) {
     cfg.limits = { ...cfg.limits, maxTotalTokens: budget.maxTotalTokens };
   }
+  if(task.editing)cfg.editing={...cfg.editing,...task.editing};
+  if(task.verification)cfg.editing={...cfg.editing,lintCommand:'node --check {files}',testCommand:'node test.cjs',maxVerificationRuns:5};
   const RequestBudget = require("../../electron/requestBudget.cjs").RequestBudget;
   cfg.requestBudget = new RequestBudget(task.requestBudgetTokens || (budget && budget.maxTotalTokens) || cfg.limits.maxTotalTokens);
   return cfg;
@@ -540,9 +576,16 @@ async function runTask(task, opts) {
     return record;
   }
 
+  const evidence = protocol.createTrial(opts.evidenceRoot, task, { mode: opts.mode, profile: 'benchmark-controlled', agent: opts.agentIdentity, evaluation: task.evaluation }, [opts.modelCfg.apiKey]);
+  opts.trials.set(task.id, evidence);
+  record.evidence = { trialId: evidence.trialId, directory: evidence.directory };
+  evidence.save('execution.json', { phase: 'PREPARING', executionStatus: 'NOT_STARTED', gradingStatus: 'NOT_RUN', integrityStatus: 'UNKNOWN' });
   const workspace = fs.mkdtempSync(path.join(opts.workRoot, 'eval-' + task.id + '-'));
   record.workspace = workspace;
+  if(task.repository)record.repository=require('../lib/eval-repository.cjs').materialize(task.repository,workspace);
   writeFixtures(workspace, task.fixture);
+  if(task.gitBaseline){for(const args of [['init'],['add','.'],['-c','user.name=Eval','-c','user.email=eval@localhost','commit','-m','baseline']]){const out=spawnSync('git',args,{cwd:workspace,encoding:'utf8'});if(out.status!==0)throw Error('评测 Git 基线失败：'+out.stderr);}}
+  if(task.userDirty)writeFixtures(workspace,task.userDirty);
   const before = snapshotWorkspace(workspace);
 
   const cfg = buildConfig(task, workspace, opts);
@@ -552,9 +595,28 @@ async function runTask(task, opts) {
     ragEnabled: true,
     projectRoot: workspace,
   });
+  if (task.injectFailure) {
+    const original = registry.execute.bind(registry);
+    let remaining = task.injectFailure.count || 1;
+    registry.execute = async (name, args, ctx) => {
+      if (name === task.injectFailure.tool && remaining > 0) {
+        remaining--;
+        evidence.append('events.jsonl', { kind: 'injected_tool_failure', tool: name, remaining });
+        return { ok: false, text: '临时读取故障，请修正或重试；本提示是评测注入。', data: { code: 'EVAL_TEMPORARY_FAILURE' } };
+      }
+      return original(name, args, ctx);
+    };
+  }
+  const effective = {};
+  for (const key of ['apiBase','model','protocol','auth','endpoint','maxTokens','reasoningEffort','limits','tools','compression','compaction','reliability','editing','externalVerification']) effective[key] = cfg[key];
+  evidence.save('effective-config.json', { profile: 'benchmark-controlled', values: effective, budget, graderBackend: opts.graderBackend || 'process', argvGuide: !!opts.argvGuide, approvalMode: 'auto-approve-fixture' });
   const model = new GraphModel();
   const controller = new AbortController();
   const runId = runStore.normalizeRunId('eval-' + task.id);
+  cfg.costRunId=runId;
+  cfg.costLedger = new (require('../../electron/costLedger.cjs').CostLedger)({projectRoot:workspace,runId,prices:cfg.costPrices});
+  let approvalRequests=0, inputRequests=0, steerQueued=false, injectedMutation=false, firstVerificationFingerprint=null, verificationReports=0;
+  const steerQueue=[];
   const deltas = [];
   const messages = [];
 
@@ -566,14 +628,14 @@ async function runTask(task, opts) {
     signal: controller.signal,
     scalarStore: getScalarStore(workspace),
     // 评测自动批准写操作：确认交互不属于本任务判据（路径边界/敏感文件由工具层独立拦截）
-    confirm: async () => true,
+    confirm: async () => {approvalRequests++;return true;},
     audit: (entry) => runStore.appendEvent(workspace, runId, 'audit', { entry: String(entry || '').slice(0, 2000) }),
     mutateWorkbench: async (fn) => {
       fn(model);
       return true;
     },
     saveProject: async () => null,
-    askUser: async () => '',
+    askUser: async () => {inputRequests++;return '';},
     ui: async () => false,
     conversationHistory: () => [],
     notifyFileChange: () => {},
@@ -583,6 +645,7 @@ async function runTask(task, opts) {
   const soul = agent.parseSoul(agent.loadSoul(cfg, workspace));
   const toolGuide = agent.buildToolGuide(registry.listTools());
   messages.push({ role: 'system', content: agent.buildSystemPrompt(soul, '', toolGuide, '', '') });
+  if (opts.argvGuide) messages[0].content += '\n' + require('../../electron/benchmarkProfile.cjs').ARGV_GUIDE;
   messages.push({ role: 'user', content: task.prompt });
 
   let toolResultCount = 0;
@@ -590,13 +653,21 @@ async function runTask(task, opts) {
   let cancelArmed = !!task.cancelAfter;
   const onDelta = (delta) => {
     if (!delta || !delta.kind) return;
+    if(delta.kind==='code_verification'&&delta.codeVerification?.verified)verificationReports++;
+    if(task.mutateAfterVerification&&!injectedMutation&&delta.kind==='code_verification'&&delta.codeVerification?.verified){
+      firstVerificationFingerprint=delta.codeVerification.fingerprint;injectedMutation=true;
+      fs.writeFileSync(path.join(workspace,task.mutateAfterVerification.path),task.mutateAfterVerification.content);
+      steerQueue.push('工作区文件刚被外部修改，请重新读取、修复和验证；旧校验不能代表当前代码。');
+    }
     deltas.push(delta);
+    evidence.append('events.jsonl', delta);
     // 与 electron/main.cjs 的 agent:chat 保持一致：把本轮关键事件写进 Run JSONL
     if (delta.kind === 'tool_result' && Array.isArray(delta.toolCalls)) {
       runStore.appendEvent(workspace, runId, 'tool_result', {
         tools: delta.toolCalls.map((item) => ({ name: item && item.name, ok: item && item.ok, elapsedMs: item && item.elapsedMs })),
       });
       toolResultCount += delta.toolCalls.length;
+      if(task.steerAfter&&!steerQueued&&delta.toolCalls.some(item=>item.name===task.steerAfter.tool)){steerQueued=true;steerQueue.push(task.steerAfter.text);}
       // 取消判据（离线模式）：第 N 次目标工具结果返回后取消运行
       if (cancelArmed && task.cancelAfter) {
         const matched = (task.cancelAfter.tool == null || delta.toolCalls.some((item) => item && item.name === task.cancelAfter.tool));
@@ -616,13 +687,14 @@ async function runTask(task, opts) {
   };
 
   let transport = null;
-  let originalFetch = null;
+  const originalFetch = global.fetch;
   if (opts.mode === 'offline') {
     transport = createScriptedTransport({ task, apiBase: cfg.apiBase });
-    originalFetch = global.fetch;
-    global.fetch = transport.fetchImpl;
+
   }
 
+  global.fetch = instrumentFetch(transport ? transport.fetchImpl : originalFetch, evidence, { apiBase: cfg.apiBase, ledger: opts.mode === 'model' ? opts.tokenLedger : null });
+  evidence.save('execution.json', { phase: 'SOLVING', executionStatus: 'UNKNOWN', gradingStatus: 'NOT_RUN', integrityStatus: 'UNKNOWN' });
   let timer = null;
   if (opts.mode === 'model' && task.cancelAfterMs) {
     timer = setTimeout(() => controller.abort(), task.cancelAfterMs);
@@ -641,6 +713,7 @@ async function runTask(task, opts) {
       tools: { registry, context },
       signal: controller.signal,
       timeoutMs: budget && budget.timeoutMs ? budget.timeoutMs : 60000,
+      steering: {drain:()=>steerQueue.splice(0)},
     })
     .catch((error) => ({ error: String((error && error.message) || error), toolCalls: [], aborted: controller.signal.aborted }));
 
@@ -661,7 +734,7 @@ async function runTask(task, opts) {
     } catch {}
   }
   if (timer) clearTimeout(timer);
-  if (transport) global.fetch = originalFetch;
+  global.fetch = originalFetch;
 
   if (!crashed && !watchdogFired) {
     runStore.finishRun(workspace, runId, result.error ? 'error' : result.aborted ? 'cancelled' : 'completed', {
@@ -694,7 +767,9 @@ async function runTask(task, opts) {
     after,
     modelSteps: transport ? transport.stats.streamRequests : Number(result && result.iterations),
     citations: collectCitations(result.toolCalls || []),
+    injectedMutation, firstVerificationFingerprint, verificationReports,
     transport,
+    graderBackend: opts.graderBackend || 'process',
   };
 
   const checkers = buildChecks(ctx);
@@ -718,9 +793,16 @@ async function runTask(task, opts) {
     } catch (error) {
       outcome = { pass: false, detail: '检查抛错：' + String((error && error.message) || error) };
     }
-    record.checks.push({ name, type: check.type, pass: !!outcome.pass, detail: outcome.detail });
+    record.checks.push({ name, type: check.type, pass: !!outcome.pass, detail: outcome.detail, status: outcome.status || (outcome.pass ? 'PASS' : 'FAIL'), integrityStatus: outcome.integrityStatus });
     if (!outcome.pass) record.failed.push(name + ' → ' + outcome.detail);
   }
+
+  record.observations = (task.observations || []).map(check => {
+    let outcome;
+    try { outcome = checkers[check.type](check); }
+    catch (error) { outcome = { pass: false, detail: String(error.message || error) }; }
+    return { type: check.type, tool: check.tool, pass: !!outcome.pass, detail: outcome.detail };
+  });
 
   if (watchdogFired) record.failed.unshift('评测看门狗超时（' + watchdogMs + 'ms）');
   if (transport && transport.stats.unexpectedUrls.length) {
@@ -736,6 +818,8 @@ async function runTask(task, opts) {
     record.failed.unshift('无法确定模型步数（runAgentChat 返回值缺 iterations）');
   }
   record.modelSteps = ctx.modelSteps;
+  const costs=cfg.costLedger.summary(runId);
+  record.metrics={approvalRequests, inputRequests, injectedUserChanges:result.steeringInjected||0, humanInterventions:inputRequests, tokens:costs.totalTokens, costUsd:opts.mode==='model'&&costs.costKnown?costs.costUsd:null, costKnown:opts.mode==='model'&&costs.costKnown, mode:opts.mode};
   record.toolCalls = (result.toolCalls || []).length;
   record.toolSequence = (result.toolCalls || []).map((r) => r.name + (r.ok ? '' : '!' ) + (r.compressed ? '~' : '')).join(' → ');
   record.runStatus = runStore.summarizeRun(runStore.readRun(workspace, runId)).status;
@@ -745,6 +829,26 @@ async function runTask(task, opts) {
   if (transport) record.transport = { streamRequests: transport.stats.streamRequests, compressionRequests: transport.stats.nonStreamRequests, scriptSteps: transport.stats.steps };
   record.status = record.failed.length ? 'fail' : 'pass';
   record.durationMs = Date.now() - started;
+
+  const executionStatus = protocol.classifyExecution(result, { watchdog: watchdogFired, deadlineExceeded: !!result.error && Date.now()-started >= budget.timeoutMs });
+  const behaviorChecks = record.checks.filter(check => check.type === 'coding-behavior');
+  const gradingStatus = behaviorChecks.some(c => c.status === 'ERROR') ? 'ERROR' : behaviorChecks.length ? (behaviorChecks.every(c => c.pass) ? 'PASS' : 'FAIL') : (record.checks.every(c => c.pass) ? 'PASS' : 'FAIL');
+  const integrityStatus = behaviorChecks.some(c => c.integrityStatus === 'VIOLATION') ? 'VIOLATION' : task.evaluation.track === 'coding' ? 'CLEAN' : 'UNKNOWN';
+  record.protocol = { executionStatus, gradingStatus, integrityStatus, delivered: protocol.verdict(executionStatus, gradingStatus, integrityStatus, task.deliveryContract) };
+  record.attribution = require('../lib/eval-attribution.cjs').attribute(result, record.checks, record.protocol);
+  evidence.save('attribution.json', record.attribution);
+  evidence.collect(before, after, { schemaVersion: 1, taskId: task.id, fixture: task.fixture, behaviorCases: task.behaviorCases || [], evaluation: task.evaluation, deliveryContract: task.deliveryContract || {}, graderBackend: opts.graderBackend || 'process' });
+  evidence.save('native-result.json', { result, before, after, checks: record.checks });
+  evidence.save('execution.json', { phase: 'FINISHED', ...record.protocol, stopReason: result.stopReason || null, completedAt: new Date().toISOString() });
+  const gradeId = require('node:crypto').randomUUID();
+  evidence.save('grades/' + gradeId + '/result.json', { gradeId, source: 'initial', grader: opts.graderIdentity, ...record.protocol, checks: record.checks });
+  // 保留可复核的完整轨迹及终态；默认清理模式不额外写盘。
+  if (opts.keep) {
+    fs.writeFileSync(path.join(workspace, 'eval-transcript.json'), JSON.stringify(protocol.redact({
+      taskId: task.id, prompt: task.prompt, messages, deltas, result,
+      before, after, checks: record.checks,
+    }, [opts.modelCfg.apiKey]), null, 2), 'utf8');
+  }
 
   if (!opts.keep) {
     try {
@@ -759,6 +863,7 @@ async function runTask(task, opts) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  if(opts.cases){const custom=require('../lib/project-eval-cases.cjs').readCases(opts.cases);TASKS=custom.tasks;datasetVersion=custom.datasetVersion;modelSubsets={};}
   const git = gitInfo();
   const limits = sourceLimits();
   const modelCfg = {
@@ -771,9 +876,10 @@ async function main() {
     endpoint: String(process.env.CODENODE_EVAL_ENDPOINT || '').trim(),
   };
 
+  opts.secrets = [modelCfg.apiKey];
   if (opts.list) {
     for (const task of TASKS) {
-      console.log(`${task.required === false ? '[可选]' : '[必需]'} ${task.id.padEnd(32)} ${task.category.padEnd(16)} ${task.title}`);
+      console.log(`${task.required === false ? '[可选]' : '[必需]'} ${task.id.padEnd(32)} ${task.category.padEnd(16)} [${task.evaluation?.track || 'unclassified'}] ${task.title}`);
     }
     return EXIT_OK;
   }
@@ -823,8 +929,30 @@ async function main() {
     harness: { selfChecks: [] },
   };
 
+  const reportRoot = path.resolve(opts.reportDir || path.join(ROOT, REPORT_DIR_REL));
+  fs.mkdirSync(reportRoot, { recursive: true });
+  opts.evidenceRoot = fs.mkdtempSync(path.join(reportRoot, 'evidence-'));
+  opts.trials = new Map();
+  opts.agentIdentity = git;
+  report.evidenceRoot = opts.evidenceRoot;
   const started = Date.now();
+  report.taskQuality = runQualityChecks(selected, { checkTypes: new Set(Object.keys(buildChecks({}))), checkerSource: buildChecks.toString() });
+  opts.graderIdentity = report.taskQuality.grader;
+  protocol.writeNew(path.join(opts.evidenceRoot, 'manifest.json'), { schemaVersion: 1, startedAt: report.startedAt, mode: opts.mode, model: report.model, git, taskQuality: report.taskQuality, argvGuide: !!opts.argvGuide, graderBackend: opts.graderBackend || 'process', selectedTasks: selected.map(t => t.id) });
   report.harness.selfChecks = await runHarnessSelfChecks();
+  report.harness.selfChecks.push({ name: '任务规格与编码评分器校准', pass: report.taskQuality.pass,
+    detail: `检查 ${selected.length} 题；校准只代表自动检查，人工状态保留为各题 review` });
+  if (!report.taskQuality.pass) {
+    report.tasks = selected.map(task => ({ id: task.id, title: task.title, category: task.category,
+      required: task.required !== false, status: 'skipped', reason: '任务质量检查失败，未启动 Agent',
+      durationMs: 0, checks: [], failed: [] }));
+    finalize(report, started, opts);
+    writeReports(report, opts);
+    console.error('AGENT EVAL: FAIL（任务质量检查失败，未调用模型）');
+    for (const issue of report.taskQuality.validation.issues) console.error(`${issue.taskId} ${issue.field}: ${issue.message}`);
+    for (const task of report.taskQuality.tasks) for (const check of task.checks.filter(c => !c.pass)) console.error(`${task.id}/${check.id}: ${check.detail}`);
+    return EXIT_TASK_FAIL;
+  }
 
   if (opts.mode === 'model' && !modelCfg.apiKey) {
     // fail-closed：绝不能「无 Key 静默假绿」
@@ -866,7 +994,7 @@ async function main() {
   let index = 0;
   for (const task of selected) {
     index++;
-    let record;
+    let record = /** @type {any} */ (null);
     try {
       record = await runTask(task, { ...opts, workRoot, modelCfg });
     } catch (error) {
@@ -877,10 +1005,16 @@ async function main() {
         required: task.required !== false,
         status: 'fail',
         reason: 'runner 异常：' + String((error && error.stack) || error),
+        failureCode: error?.code || null,
         durationMs: 0,
         checks: [],
         failed: ['runner 异常：' + String((error && error.message) || error)],
       };
+    }
+    if (record.reason?.startsWith('runner 异常')) {
+      const failedTrial = opts.trials.get(task.id);
+      record.protocol = { executionStatus: record.failureCode==='EVAL_SECRET_ARTIFACT'?'AGENT_ERROR':'INFRA_ERROR', gradingStatus: 'NOT_RUN', integrityStatus: record.failureCode==='EVAL_SECRET_ARTIFACT'?'VIOLATION':'UNKNOWN', delivered: false };
+      if (failedTrial) { failedTrial.save('execution.json', { phase: 'FAILED', ...record.protocol, reason: record.reason }); record.evidence = { trialId: failedTrial.trialId, directory: failedTrial.directory }; }
     }
     report.tasks.push(record);
     const tag = record.status === 'pass' ? 'PASS' : record.status === 'skipped' ? 'SKIP' : 'FAIL';
@@ -915,6 +1049,13 @@ function finalize(report, started, opts) {
   report.finishedAt = nowIso();
   report.durationMs = Date.now() - started;
   const tasks = report.tasks;
+  for (const record of tasks) {
+    const source = TASKS.find(task => task.id === record.id);
+    record.assessment = assessmentFor(source || {}, report.mode, record.status);
+    if (report.mode==='model' && record.modelSteps===0 && record.error) record.assessment.evidence = 'model-unavailable';
+    if (record.reason?.startsWith('runner 异常')) record.assessment.evidence = 'runner-error';
+  }
+  report.trackSummary = summarizeAssessments(tasks);
   const runTasks = tasks.filter((t) => t.status !== 'skipped');
   report.totals = {
     total: tasks.length,
@@ -928,6 +1069,8 @@ function finalize(report, started, opts) {
     steps: tasks.reduce((n, t) => n + (t.modelSteps || 0), 0),
     durationMs: report.durationMs,
   };
+  report.workflowMetrics={approvalRequests:tasks.reduce((n,t)=>n+(t.metrics?.approvalRequests||0),0),humanInterventions:tasks.reduce((n,t)=>n+(t.metrics?.humanInterventions||0),0),tokens:tasks.reduce((n,t)=>n+(t.metrics?.tokens||0),0),costUsd:tasks.length&&tasks.every(t=>t.metrics?.costKnown)?tasks.reduce((n,t)=>n+t.metrics.costUsd,0):null};
+  if(opts.baseline){const previous=JSON.parse(fs.readFileSync(opts.baseline,'utf8'));if(previous.datasetVersion!==report.datasetVersion||previous.mode!==report.mode||previous.model!==report.model)throw Error('基线的数据集、模式或模型不同，不能直接比较');if(previous.taskQuality?.contractHash!==report.taskQuality?.contractHash||previous.taskQuality?.grader?.sha256!==report.taskQuality?.grader?.sha256||previous.taskQuality?.checkerHash!==report.taskQuality?.checkerHash)throw Error('基线任务或评分器契约不同，必须使用相同规则重评后比较');const ids=tasks.map(t=>t.id).sort().join(',');if(ids!==previous.tasks.map(t=>t.id).sort().join(','))throw Error('基线任务集合不同，不能直接比较');report.comparison={baseline:path.basename(opts.baseline),successRateDelta:report.totals.successRate-previous.totals.successRate,durationMsDelta:report.durationMs-previous.durationMs,tokensDelta:report.workflowMetrics.tokens-(previous.workflowMetrics?.tokens||0),humanInterventionsDelta:report.workflowMetrics.humanInterventions-(previous.workflowMetrics?.humanInterventions||0)};}
   report.skipped = tasks.filter((t) => t.status === 'skipped').map((t) => ({ id: t.id, reason: t.reason }));
   report.failures = tasks
     .filter((t) => t.status === 'fail')
@@ -941,6 +1084,7 @@ function finalize(report, started, opts) {
     id: t.id,
     title: t.title,
     category: t.category,
+    evaluation: t.evaluation,
     required: t.required !== false,
     realModel: t.realModel === true,
     allowTools: t.allowTools,
@@ -992,10 +1136,10 @@ function writeReports(report, opts) {
   const base = `agent-eval-${report.git.commit}-${report.mode}-${stamp()}`;
   const jsonFile = path.join(relDir, base + '.json');
   const mdFile = path.join(relDir, base + '.md');
-  fs.writeFileSync(jsonFile, JSON.stringify(report, null, 2), 'utf8');
-  fs.writeFileSync(mdFile, renderMarkdown(report), 'utf8');
+  fs.writeFileSync(jsonFile, JSON.stringify(protocol.redact(report, opts.secrets || []), null, 2), 'utf8');
+  fs.writeFileSync(mdFile, renderMarkdown(protocol.redact(report, opts.secrets || [])), 'utf8');
   report.reportFiles = { json: path.relative(ROOT, jsonFile).replace(/\\/g, '/'), md: path.relative(ROOT, mdFile).replace(/\\/g, '/') };
-  fs.writeFileSync(jsonFile, JSON.stringify(report, null, 2), 'utf8');
+  fs.writeFileSync(jsonFile, JSON.stringify(protocol.redact(report, opts.secrets || []), null, 2), 'utf8');
 }
 
 function renderMarkdown(report) {
@@ -1020,11 +1164,26 @@ function renderMarkdown(report) {
   lines.push(`| 通过 | ${t.passed} |`);
   lines.push(`| 失败（其中必需 ${t.requiredFailed}） | ${t.failed} |`);
   lines.push(`| 跳过/未适用 | ${t.skipped} |`);
-  lines.push(`| 成功率（执行任务中） | ${(t.successRate * 100).toFixed(1)}% |`);
+  lines.push(`| 判据通过率（执行任务中，非综合能力分） | ${(t.successRate * 100).toFixed(1)}% |`);
   lines.push(`| 工具调用总数 | ${t.toolCalls} |`);
   lines.push(`| 模型步数总数 | ${t.steps} |`);
   lines.push(`| 退出码 | ${report.exitCode} |`);
   lines.push('');
+  lines.push('## 证据分类');
+  lines.push('');
+  lines.push('离线通过只证明脚本化轨迹下的回归与评分接线。真实模型的机制、流程、可靠性场景与编码结果分开解释；任务范围与开发集或保留集身份以各题 assessment 为准，自动通过不等于独立人工认证。');
+  lines.push('');
+  lines.push('| 轨道 | 证据类型 | 计划 | 通过 | 失败 | 未执行 |');
+  lines.push('| --- | --- | --- | --- | --- | --- |');
+  for (const group of report.trackSummary) lines.push(`| ${TRACK_LABELS[group.track] || group.track} | ${group.evidence} | ${group.total} | ${group.passed} | ${group.failed} | ${group.skipped} |`);
+  lines.push('');
+  lines.push('## 运行前任务质量检查');
+  lines.push('');
+  lines.push(`结果：${report.taskQuality.pass ? 'PASS' : 'FAIL'}；任务契约 ${report.taskQuality.contractHash}；编码 grader v${report.taskQuality.grader.version}。自动校准不等于独立人工复核。`);
+  for (const issue of report.taskQuality.validation.issues) lines.push(`- ${issue.taskId} / ${issue.field}: ${issue.message}`);
+  for (const task of report.taskQuality.tasks) lines.push(`- ${task.id}: ${task.calibrationStatus}，${task.checks.length} 个校准候选；人工复核=${task.review}`);
+  lines.push('');
+  lines.push('## 工作流指标');lines.push('');lines.push('审批请求为夹具自动处理；人工干预计数只统计 askUser 请求，运行中注入的用户变更另计。离线费用与未配置价格的真实模型费用均为未知。');lines.push('');lines.push('```json');lines.push(JSON.stringify({metrics:report.workflowMetrics,comparison:report.comparison||null},null,2));lines.push('```');lines.push('');
   lines.push('## 任务明细');
   lines.push('');
   lines.push('| 任务 | 类别 | 必需 | 状态 | 步数 | 工具调用 | 耗时ms | 失败判据 |');
@@ -1051,6 +1210,7 @@ function renderMarkdown(report) {
     lines.push('');
     lines.push(`工具序列：\`${task.toolSequence || '（无工具调用）'}\``);
     if (task.transport) lines.push(`传输：模型回合 ${task.transport.streamRequests} 次，压缩调用 ${task.transport.compressionRequests} 次，脚本回合 [${(task.transport.scriptSteps || []).join(', ')}]`);
+    if (task.observations?.length) lines.push('过程观测（不计通过）：' + task.observations.map(o => `${o.type}: ${o.pass ? '命中' : '未命中'}（${o.detail}）`).join('；'));
     if (task.runStatus) lines.push(`Run 状态：\`${task.runStatus}\``);
     if (task.error) lines.push(`结束原因：\`${task.error}\``);
     lines.push('');

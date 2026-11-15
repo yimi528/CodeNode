@@ -2,7 +2,7 @@
   "providers": ["manual", "github-actions", "agent-eval"],
   "agentEval": {
     "reportDirectory": "docs/eval-reports",
-    "defaultDatasetVersion": "agent-eval-v1",
+    "defaultDatasetVersion": "agent-eval-v2",
     "defaultMode": "model",
     "modes": ["model", "offline"],
     "maxReportBytes": 8388608,

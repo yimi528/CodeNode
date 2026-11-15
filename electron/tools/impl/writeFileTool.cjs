@@ -2,12 +2,13 @@
  * write_file：将内容写入项目内文件。路径校验 + 写前确认（WRITE 级，默认放行并记录）+ 可选备份 + 审计。
  */
 'use strict';
+const { resolveToolPath } = require('../paths.cjs');
 
 const fs = require('fs');
 const path = require('path');
 const { AgentToolResult } = require('../result.cjs');
 const { ConfirmationLevel } = require('../context.cjs');
-const { resolveInRoot, checkExpectedHash, sha256OfFile, summarizeContentForConfirm } = require('./shared.cjs');
+const { checkExpectedHash, sha256OfFile, summarizeContentForConfirm } = require('./shared.cjs');
 const { atomicWriteFile } = require('../../atomicFile.cjs');
 const { fileChangeReview } = require('../fileChangeReview.cjs');
 const editing = require('../../safeEditing.cjs');
@@ -36,8 +37,7 @@ function register(registry) {
       const relative = String(args.path || '').trim();
       const content = String(args.content || '');
       if (!relative) return AgentToolResult.error('缺少 path');
-      const root = path.resolve(context.projectRoot());
-      const target = resolveInRoot(root, relative);
+      const target = resolveToolPath(context, relative);
       if (!target) return AgentToolResult.error('路径越过项目边界');
       // 乐观并发：基于「我看到的那一版」写。校验放在**确认之前** —— 注定失败的写别去打扰用户。
       if (args.expectedSha256 != null && String(args.expectedSha256).trim()) {

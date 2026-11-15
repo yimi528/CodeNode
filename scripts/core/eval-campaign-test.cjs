@@ -1,0 +1,30 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const {prepare,run,readPlan,gate}=require('../eval/eval-system.cjs');
+const {readJson}=require('../lib/eval-protocol.cjs');
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'codenode-campaign-test-'));
+try{
+  const output=path.join(root,'offline');
+  const created=prepare({output,tasks:'coding-timeout-default,coding-port-parser',trials:'2',mode:'offline','max-tokens':'50000'});
+  assert.equal(created.attempts,8);
+  const plan=readPlan(created.plan);assert.equal(plan.sealVerified,true);
+  assert.equal(plan.arms.length,2);assert.equal(plan.schedule.length,8);
+  assert.equal(new Set(plan.schedule.map(r=>r.id)).size,8);
+  const result=run(created.plan);
+  assert.equal(result.complete,true);
+  assert.equal(result.byArm.baseline.delivered,4);
+  assert.equal(result.byArm.improved.delivered,4);
+  assert.equal(result.comparison.decision,'insufficient-evidence');
+  assert.equal(result.budget.reported,0);
+  const states=fs.readdirSync(path.join(output,'states')).map(name=>fs.readFileSync(path.join(output,'states',name),'utf8'));
+  const resumed=run(created.plan);assert.equal(resumed.complete,true);
+  assert.deepEqual(fs.readdirSync(path.join(output,'states')).map(name=>fs.readFileSync(path.join(output,'states',name),'utf8')),states,'恢复不得覆盖或重新解题');
+  const rejected=gate(created.plan);assert.equal(rejected.pass,false);
+  assert.ok(rejected.reasons.some(r=>r.includes('独立人工')));
+  assert.ok(rejected.reasons.some(r=>r.includes('隔离')));
+  fs.appendFileSync(created.plan,' ');assert.throws(()=>readPlan(created.plan),/已被修改/);
+  console.log('EVAL CAMPAIGN: PASS (frozen runtime, sealed plan, randomized paired trials, persisted evidence, resume without replay, conservative release gate)');
+}finally{fs.rmSync(root,{recursive:true,force:true});}

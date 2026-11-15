@@ -243,7 +243,9 @@ function makeContext(projectRoot, audits, model) {
     const headAfterRepeat = (await worktree.runGit(repo, ['rev-parse', 'HEAD'], { policy })).stdout.trim();
     check('[G] 重复确认幂等，不新增合并提交', repeated.ok === true && headBeforeRepeat === headAfterRepeat);
     if (aliased) fs.unlinkSync(alias);
-    await worktree.removeWorktree(repo, { name: 'task-atomic' }, { policy });
+    // Runtime metadata is deliberately left uncommitted; explicitly discard this temporary fixture on cleanup.
+    const cleanup = await worktree.removeWorktree(repo, { name: 'task-atomic', force: true }, { policy });
+    check('[G] 清理临时隔离目录后释放工作树名额', cleanup.ok === true);
   }
   {
     const audits = [];
@@ -289,7 +291,8 @@ function makeContext(projectRoot, audits, model) {
     check('[G] 冲突阻断确认并保持主工作树提交不变', conflict.ok === false &&
       manager.confirmedSources(ctx, ['task-conflict']).ok === false && headBefore === headAfter &&
       manager.taskById(ctx, 'task-conflict').review.status === 'conflict_blocked');
-    await worktree.removeWorktree(repo, { name: 'task-conflict' }, { policy });
+    const cleanup = await worktree.removeWorktree(repo, { name: 'task-conflict', force: true }, { policy });
+    check('[G] 冲突场景清理保留的临时运行资料', cleanup.ok === true);
   }
 
   // ==================== H. 隔离写任务取消 ====================

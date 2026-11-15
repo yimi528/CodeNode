@@ -133,13 +133,11 @@ async function runShell(policy, command, confirm) {
 
   // ==================== D. 未解析写目标：默认模式必须确认 ====================
   console.log('\n== D. 写目标含变量/通配（默认 best-effort）==');
-  /**
-   * 选 `git status`（在白名单里、**不在** SENSITIVE_PROGRAMS 里）当载体：
-   * 这样「有没有弹确认」只可能来自本轮新增的「未解析写目标」这条判据，而不是既有的高危命令判据。
-   * 第一版用 mvn 当载体，mvn 本身就在高危名单里 → 无论怎么改都会弹确认（假绿）。
-   */
-  const unresolvedCmd = 'git status > $OUT';
-  const literalCmd = 'git status > build.log';
+  // 重定向必须走显式 shell 入口；普通 git command 现在会拒绝歧义运算符。
+  // 分析层和 APPROVAL_DENIED 仍分别锁住未解析目标的判定与拒绝路径。
+  const shellPrefix = process.platform === 'win32' ? 'cmd /c ' : 'cmd ';
+  const unresolvedCmd = shellPrefix + 'git status > $OUT';
+  const literalCmd = shellPrefix + 'git status > build.log';
   {
     const analysis = shellGuard.analyzeShellCommand(unresolvedCmd, { projectRoot: root, writeRoots: [root, os.tmpdir()] });
     check(
@@ -218,7 +216,7 @@ async function runShell(policy, command, confirm) {
   {
     const confirm = makeConfirm(true);
     const res = await runShell(makePolicy(), literalCmd, confirm);
-    check('[E] 明文写目标落在项目内 → 不额外要求确认', confirm.calls.length === 0, 'confirmCalls=' + confirm.calls.length);
+    check('[E] 显式 shell 的项目内写入仍需 HIGH 确认', confirm.calls.length === 1, 'confirmCalls=' + confirm.calls.length);
     check('[E] 且没有被结构性拒绝', !/拒绝执行/.test(String(res.text || '')), JSON.stringify({ ok: res.ok, text: String(res.text || '').slice(0, 60) }));
   }
   {

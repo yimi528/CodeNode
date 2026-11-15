@@ -82,7 +82,7 @@ async function runGit(projectRoot, args, options) {
   try {
     child = sandbox.guardedSpawn(
       { file: 'git', args: args.map(String) },
-      shellTool.foregroundSpawnOptions(inRoot, safeEnvironment({ GIT_TERMINAL_PROMPT: '0' }, []), policy, opts.context)
+      shellTool.foregroundSpawnOptions(inRoot, { ...safeEnvironment({ GIT_TERMINAL_PROMPT: '0' }, []), ...(opts.indexFile ? { GIT_INDEX_FILE: opts.indexFile } : {}) }, policy, opts.context)
     );
   } catch (error) {
     return { ok: false, exitCode: null, stdout: '', stderr: '', error: 'SPAWN_FAILED: ' + String((error && error.message) || error) };
@@ -270,7 +270,7 @@ async function snapshotSource(worktreePath, options) {
   if (!head.ok || !status.ok || status.stdout.length >= MAX_OUTPUT_CHARS) {
     return { ok: false, error: 'GIT_FAILED', message: '无法锁定隔离工作树版本' };
   }
-  const pending = status.stdout.split(/\r?\n/).filter(Boolean);
+  const pending = status.stdout.split(/\r?\n/).filter(line => line && !isAppRuntimeUntracked(line));
   const pendingDigest = await pendingFingerprint(worktreePath, pending);
   if (!pendingDigest) return { ok: false, error: 'UNSUPPORTED_PATH', message: '隔离工作树含无法安全核对的路径' };
   return { ok: true, sourceHead: head.stdout.trim(), pendingDigest, pending };
@@ -312,7 +312,7 @@ async function inspectMerge(projectRoot, name, options) {
   const committed = await runGit(root, ['diff', '--name-only', 'HEAD...' + source.branch], options);
   if (!committed.ok) return { ok: false, error: 'GIT_FAILED', message: '无法列出分支改动；可能缺少共同基线' };
   if (committed.stdout.length >= MAX_OUTPUT_CHARS) return { ok: false, error: 'REVIEW_LIMIT', message: '分支文件清单过长，无法可靠预检' };
-  const pending = sourceStatus.stdout.split(/\r?\n/).filter(Boolean);
+  const pending = sourceStatus.stdout.split(/\r?\n/).filter(line => line && !isAppRuntimeUntracked(line));
   const pendingDigest = await pendingFingerprint(source.path, pending);
   if (!pendingDigest) return { ok: false, error: 'UNSUPPORTED_PATH', message: '待合并改动含复杂路径或目录，无法可靠核对内容；请先在隔离分支手动提交' };
   const files = [...new Set(committed.stdout.split(/\r?\n/).filter(Boolean).concat(pending.map((line) => line.slice(3))))].sort();
@@ -344,7 +344,7 @@ async function mergeWorktree(projectRoot, args, options) {
     if (!message || message.length > 200) {
       return { ok: false, error: 'COMMIT_MESSAGE_REQUIRED', message: '隔离工作树有未提交改动，合并前需提供不超过 200 字的 commitMessage' };
     }
-    const added = await runGit(preview.path, ['add', '--all'], options);
+    const added = await runGit(preview.path, ['add', '--all', '--', ...pending.map(line => line.slice(3))], options);
     if (!added.ok) return { ok: false, error: 'GIT_FAILED', message: '隔离工作树暂存失败；主工作树未改变' };
     const committed = await runGit(preview.path, ['commit', '-m', message], options);
     if (!committed.ok) return { ok: false, error: 'COMMIT_FAILED', message: '隔离工作树提交失败；主工作树未改变，暂存内容保留：' + committed.stdout.slice(0, 400) };
