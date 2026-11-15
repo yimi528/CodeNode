@@ -4,7 +4,7 @@
 
 当前系统已接通任务检查、冻结实验、持久证据、共享预算、独立重评、对照统计和发布检查。26 道内置任务包括 12 道编码任务，其中 2 道属于保留任务；其余覆盖机制、流程和注入场景。任务自动检查有 74 个编码校准候选，独立人工复核仍按外部证据登记。
 
-本地 Docker daemon 已恢复，独立 grader 正反例、Harbor 主链路、原生 CLI profile 和首次读取故障变体均已在容器中实跑通过，verifier 的实际网络模式核验为 none。用户最新确认本项目只允许 yimi528/CodeNode；隔离分支正在准备远程离线 CI。此前真实模型结果来自宿主进程诊断，不会因离线容器 smoke 通过而自动成为隔离模型成绩或发布认证。体系决策见[设计文档](agent-evaluation-system-design.zh-CN.md)。
+本地 Docker daemon 已恢复，独立 grader 正反例、Harbor 主链路、原生 CLI profile 和首次读取故障变体均已在容器中实跑通过，verifier 的实际网络模式核验为 none。用户最新确认本项目只允许 yimi528/CodeNode；隔离分支的远程离线评测 CI 已实际通过。此前真实模型结果来自宿主进程诊断，不会因离线容器 smoke 通过而自动成为隔离模型成绩或发布认证。体系决策见[设计文档](agent-evaluation-system-design.zh-CN.md)。
 
 ## 本地检查
 
@@ -129,7 +129,7 @@ npm run eval:system -- gate \
 
 [agent-evaluation.yml](../.github/workflows/agent-evaluation.yml)包含相关 PR 的离线契约与证据测试、Docker verifier 和 Harbor smoke，以及显式启用的有预算模型 pilot。PR 不接收模型 secrets；模型定期任务只有设置 `CODENODE_EVAL_SCHEDULED=true` 才运行。默认定期离线测试不产生模型费用。
 
-CI 上传原始证据与报告。实验执行成功不等于发布检查通过，正式发布需读取 gate 结果。本项目按用户最新确认只使用 yimi528/CodeNode。通过隔离分支的 CodeNode CI evaluation_only 入口执行评测，live=false 且不继承模型 secrets；当前为首次远程执行准备状态，尚不宣称远程通过。
+CI 上传原始证据与报告。实验执行成功不等于发布检查通过，正式发布需读取 gate 结果。本项目按用户最新明确指示只使用 yimi528/CodeNode。已在 codex/agent-evaluation-ci 分支通过 CodeNode CI 的 evaluation_only 入口运行评测；live=false 且未继承模型 secrets。main 与 yimi-branch 未被本次推送更新。
 
 ## 本次真实模型诊断结果
 
@@ -158,3 +158,8 @@ CI 上传原始证据与报告。实验执行成功不等于发布检查通过�
 独立 Docker grader 的正确实现与伪造成功输出反例均通过验收。Harbor 的 benchmark-controlled、native-product、首次读取故障三条离线链路均交付 1/1，原始 verifier reward=1、exception_info=null；故障变体确实注入一次 read_file 失败，后续读取成功。每条链路都保存了独立 verifier 的 containerId、networkMode=none 和 enforced=true，不依赖静态配置推测隔离。
 
 持久证据分别位于 `out/evals/container-acceptance-20261115-passed/`、`out/evals/container-native-acceptance-20261115/`、`out/evals/container-fault-acceptance-20261115/`。失败尝试同样保留，未覆盖为成功。以上全部使用脚本模型，供应商 token 计账为 0。
+
+
+## 远程 CI 验收记录
+
+[运行 43687779566](https://github.com/yimi528/CodeNode/actions/runs/43687779566) 绑定提交 `5924dfb8c937c6d0a319f85f6fe3ee15bddcc7b1`，结果为 success。`contracts` 与 `isolated-verifier` 均实际成功执行：全量离线任务、评分器、证据与成对试验测试、固定依赖安装、Docker 正反例和 Harbor 分离 verifier smoke 通过，契约证据工件上传成功。应用 Verify、Package 和 live-pilot job 按专用模式跳过；此结果不是产品打包发布或独立人审通过。

@@ -19,3 +19,7 @@ gh workflow run ci.yml --repo yimi528/CodeNode --ref codex/agent-evaluation-ci -
 This dispatch skips application packaging and runs contracts plus isolated-verifier jobs. The live-model input is false and repository secrets are not inherited by the reusable call. Automatic push runs on this dedicated branch are excluded from the older CI and production workflows to avoid unrelated packaging or model work. Other branches keep the upstream trigger behavior.
 
 The checks establish evaluation integration, not application release approval or an independently human-reviewed capability claim. Human review remains pending. Generated evidence is uploaded as workflow artifacts.
+
+## Verified remote run
+
+[Run 43687779566](https://github.com/yimi528/CodeNode/actions/runs/43687779566) completed successfully for commit `5924dfb8c937c6d0a319f85f6fe3ee15bddcc7b1`. Both contracts and isolated-verifier jobs ran successfully. Application verification, packaging and live-model jobs were skipped by the evaluation-only mode. The default and delivery branches were not updated.
