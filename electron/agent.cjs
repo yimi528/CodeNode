@@ -1453,7 +1453,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
   const emitTrace = (event, rootOverride) =>
     logToolTrace(rootOverride || traceProjectRoot(), Object.assign({ runId: (cfg && cfg.costRunId) || null }, event));
   const noProgressGuard = require('./noProgressGuard.cjs').createGuard({ root: traceProjectRoot(), limits, canonicalArgs, emitTrace, onDelta, signal });
-  const cacheVersions = require('./tools/workspaceCache.cjs').createVersions(traceProjectRoot(), limits.workspaceCacheVersions === true, tools.context);
+  const cacheVersions = require('./tools/workspaceCache.cjs').createVersions(traceProjectRoot(), limits.workspaceCacheVersions === true, tools?.context);
   cfg = { ...cfg, onModelEvent: (event) => emitTrace(event) };
   let totalToolCalls = cfg.taskAcceptanceRunner?.calls || 0;
   let loopIterations = 0;
