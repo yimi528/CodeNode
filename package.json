@@ -294,7 +294,8 @@
     "test:coding-grader": "node scripts/core/coding-grader-test.cjs",
     "test:eval:coding": "node scripts/eval/agent-eval.cjs --subset=coding",
     "log:add": "node scripts/add-development-log.cjs",
-    "test:development-log": "node scripts/core/development-log-test.cjs"
+    "test:development-log": "node scripts/core/development-log-test.cjs",
+    "test:eval-ci": "node scripts/core/eval-ci-test.cjs"
   },
   "build": {
     "appId": "com.codenode.desktop",

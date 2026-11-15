@@ -49,6 +49,7 @@ const CORE = [
   'test:eval-quality',
   'test:eval-system',
   'test:eval-campaign',
+  'test:eval-ci',
   'test:backend-workflow',
   'test:soul',
   'test:session',

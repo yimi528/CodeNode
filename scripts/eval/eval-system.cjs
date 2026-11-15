@@ -52,7 +52,8 @@ function freezeRuntime(directory) {
   const dependencies=[];
   const scan=dir=>{if(!fs.existsSync(dir))return;for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())scan(full);else if(entry.isFile())dependencies.push({path:path.relative(runtime,full).replaceAll('\\','/'),sha256:protocol.hash(fs.readFileSync(full))});}};
   scan(path.join(runtime,'node_modules'));
-  return {directory:runtime,files:[...files,...dependencies],hash:protocol.hash([...files,...dependencies]),node:process.version,platform:process.platform,arch:process.arch};
+  const commit=spawnSync('git',['rev-parse','HEAD'],{cwd:ROOT,encoding:'utf8'});
+  return {directory:runtime,files:[...files,...dependencies],hash:protocol.hash([...files,...dependencies]),sourceCommit:commit.status===0?commit.stdout.trim():null,node:process.version,platform:process.platform,arch:process.arch};
 }
 function verifyRuntime(manifest) {
   for(const file of manifest.files)if(protocol.hash(fs.readFileSync(protocol.safePath(manifest.directory,file.path)))!==file.sha256)throw Error('冻结运行时漂移：'+file.path);
@@ -133,7 +134,7 @@ function analyze(file) {
     baseline:rows.filter(r=>r.taskId===task.id&&r.arm==='baseline').map(r=>shellMetric(r.record)),
     improved:rows.filter(r=>r.taskId===task.id&&r.arm==='improved').map(r=>shellMetric(r.record))})),{seed:plan.seed,minimumEffect:plan.minimumEffect,maxRegression:plan.maxRegression});
   for(const row of rows) {
-    row.availability = !row.record ? 'not-started' : plan.mode==='offline' ? 'scripted' : row.record.modelSteps===0&&row.record.error ? 'no-completed-model-response' : 'model-response-recorded';
+    row.availability = !row.record ? 'not-started' : plan.mode==='offline' ? 'scripted' : String(row.record.error||'').includes('EVAL_TOKEN_BUDGET') ? 'budget-not-funded' : row.record.modelSteps===0&&row.record.error ? 'no-completed-model-response' : 'model-response-recorded';
   }
   const byArm=Object.fromEntries(plan.arms.map(arm=>{const subset=rows.filter(r=>r.arm===arm);const counts=statistics.coverage(subset.map(r=>r.record||{protocol:{executionStatus:'NOT_STARTED',gradingStatus:'NOT_RUN',delivered:false}}),subset.length);return [arm,{...counts,modelEvidenceUnavailable:subset.filter(r=>r.availability==='no-completed-model-response').length}];}));
   const ledger=protocol.readJson(plan.budgetLedger);

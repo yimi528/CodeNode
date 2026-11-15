@@ -3,6 +3,18 @@ const fs = require('node:fs');
 const { atomicJson, readJson, redact } = require('./eval-protocol.cjs');
 const crypto = require('node:crypto');
 
+function validateLedger(ledger) {
+  for (const key of ['limit', 'charged', 'reported']) if (!Number.isSafeInteger(ledger[key]) || ledger[key] < 0) throw Error('Invalid budget ledger: '+key);
+  if (ledger.schemaVersion !== 1 || !ledger.ledgerId || ledger.limit <= 0 || ledger.reported > ledger.charged ||
+      !ledger.reservations || !Array.isArray(ledger.attempts)) throw Error('Invalid budget ledger');
+  const pending = Object.values(ledger.reservations).reduce((n, value) => {
+    if (!Number.isSafeInteger(value) || Number(value) <= 0) throw Error('Invalid budget reservation');
+    return n + Number(value);
+  }, 0);
+  if (!Number.isSafeInteger(pending) || ledger.charged + pending > ledger.limit && !ledger.boundViolation) throw Error('Budget ledger exceeds authorization');
+  return { pending, remaining: Math.max(0, ledger.limit - ledger.charged - pending) };
+}
+
 function createLedger(file, limit) {
   if (!Number.isSafeInteger(limit) || limit <= 0) throw Error('总 token 上限必须是正整数');
   fs.mkdirSync(require('node:path').dirname(file), { recursive: true });
@@ -11,11 +23,13 @@ function createLedger(file, limit) {
 function update(file, fn) {
   const lock = file + '.lock';
   const fd = fs.openSync(lock, 'wx', 0o600); // Contention fails closed; never bypass a budget lock.
-  try { const ledger = readJson(file); const result = fn(ledger); atomicJson(file, ledger); return result; }
+  try { const ledger = readJson(file); validateLedger(ledger); const result = fn(ledger); validateLedger(ledger); atomicJson(file, ledger); return result; }
   finally { fs.closeSync(fd); fs.unlinkSync(lock); }
 }
 function reserve(file, tokens, identity) {
+  if (!Number.isSafeInteger(tokens) || tokens <= 0) throw Error('Invalid reservation amount');
   return update(file, ledger => {
+    if (ledger.boundViolation) throw Error('EVAL_TOKEN_BUDGET: prior bound violation requires investigation');
     const pending = Object.values(ledger.reservations).reduce((n, v) => n + Number(v), 0);
     if (ledger.charged + pending + tokens > ledger.limit) throw Object.assign(Error('EVAL_TOKEN_BUDGET: 总预算不足以发出下一请求'), { code: 'EVAL_TOKEN_BUDGET' });
     const id = crypto.randomUUID(); ledger.reservations[id] = tokens;
@@ -87,4 +101,4 @@ function instrumentFetch(delegate, writer, options = /** @type {any} */ ({})) {
     } catch (error) { writer.append('requests.jsonl',{kind:'transport-error',at:new Date().toISOString(),code:error.cause?.code||error.code||error.name,message:String(error.message)}); finish(null); throw error; }
   };
 }
-module.exports = { createLedger, reserve, settle, usageFrom, instrumentFetch, redact };
+module.exports = { createLedger, reserve, settle, usageFrom, instrumentFetch, redact, validateLedger };

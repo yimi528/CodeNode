@@ -127,9 +127,9 @@ npm run eval:system -- gate \
 
 ## CI 配置
 
-[agent-evaluation.yml](../.github/workflows/agent-evaluation.yml)包含相关 PR 的离线契约与证据测试、Docker verifier 和 Harbor smoke，以及显式启用的有预算模型 pilot。PR 不接收模型 secrets；模型定期任务只有设置 `CODENODE_EVAL_SCHEDULED=true` 才运行。默认定期离线测试不产生模型费用。
+[agent-evaluation.yml](../.github/workflows/agent-evaluation.yml)包含相关 PR 的离线契约与证据测试、Docker verifier 和 Harbor smoke，以及显式启用的有预算模型 pilot。评测 PR 不接收模型 secrets；专用真实模型工作流只有手动触发或设置 `CODENODE_EVAL_SCHEDULED=true` 后才运行。默认定期离线测试不产生模型费用。
 
-CI 上传原始证据与报告。实验执行成功不等于发布检查通过，正式发布需读取 gate 结果。本项目按用户最新明确指示只使用 yimi528/CodeNode。已在 codex/agent-evaluation-ci 分支通过 CodeNode CI 的 evaluation_only 入口运行评测；live=false 且未继承模型 secrets。main 与 yimi-branch 未被本次推送更新。
+CI 上传原始证据与报告。实验执行成功不等于发布检查通过，正式发布需读取 gate 结果。本项目按用户最新明确指示只使用 yimi528/CodeNode。工程集成已通过 PR #27 合入 main（800212a），合并前后均通过三平台回归、生产门禁和打包。原工作区 yimi-branch 的未提交内容保留；人审没有因此转为通过。
 
 ## 本次真实模型诊断结果
 
@@ -163,3 +163,29 @@ CI 上传原始证据与报告。实验执行成功不等于发布检查通过�
 ## 远程 CI 验收记录
 
 [运行 43687779566](https://github.com/yimi528/CodeNode/actions/runs/43687779566) 绑定提交 `5924dfb8c937c6d0a319f85f6fe3ee15bddcc7b1`，结果为 success。`contracts` 与 `isolated-verifier` 均实际成功执行：全量离线任务、评分器、证据与成对试验测试、固定依赖安装、Docker 正反例和 Harbor 分离 verifier smoke 通过，契约证据工件上传成功。应用 Verify、Package 和 live-pilot job 按专用模式跳过；此结果不是产品打包发布或独立人审通过。
+
+
+## 持久预算、隔离真实模型和能力发布
+
+用户本轮明确继续原总额度：总上限 1,000,000 tokens，交接时保守已用 882,845，剩余 117,155；不新增额度。实际余额以 `codex/agent-evaluation-budget` 分支的 `state.json` 为准，而不是静态文档数字。该分支只存无密钥账本与执行锁，不存产品代码。
+
+付费入口为 `agent-evaluation-live.yml`。使用独立 secret `CODENODE_EVAL_ISOLATED_KEY`，模型和地址由 `CODENODE_EVAL_MODEL`、`CODENODE_EVAL_BASE_URL` variables 固定；不会给旧的无共享预算模型 job 配置 key。任务先原子取得远程执行锁，再复制原账本；所有请求仍先预留后结算。结束时以原文件 SHA 更新账本；中断、写回失败或未知预留均会阻止继续调用，不自动清锁或重置预算。旧宿主账本交接后仅为只读镜像。
+
+```bash
+gh workflow run agent-evaluation-live.yml --repo yimi528/CodeNode -f purpose=confirmation
+# 只有显式启用且余额足够，周任务才执行一次单题 diagnostic。
+gh variable set CODENODE_EVAL_SCHEDULED --repo yimi528/CodeNode --body true
+```
+
+confirmation 预先固定现有两个保留任务、每组两次、baseline/improved 分块随机顺序，使用 native-product profile、Harbor 解题环境、独立无网络 verifier 和原 argv 单变量。题目此前已经观察过，本轮是固定题集复验，不作为全新未见题泛化证据。预算不足时保留全部计划分母和未执行项，不缩小样本冒充完成；服务连续无完整响应时停止。统计不支持收益同样是有效报告结果。不得扩大预算或反复运行来追逐显著性。
+
+输出工件 `agent-evaluation-live-evidence` 包含冻结计划、源码提交、模型请求、逐次产物、统计、待人审盲评包与 gate 决策，保留 90 天；账本单独持续保存，不受工件到期影响。原 26 题人审模板继续待完成，不替换或代签。运行记录见 [隔离模型工作流](https://github.com/yimi528/CodeNode/actions/workflows/agent-evaluation-live.yml)。
+
+发布模式必须给 production-gate 的 `capability_run_id` 提供当前同一提交的已完成确认实验。工作流调用 `capability-release.yml`，核对仓库、触发类型、工作流、提交和冻结代码身份，下载证据并重新执行 `eval:system gate`。独立复核完成后才可设置 `CODENODE_EVAL_INDEPENDENT_REVIEW` JSON secret；缺少时保持拒绝。诊断工作流执行成功、模型偶尔通过和能力发布通过分别记录。
+
+```bash
+# 无人审时这项检查应失败，这是实际拒绝，不是豁免或批准。
+gh workflow run capability-release.yml --repo yimi528/CodeNode -f evidence_run_id=RUN_ID
+```
+
+当前人审仍待完成。正式实验是否覆盖完整、统计能支持什么结论，以及剩余余额，以对应 Actions 工件和生成报告为准；工程 smoke、历史宿主模型报告与新隔离结果不相互回填。
