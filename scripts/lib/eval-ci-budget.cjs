@@ -58,7 +58,7 @@ function persist(directory, policy, store) {
       JSON.stringify(ledger.attempts.slice(0,before.attempts.length)) !== JSON.stringify(before.attempts)) throw Error('Budget history rollback or mutation');
   const remote = store.get();
   if (remote.sha !== session.sha || remote.value.lease?.id !== session.lease.id || remote.value.lease?.owner !== session.lease.owner) throw Error('Budget lease ownership changed');
-  store.put(remote.sha,{schemaVersion:1,ledger,lease:null,history:[...(remote.value.history||[]),{
+  store.put(remote.sha,{...remote.value,schemaVersion:1,ledger,lease:null,history:[...(remote.value.history||[]),{
     ...session.lease,finishedAt:new Date().toISOString(),charged:ledger.charged-before.charged,remaining:balance.remaining,
   }]});
   atomicJson(path.join(directory,'budget-status.json'),{status:'persisted',charged:ledger.charged,reported:ledger.reported,...balance});
