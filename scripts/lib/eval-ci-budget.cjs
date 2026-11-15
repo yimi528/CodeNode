@@ -40,7 +40,7 @@ function acquire(directory, policy, store, owner) {
   const ledger = remote.value.ledger, balance = validatePolicy(ledger, policy);
   fs.mkdirSync(directory,{recursive:true});
   if (ledger.boundViolation || balance.pending || balance.remaining < policy.minimumStartTokens) {
-    atomicJson(path.join(directory,'budget-status.json'),{status:'blocked',remaining:balance.remaining,pending:balance.pending,boundViolation:!!ledger.boundViolation});
+    atomicJson(path.join(directory,'budget-status.json'),{status:'blocked',remaining:balance.remaining,minimumStartTokens:policy.minimumStartTokens,pending:balance.pending,boundViolation:!!ledger.boundViolation});
     return {runnable:false,remaining:balance.remaining};
   }
   const lease = {id:crypto.randomUUID(),owner,startedAt:new Date().toISOString()};

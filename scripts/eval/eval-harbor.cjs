@@ -5,6 +5,7 @@ const {spawn,spawnSync}=require('node:child_process');
 const protocol=require('../lib/eval-protocol.cjs');
 const {startBroker}=require('../lib/eval-broker.cjs');
 const {validateLedger}=require('../lib/eval-transport.cjs');
+const importedNative=require('../lib/eval-harbor-result.cjs');
 const ROOT=path.resolve(__dirname,'../..');
 const python=process.env.CODENODE_BENCHMARK_PYTHON||path.join(ROOT,'benchmarks/.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
 
@@ -83,15 +84,13 @@ async function runHarbor(planFile) {
       const resultFile=imported.results[0],nativeTrial=path.dirname(resultFile),raw=protocol.readJson(resultFile);
       const nativeFile=path.join(nativeTrial,'agent/codenode.jsonl');
       const events=fs.existsSync(nativeFile)?fs.readFileSync(nativeFile,'utf8').split('\n').flatMap(line=>{try{return [JSON.parse(line)];}catch{return [];}}):[];
-      const final=[...events].reverse().find(e=>e.kind==='result')||{};
-      final.toolCalls=events.flatMap(e=>e.delta?.kind==='tool_result'?e.delta.toolCalls||[]:[]);
+      const final=importedNative.nativeResult(events,raw);
       for(const event of events)writer.append('events.jsonl',event);
       const candidate=path.join(nativeTrial,'artifacts/candidate');
       const after=fs.existsSync(candidate)?snapshots(candidate):{};
       const integrity=!fs.existsSync(candidate)?'UNKNOWN':Object.entries(task.fixture).filter(([file])=>!file.startsWith('src/')).every(([file,text])=>after[file]===text)?'CLEAN':'VIOLATION';
       const reward=raw.verifier_result?.rewards?.reward;
-      const state={executionStatus:final.state?protocol.classifyExecution(final):raw.exception_info?.exception_type==='AgentTimeoutError'?'BUDGET_EXHAUSTED':'UNKNOWN',gradingStatus:reward===1?'PASS':reward===0?'FAIL':'ERROR',integrityStatus:integrity};
-      if(String(final.error||'').includes('EVAL_TOKEN_BUDGET'))state.executionStatus='BUDGET_EXHAUSTED';
+      const state={executionStatus:importedNative.executionStatus(final,raw),gradingStatus:reward===1?'PASS':reward===0?'FAIL':'ERROR',integrityStatus:integrity};
       const networkFile=path.join(nativeTrial,'verifier-network.json');
       const network=fs.existsSync(networkFile)?protocol.readJson(networkFile):null;
       if(network?.enforced!==true||network.networkMode!=='none')state.gradingStatus='ERROR';

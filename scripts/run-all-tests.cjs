@@ -51,6 +51,7 @@ const CORE = [
   'test:eval-campaign',
   'test:eval-ci',
   'test:deepseek-reasoning',
+  'test:harbor-result',
   'test:backend-workflow',
   'test:soul',
   'test:session',

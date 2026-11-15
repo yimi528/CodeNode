@@ -57,6 +57,7 @@ jobs:
       - run: npm run test:eval-system
       - run: npm run test:eval-campaign
       - run: npm run test:eval-ci
+      - run: npm run test:harbor-result
       - run: npm run test:eval -- --report-dir=out/evals/ci-contracts
       - if: always()
         uses: actions/upload-artifact@v7
