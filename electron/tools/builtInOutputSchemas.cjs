@@ -29,6 +29,7 @@ const graphChange = choice(
   object({ kind: { enum: ['edge_added', 'edge_removed'] }, edge: nonempty }),
 );
 const reviewCanvas = object({ changes: list(graphChange), total: nat, truncated: bool });
+const executionResult = properties => object({ ...properties, executionMode: { enum: ['legacy', 'argv', 'shell'] }, cwd: str, program: str }, Object.keys(properties));
 const page = { output: str, offset: nat, nextOffset: nat, totalChars: nat, hasMore: bool };
 const quality = object({ level: { enum: ['none', 'low', 'medium', 'high'] }, answerable: bool, reason: str,
   basis: str, evidenceVerified: bool, topCoverage: num, coveredQueries: nat, queryCount: nat }, ['level', 'reason'], true);
@@ -123,7 +124,7 @@ const graphNode = object({ id: nonempty, type: str, label: str, status: str, x: 
   objectName: str, parentId: str, childIds: strings }, ['id', 'type', 'label', 'status', 'x', 'y']);
 const planItem = object({ id: nonempty, step: nonempty, acceptanceCriteria: nonempty,
   status: { enum: ['pending', 'in_progress', 'blocked', 'completed', 'cancelled'] },
-  evidenceCallIds: strings, dependsOn: strings, ownerTaskId: str, reason: str }, ['id', 'step', 'acceptanceCriteria', 'status'], true);
+  evidenceCallIds: strings, dependsOn: strings, ownerTaskId: str, reason: str, hypothesis: str }, ['id', 'step', 'acceptanceCriteria', 'status'], true);
 const fileVersion = object({ sha256: nonempty, ranges: dict(nonempty) });
 const symbolDefinition = object({ id: nonempty, path: nonempty, symbol: nonempty, qualifiedSymbol: nonempty,
   kind: nonempty, startLine: { type: 'integer', minimum: 1 }, endLine: { type: 'integer', minimum: 1 },
@@ -160,13 +161,13 @@ const schemas = {
     sourceVersions: dict(choice(str, fileVersion)) }, ['count', 'offset']),
   list_directory: object({ count: nat, offset: nat, path: str }),
   execute_shell: choice(
-    object({ jobId: nonempty, async: { const: true }, command: nonempty, status: { const: 'running' }, timeoutSeconds: num }),
-    object({ exitCode: integer, command: nonempty, output: str, outputOffset: nat, nextOffset: nat,
+    executionResult({ jobId: nonempty, async: { const: true }, command: nonempty, status: { const: 'running' }, timeoutSeconds: num }),
+    executionResult({ exitCode: integer, command: nonempty, output: str, outputOffset: nat, nextOffset: nat,
       totalOutputChars: nat, hasMore: bool, jobId: nullable(str), outputTruncated: bool, droppedOutputChars: nat }),
   ),
   poll_job: choice(
-    object({ jobId: nonempty, status: { const: 'running' }, startedAt: num, elapsedMs: nat, ...page }),
-    object({ jobId: nonempty, status: { const: 'done' }, exitCode: nullable(integer), ...page }),
+    executionResult({ jobId: nonempty, status: { const: 'running' }, startedAt: num, elapsedMs: nat, ...page }),
+    executionResult({ jobId: nonempty, status: { const: 'done' }, exitCode: nullable(integer), ...page }),
   ),
   ask_user: object({ answer: str }),
   fetch_url: object({ url: nonempty, chars: nat, bytes: nat, truncated: bool }),
@@ -209,7 +210,7 @@ const schemas = {
   read_skill: choice(object({}), object({ name: nonempty, instructions: str, truncated: bool, chars: nat }, ['name', 'instructions', 'truncated'])),
   view_image: object({ image: object({ path: nonempty, mime: { enum: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] },
     bytes: nat, dataUrl: nonempty, note: nullable(str) }) }),
-  web_search: object({ query: nonempty, backend: { enum: ['searxng', 'custom'] }, count: nat,
+  web_search: object({ query: nonempty, backend: { enum: ['searxng', 'tavily', 'brave', 'serper', 'google', 'custom'] }, count: nat,
     results: list(object({ title: str, url: str, snippet: str })) }),
   dify_call: object({ kind: { enum: ['workflow', 'chat'] }, inputKeys: strings, inputs: dict(value), query: str,
     output: value, elapsedMs: nat, status: str, taskId: nullable(str), runId: nullable(str), conversationId: nullable(str), error: nullable(str),

@@ -49,7 +49,7 @@ const promptContextLib = require(path.join(ROOT, 'electron', 'promptContext.cjs'
 const compaction = require(path.join(ROOT, 'electron', 'compaction.cjs'));
 
 function parseArgs(argv) {
-  const args = { project: process.cwd(), prompt: null, promptFile: null, allowWrites: false, yes: false, json: false, quiet: false, timeout: null, maxIterations: null, help: false };
+  const args = { project: process.cwd(), prompt: null, promptFile: null, allowWrites: false, yes: false, json: false, quiet: false, timeout: null, maxIterations: null, help: false, benchmark: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const next = () => argv[i + 1];
@@ -58,6 +58,9 @@ function parseArgs(argv) {
     else if (a === '--prompt-file') { args.promptFile = next(); i += 1; }
     else if (a === '--allow-writes') args.allowWrites = true;
     else if (a === '--yes' || a === '-y') args.yes = true;
+    else if (a === '--access-root') { if (!next() || next().startsWith('--')) args.error = '--access-root 缺少目录'; else { args.accessRoot = next(); i += 1; } }
+    else if (a === '--acceptance-file') { if (!next() || next().startsWith('--')) args.error = '--acceptance-file 缺少文件'; else { args.acceptanceFile = next(); i += 1; } }
+    else if (a === '--benchmark') args.benchmark = true;
     else if (a === '--json') args.json = true;
     else if (a === '--quiet' || a === '-q') args.quiet = true;
     else if (a === '--timeout') { args.timeout = Number(next()); i += 1; }
@@ -74,6 +77,9 @@ const USAGE = [
   '选项：--allow-writes  自动批准 WRITE 级确认（默认拒绝，fail-closed）',
   '      --yes          自动批准全部确认（含 HIGH/破坏性，慎重）',
   '      --json         输出 JSON Lines 事件流',
+  '      --benchmark    官方评测容器配置（需显式容器标记与 API Key）',
+  '      --access-root <dir>  评测容器文件访问边界（默认工程目录）',
+  '      --acceptance-file <json>  显式任务验收契约（version=1）',
   '      --quiet        只输出最终回答',
   '      --timeout <sec> / --max-iterations <n>',
   '',
@@ -136,7 +142,17 @@ async function main() {
     return 2;
   }
 
-  const cfg = agent.loadConfig(projectRoot);
+  let cfg = agent.loadConfig(args.benchmark ? null : projectRoot);
+  if(args.benchmark){try{cfg=require('../electron/benchmarkProfile.cjs').apply(cfg);}catch(error){process.stderr.write(error.message+'\n');return 2;}}
+  if (args.accessRoot && !args.benchmark) { process.stderr.write('--access-root 仅允许评测入口使用\n'); return 2; }
+  if (args.acceptanceFile) {
+    try {
+      const file = path.resolve(args.acceptanceFile);
+      if (fs.statSync(file).size > 65536) throw Error('验收契约超过 64 KiB');
+      cfg.acceptance = JSON.parse(fs.readFileSync(file, 'utf8'));
+      require('../electron/taskAcceptance.cjs').freezeContract(cfg.acceptance);
+    } catch (error) { process.stderr.write('任务验收配置错误：' + error.message + '\n'); return 2; }
+  }
   // 环境变量覆盖：CI 里注入凭据，不落盘（与 eval runner 的 env 口径一致）
   if (process.env.CODENODE_API_KEY) cfg.apiKey = process.env.CODENODE_API_KEY;
   if (process.env.CODENODE_BASE_URL) cfg.apiBase = process.env.CODENODE_BASE_URL;
@@ -187,7 +203,7 @@ async function main() {
     return approved;
   };
 
-  const ws = parseWebSearchConfig(cfg);
+  const ws = cfg.webSearch || parseWebSearchConfig(cfg);
   const registry = toolkit.buildDefaultRegistryWithConfig({
     projectRoot,
     toolsEnabled: cfg.tools.toolsEnabled,
@@ -202,6 +218,7 @@ async function main() {
     prompt,
     mode: cfg.tools.toolProfile,
   });
+  if((args.benchmark || process.env.CODENODE_EVAL_CONTEXT==='1'&&process.env.CODENODE_BENCHMARK_CONTAINER==='1') && process.env.CODENODE_BENCHMARK_FAULT) require('../electron/benchmarkProfile.cjs').installFault(registry,JSON.parse(process.env.CODENODE_BENCHMARK_FAULT),event=>emit(args,{kind:'event',delta:event}));
   const taskRoute = require('../electron/taskRouter.cjs').routeTask({ prompt, canvas: false });
   if (cfg.modelRouting?.routes?.[taskRoute.task]) cfg.modelTaskType = taskRoute.task;
   const registeredTools = registry.listTools().map((tool) => tool.name);
@@ -236,6 +253,8 @@ async function main() {
   const userMemory = require(path.join(ROOT, 'electron', 'userMemory.cjs'));
   const context = new AgentToolContext({
     projectRoot,
+    accessRoot: args.accessRoot || projectRoot,
+    benchmarkContainer: args.benchmark,
     runId,
     traceContext: cfg.traceContext,
     sourceMessageId: runId,
@@ -260,9 +279,9 @@ async function main() {
     signal: undefined,
   });
 
-  const projectMemory = memory.readMemory(projectRoot);
-  const skills = extensions.readManifest(projectRoot).filter((item) => String(item.kind || '').toLowerCase() === 'skills');
-  const promptContext = promptContextLib.buildPromptContext({
+  const projectMemory = args.benchmark ? {entries:[]} : memory.readMemory(projectRoot);
+  const skills = args.benchmark ? [] : extensions.readManifest(projectRoot).filter((item) => String(item.kind || '').toLowerCase() === 'skills');
+  const promptContext = args.benchmark ? {canvasSummaryForPrompt:'',memoryText:'',skillsText:'',userMemoryText:'',sessionMemoryText:'',contextBudget:null} : promptContextLib.buildPromptContext({
     prompt,
     canvasSummary: '',
     skills,
@@ -274,9 +293,9 @@ async function main() {
     truncateCanvasSummary: agent.truncateCanvasSummary,
     truncateSkillsIndex: agent.truncateSkillsIndex,
   });
-  const soul = agent.parseSoul(agent.loadSoul(cfg, projectRoot));
+  const soul = agent.parseSoul(args.benchmark ? 'name: CodeNode' : agent.loadSoul(cfg, projectRoot));
   const toolGuide = agent.buildToolGuide(registry.listTools().filter((tool) => registry.isExposed(tool.name)));
-  const systemContent = agent.buildSystemPrompt(
+  let systemContent = agent.buildSystemPrompt(
     soul,
     promptContext.canvasSummaryForPrompt,
     toolGuide,
@@ -294,6 +313,8 @@ async function main() {
     },
   );
 
+  if((args.benchmark || process.env.CODENODE_EVAL_CONTEXT==='1'&&process.env.CODENODE_BENCHMARK_CONTAINER==='1') && process.env.CODENODE_BENCHMARK_ARGV_GUIDE === '1') systemContent += '\n' + require('../electron/benchmarkProfile.cjs').ARGV_GUIDE;
+  if(args.benchmark || process.env.CODENODE_EVAL_CONTEXT==='1')emit(args,{kind:'benchmark_context',system:systemContent,prompt,tools:registry.toOpenAiTools(),profile:{kind:args.benchmark?'benchmark-controlled':'native-product',limits:cfg.limits,compaction:cfg.compaction,externalVerification:cfg.externalVerification},directories:{projectRoot,workingDirectory:projectRoot,accessRoot:context.accessRoot(),logDirectory:path.join(projectRoot,'.codenode')}});
   runStore.startRun(projectRoot, runId, { prompt: prompt.slice(0, 4000), model: cfg.model, headless: true, sandbox: sandbox.describe(sandboxPolicy) });
   runStore.appendEvent(projectRoot, runId, 'tool_face', toolFace);
   if (promptContext.contextBudget) {
@@ -311,7 +332,7 @@ async function main() {
   try {
     result = await agent.runAgentChat({
       cfg,
-      soulEvolution: true,
+      soulEvolution: !args.benchmark,
       soulMessages: [{ role: 'user', content: prompt }],
       messages: [
         { role: 'system', content: systemContent },
@@ -359,10 +380,11 @@ async function main() {
     usage: (result && result.usage) || null,
     error: (result && result.error) || null,
     deniedCount: denied.length,
+    taskAcceptance: result?.taskAcceptance || null,
   });
 
   if (args.json) {
-    emit(args, { kind: 'result', runId, state, status, content: finalText, usage: (result && result.usage) || null, denied });
+    emit(args, { kind: 'result', runId, state, status, stopReason:result?.stopReason || null, content: finalText, usage: (result && result.usage) || null, cost:cfg.costLedger.summary(runId), iterations:result?.iterations, benchmark:args.benchmark, taskAcceptance:result?.taskAcceptance || null, codeVerification:result?.codeVerification || null, denied });
   } else if (args.quiet) {
     process.stdout.write(finalText + '\n');
   } else {

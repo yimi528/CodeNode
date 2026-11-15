@@ -2,10 +2,18 @@ name: CodeNode CI
 
 # 触发：所有分支的 push、所有 PR、手动触发。
 # 不再写死分支名——历史上这里写死过 n0_12，分支一改名 CI 就静默失效了（门禁形同虚设）。
+# The focused evaluation branch is manually dispatched, without production side effects.
 on:
   push:
+    branches-ignore: [codex/agent-evaluation-ci]
   pull_request:
   workflow_dispatch:
+    inputs:
+      evaluation_only:
+        description: Run only the offline agent evaluation and isolated verifier jobs
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,8 +23,16 @@ permissions:
   contents: read
 
 jobs:
+  agent-evaluation:
+    name: Agent evaluation only
+    if: github.event_name == 'workflow_dispatch' && inputs.evaluation_only
+    uses: ./.github/workflows/agent-evaluation.yml
+    with:
+      live: false
+
   verify:
     name: Verify (${{ matrix.os }})
+    if: github.event_name != 'workflow_dispatch' || !inputs.evaluation_only
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -73,6 +89,7 @@ jobs:
 
   package:
     name: Package (${{ matrix.os }})
+    if: github.event_name != 'workflow_dispatch' || !inputs.evaluation_only
     runs-on: ${{ matrix.os }}
     needs: verify
     timeout-minutes: 60

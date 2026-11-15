@@ -593,7 +593,7 @@ class AgentToolRegistry {
     // 或 TTL 到期 —— 写完就放会让另一个 Agent 基于过期的读去覆盖，那正是我们要防的「静默互相覆盖」。
     if (descriptor.mutatesWorkspace && this.leases && this.leases.enabled) {
       const itsRoot = execContext.project.root();
-      const keys = resourceKeysFor(name, args, { projectRoot: itsRoot || process.cwd() });
+      const keys = resourceKeysFor(name, args, { projectRoot: itsRoot || process.cwd(), accessRoot: execContext.accessRoot?.() });
       if (keys.length) {
         const holder = execContext.exec.taskId || 'supervisor';
         const role = execContext.exec.role || '';

@@ -1,0 +1,81 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const {spawnSync}=require('node:child_process');
+const protocol=require('../lib/eval-protocol.cjs');
+const transport=require('../lib/eval-transport.cjs');
+const stats=require('../lib/eval-statistics.cjs');
+const {regrade}=require('../eval/agent-eval-regrade.cjs');
+const {reviewPack,validateReview}=require('../lib/eval-reviews.cjs');
+const task=/** @type {any} */ (require('../eval/coding-tasks.cjs')[0]);
+
+async function main(){
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'codenode-system-test-'));
+  try{
+    const secret='sk-synthetic-evidence-private-token';
+    const writer=protocol.createTrial(root,task,{mode:'offline'},[secret]);
+    writer.save('config.json',{apiKey:secret,messages:['value '+secret]});
+    assert.ok(!fs.readFileSync(path.join(writer.directory,'config.json'),'utf8').includes(secret));
+    const after={...task.fixture,...task.reference};writer.collect(task.fixture,after,{fixture:task.fixture,behaviorCases:task.behaviorCases,taskId:task.id});
+    assert.equal(protocol.verifyTrial(writer.directory).identity.trialId,writer.trialId);
+    const grade=regrade(writer.directory);assert.equal(grade.gradingStatus,'PASS');assert.equal(grade.modelRequests,0);
+    const next=regrade(writer.directory,{parentGradeId:grade.gradeId});assert.notEqual(next.gradeId,grade.gradeId);
+    assert.ok(fs.existsSync(path.join(writer.directory,'grades',grade.gradeId,'result.json')));
+    fs.appendFileSync(path.join(writer.directory,'snapshots.json'),' ');
+    assert.throws(()=>regrade(writer.directory),/哈希/);
+    assert.throws(()=>protocol.safePath(root,'../escaped'),/路径/);
+    assert.equal(protocol.classifyExecution({state:'LIMIT_REACHED'}),'BUDGET_EXHAUSTED');
+    assert.equal(protocol.classifyExecution({state:'COMPLETED'}),'COMPLETED');
+    assert.equal(protocol.classifyExecution({}, {setupError:true}),'INFRA_ERROR');
+    assert.equal(protocol.verdict('BUDGET_EXHAUSTED','PASS','CLEAN'),false);
+    assert.equal(protocol.verdict('BUDGET_EXHAUSTED','PASS','CLEAN',{allowBudgetArtifact:true}),true);
+    assert.equal(protocol.verdict('COMPLETED','PASS','VIOLATION'),false);
+    const registry={execute:async(..._args)=>({ok:true,text:'read'})};
+    require('../../electron/benchmarkProfile.cjs').installFault(registry,{tool:'read_file',count:1});
+    assert.equal((await registry.execute('read_file',{},{})).ok,false);
+    assert.equal((await registry.execute('read_file',{},{})).ok,true);
+    assert.throws(()=>require('../../electron/benchmarkProfile.cjs').installFault(registry,{tool:'write_file',count:1}),/Unsupported/);
+    const ledger=path.join(root,'budget.json');transport.createLedger(ledger,50000);
+    const ticket=transport.reserve(ledger,40000,'test');assert.throws(()=>transport.reserve(ledger,20000,'test'),/BUDGET/);
+    transport.settle(ledger,ticket,120);assert.equal(protocol.readJson(ledger).reported,120);
+    const unknown=transport.reserve(ledger,1000,'unknown');transport.settle(ledger,unknown,null);assert.equal(protocol.readJson(ledger).charged,1120);
+    const fake=async()=>new Response('data: '+JSON.stringify({choices:[],usage:{total_tokens:200}})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
+    const metered=transport.instrumentFetch(fake,writer,{apiBase:'https://model.test',ledger});
+    await (await metered('https://model.test/chat/completions',{body:JSON.stringify({model:'mock',messages:[],max_tokens:32})})).text();
+    assert.equal(protocol.readJson(ledger).reported,320);
+    assert.equal(Object.keys(protocol.readJson(ledger).reservations).length,0);
+    await assert.rejects(()=>metered('https://other.test/chat/completions',{body:JSON.stringify({model:'mock',messages:[]})}),/ENDPOINT/);
+    assert.equal(stats.wilson(3,3)[1],1);assert.ok(stats.wilson(3,3)[0]<0.5);
+    assert.equal(stats.compareTasks([{taskId:'one',family:'x',baseline:[1],improved:[1]}]).decision,'insufficient-evidence');
+    const rows=Array.from({length:6},(_,i)=>({taskId:'task-'+i,family:'family-'+i,baseline:[0,0,0,1,0,0],improved:[1,1,1,0,1,1]}));
+    const comparison=stats.compareTasks(rows,{scope:'population',samples:500,seed:7});
+    assert.equal(comparison.decision,'improvement-supported');assert.ok(comparison.interval[0]>0);
+    assert.deepEqual(comparison,stats.compareTasks(rows,{scope:'population',samples:500,seed:7}));
+    const boundary=stats.compareTasks([{taskId:'a',family:'a',baseline:Array(1000).fill(0),improved:Array(1000).fill(1)},{taskId:'b',family:'b',baseline:Array(1000).fill(0),improved:Array(1000).fill(1)}],{samples:100});
+    assert.equal(boundary.decision,'improvement-supported');assert.ok(boundary.interval[0]<1);
+    const reversed=stats.compareTasks(rows.map(r=>({...r,baseline:r.improved,improved:r.baseline})),{samples:500,seed:7});
+    assert.equal(reversed.decision,'regression-supported');
+    assert.equal(stats.compareTasks(rows.slice(0,2),{scope:'population'}).interval,null);
+    assert.equal(stats.coverage([{protocol:{executionStatus:'NOT_STARTED',gradingStatus:'NOT_RUN',delivered:false}}],1).started,0);
+    const pack=reviewPack([task],path.join(root,'reviews'));assert.ok(fs.existsSync(pack.template));
+    assert.equal(validateReview([task],pack.template).pass,false);
+    const review=protocol.readJson(pack.template);review.reviewer='synthetic-fixture-only';review.independentFromAuthor=true;
+    review.tasks[0].verdict='approved';review.tasks[0].notes='synthetic test, not actual review';review.tasks[0].candidateLabels=protocol.readJson(path.join(root,'reviews/controller-key.json')).rows[0].answerKey.map(c=>({candidateId:c.candidateId,pass:c.expected}));
+    protocol.atomicJson(pack.template,review);assert.equal(validateReview([task],pack.template).pass,true);
+    assert.equal(validateReview([{...task,prompt:'changed'}],pack.template).pass,false);
+
+    // Smoke the runner's actual persistent artifacts and zero-model regrade path.
+    const reportDir=path.join(root,'runner');
+    const child=spawnSync(process.execPath,[path.resolve(__dirname,'../eval/agent-eval.cjs'),'--task=coding-known-location','--report-dir='+reportDir],{encoding:'utf8',timeout:30000});
+    assert.equal(child.status,0,child.stdout+child.stderr);
+    const report=protocol.readJson(path.join(reportDir,fs.readdirSync(reportDir).find(n=>/^agent-eval-.*json$/.test(n))));
+    const record=report.tasks[0];assert.equal(record.protocol.delivered,true);
+    assert.equal(protocol.verifyTrial(record.evidence.directory).contract.taskId,task.id);
+    assert.equal(regrade(record.evidence.directory).gradingStatus,'PASS');
+    assert.ok(fs.existsSync(path.join(record.evidence.directory,'requests.jsonl')));
+    console.log('EVAL SYSTEM: PASS (budget reservations, unknown billing, persistent evidence, immutable regrade, statistical decisions, review gate, actual runner integration)');
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});

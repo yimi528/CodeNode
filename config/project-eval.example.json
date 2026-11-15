@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "codenode-priority-default",
+      "title": "CodeNode 真实仓库：修复默认任务优先级回归",
+      "repository": {
+        "path": "..",
+        "snapshot": "tree",
+        "commit": "ea81e60cc8cd325120c4b9632148e2a214d3730d"
+      },
+      "prompt": "当前 CodeNode 仓库的默认任务优先级配置被错误改成 low。只修复 config/goal.task-priorities.json，将默认值恢复为 normal，并用 node 独立检查 normalize() 返回 normal。不要修改其他配置或提交代码。",
+      "allowTools": [
+        "read_file",
+        "edit_file",
+        "execute_shell"
+      ],
+      "budget": {
+        "maxSteps": 8,
+        "timeoutMs": 120000
+      },
+      "fixture": {
+        "config/goal.task-priorities.json": "{\n  \"version\": 1,\n  \"default\": \"low\",\n  \"priorities\": [\n    {\n      \"id\": \"urgent\",\n      \"label\": \"紧急\",\n      \"rank\": 0\n    },\n    {\n      \"id\": \"high\",\n      \"label\": \"高\",\n      \"rank\": 1\n    },\n    {\n      \"id\": \"normal\",\n      \"label\": \"普通\",\n      \"rank\": 2\n    },\n    {\n      \"id\": \"low\",\n      \"label\": \"低\",\n      \"rank\": 3\n    }\n  ]\n}\n"
+      },
+      "script": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "config/goal.task-priorities.json"
+          }
+        },
+        {
+          "tool": "edit_file",
+          "args": {
+            "path": "config/goal.task-priorities.json",
+            "oldText": "\"default\": \"low\"",
+            "newText": "\"default\": \"normal\""
+          }
+        },
+        {
+          "content": "已修复默认优先级配置。"
+        }
+      ],
+      "checks": [
+        {
+          "type": "verify-shell",
+          "command": "node -e \"const p=require('./electron/goalTaskPriority.cjs');if(p.normalize()!=='normal')process.exit(1);console.log('PRIORITY ACCEPTED')\"",
+          "expect": "PRIORITY ACCEPTED"
+        },
+        {
+          "type": "workspace-changes",
+          "expect": [
+            "config/goal.task-priorities.json"
+          ]
+        }
+      ],
+      "editing": {
+        "lintCommand": "node -e \"const p=require('./electron/goalTaskPriority.cjs');if(p.normalize()!=='normal')process.exit(1);console.log('PRIORITY ACCEPTED')\"",
+        "testCommand": "node -e \"const p=require('./electron/goalTaskPriority.cjs');if(p.normalize()!=='normal')process.exit(1);console.log('PRIORITY ACCEPTED')\""
+      }
+    }
+  ]
+}

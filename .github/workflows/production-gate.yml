@@ -3,8 +3,10 @@ name: production-gate
 # 触发：所有分支的 push / 所有 PR / 手动。
 # 之前 push 与 PR 都写死 branches: [n0_12]，分支改名后这个工作流再也不会运行——
 # 门禁"存在但永不触发"比没有门禁更危险，这里改成不带分支过滤。
+# The focused evaluation branch is manually dispatched, without production side effects.
 on:
   push:
+    branches-ignore: [codex/agent-evaluation-ci]
   pull_request:
   workflow_dispatch:
     inputs:

@@ -1,158 +1,148 @@
 /**
- * webSearchTool.cjs —— 联网搜索（对照 Codex / Claude Code 的 `web_search` / `WebSearch`）
- *
- * 短板（对照文档 §5 #7）：此前只有 `fetch_url`（**已知 URL 才**能抓），没有「先搜再读」的能力 ——
- * 查文档、找报错、比对版本这些最常见的动作都做不了。
- *
- * 设计取舍（为什么是「可配置后端 + 出厂关闭」而不是写死某一家）：
- *   - 搜索后端要么要 API Key（Tavily / Brave / Bing），要么要自建实例（SearxNG）、要么有风控；
- *     把某一家写进产品等于替用户选服务商与计费方式，不合适；
- *   - 所以工具本身只做「把查询发给你配的后端 + 把结果结构化回灌」，后端由
- *     `config/agent.properties` 的 `web_search.*` 指定；**不配 = 工具根本不注册**（零痕迹、零上下文成本）。
- *
- * 支持的后端形状：
- *   - `searxng`：`GET {endpoint}?q=<query>&format=json` → `{results:[{title,url,content}]}`（自建实例，无需 Key）
- *   - `custom` ：`GET {endpoint}`（`{query}` 会被替换成 URL 编码后的查询）→ 接受 `{results:[…]}` 或裸数组，
- *               元素取 `title`/`url`/`content|snippet|description`；`api_key` 存在时以 `Authorization: Bearer` 发送
- *
- * 安全：出网仍受 `sandbox.network` 约束（deny = 不发请求），且走 `publicHttp.fetchPublicText`
- * （只允许公网地址、限字节上限）；**不编造结果**：后端返回空就是「没有结果」。
+ * 联网搜索工具：原生适配常见供应商，同时保留自建 SearxNG 与自定义 GET JSON 端点。
+ * 未启用时工具不注册；API Key 由主进程安全存储提供，不进入模型上下文。
  */
 'use strict';
 
 const { AgentToolResult } = require('../result.cjs');
 const { request } = require('../../publicHttp.cjs');
 
-const DEFAULTS = { backend: 'searxng', maxResults: 5, timeoutMs: 15000, maxBytes: 512 * 1024 };
+const PROVIDERS = Object.freeze(['searxng', 'tavily', 'brave', 'serper', 'google', 'custom']);
+const DEFAULT_ENDPOINTS = Object.freeze({
+  searxng: '',
+  tavily: 'https://api.tavily.com/search',
+  brave: 'https://api.search.brave.com/res/v1/web/search',
+  serper: 'https://google.serper.dev/search',
+  google: 'https://customsearch.googleapis.com/customsearch/v1',
+  custom: '',
+});
+const DEFAULTS = Object.freeze({ provider: 'searxng', backend: 'searxng', maxResults: 5, timeoutMs: 15000, maxBytes: 512 * 1024, networkAllowed: false });
 
-/** 解析 web_search 配置（扁平 properties 键）；enabled 默认 false —— 不配就不注册这个工具 */
+function asBool(value, fallback = false) {
+  if (value == null || value === '') return fallback;
+  return value === true || String(value).trim().toLowerCase() === 'true';
+}
+
+/** 接受旧 properties、agent.loadConfig() 的 webSearch 字段与设置页结构。 */
 function parseWebSearchConfig(cfg) {
   const source = cfg || {};
-  const enabled = String(source['web_search.enabled'] || '').toLowerCase() === 'true';
-  const backendRaw = String(source['web_search.backend'] || DEFAULTS.backend).toLowerCase();
-  const backend = ['searxng', 'custom'].includes(backendRaw) ? backendRaw : DEFAULTS.backend;
-  const endpoint = String(source['web_search.endpoint'] || '').trim();
-  const apiKey = String(source['web_search.api_key'] || '').trim();
-  const maxResults = Math.min(20, Math.max(1, Number(source['web_search.max_results']) || DEFAULTS.maxResults));
-  const timeoutMs = Math.min(60000, Math.max(1000, Number(source['web_search.timeout_ms']) || DEFAULTS.timeoutMs));
+  const structured = source.webSearch && typeof source.webSearch === 'object' ? source.webSearch : source;
+  const enabled = asBool(structured.enabled ?? source['web_search.enabled']);
+  const rawProvider = String(structured.provider || structured.backend || source['web_search.provider'] || source['web_search.backend'] || DEFAULTS.provider).trim().toLowerCase();
+  const provider = PROVIDERS.includes(rawProvider) ? rawProvider : DEFAULTS.provider;
+  const endpoint = String(structured.endpoint || source['web_search.endpoint'] || DEFAULT_ENDPOINTS[provider] || '').trim();
+  const apiKey = String(structured.apiKey || source['web_search.api_key'] || '').trim();
+  const engineId = String(structured.engineId || source['web_search.engine_id'] || '').trim();
+  const maxResults = Math.min(20, Math.max(1, Number(structured.maxResults || source['web_search.max_results']) || DEFAULTS.maxResults));
+  const timeoutMs = Math.min(60000, Math.max(1000, Number(structured.timeoutMs || source['web_search.timeout_ms']) || DEFAULTS.timeoutMs));
+  const networkAllowed = asBool(structured.networkAllowed ?? source['web_search.network_allowed']);
   const problems = [];
-  if (enabled && !endpoint) problems.push('web_search.enabled=true 但没有配 web_search.endpoint（例如 http://127.0.0.1:8888/search 或 https://api.tavily.com/search）');
-  if (enabled && /^https?:\/\//i.test(endpoint) === false && endpoint) problems.push('web_search.endpoint 必须以 http:// 或 https:// 开头');
-  return { enabled, backend, endpoint, apiKey, maxResults, timeoutMs, problems };
+  if (enabled && !endpoint) problems.push('web_search.enabled=true 但没有配 web_search.endpoint');
+  if (endpoint && !/^https?:\/\//i.test(endpoint)) problems.push('web_search.endpoint 必须以 http:// 或 https:// 开头');
+  if (endpoint && /^https?:\/\//i.test(endpoint)) {
+    try { const url = new URL(endpoint); if (url.username || url.password) problems.push('web_search.endpoint 不能包含账号或密码'); }
+    catch { problems.push('web_search.endpoint 不是有效 URL'); }
+  }
+  if (enabled && !['searxng', 'custom'].includes(provider) && !apiKey) problems.push(provider + ' 搜索需要 API Key');
+  if (enabled && provider === 'google' && !engineId) problems.push('Google Programmable Search 需要搜索引擎 ID（cx）');
+  return { enabled, provider, backend: provider, endpoint, apiKey, engineId, maxResults, timeoutMs, networkAllowed, problems };
 }
 
-/** 把后端返回的 JSON 归一化成 [{title,url,snippet}]（各家字段名不同，这里只认最常见几种） */
-function normalizeResults(payload, limit) {
-  const list = Array.isArray(payload) ? payload : payload && Array.isArray(payload.results) ? payload.results : payload && Array.isArray(payload.items) ? payload.items : null;
+/** 各家响应统一成 title/url/snippet。 */
+function normalizeResults(payload, limit, provider = 'custom') {
+  const list = Array.isArray(payload) ? payload
+    : provider === 'brave' && Array.isArray(payload?.web?.results) ? payload.web.results
+    : provider === 'serper' && Array.isArray(payload?.organic) ? payload.organic
+    : Array.isArray(payload?.results) ? payload.results
+    : Array.isArray(payload?.items) ? payload.items : null;
   if (!list) return null;
-  return list
-    .slice(0, limit)
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      const url = String(item.url || item.link || item.href || '').trim();
-      const title = String(item.title || item.name || url || '').trim();
-      const snippet = String(item.content || item.snippet || item.description || item.text || '').trim();
-      if (!url && !title) return null;
-      return { title, url, snippet };
-    })
-    .filter(Boolean);
+  return list.slice(0, limit).map(item => {
+    if (!item || typeof item !== 'object') return null;
+    const url = String(item.url || item.link || item.href || '').trim();
+    const title = String(item.title || item.name || url || '').trim();
+    const snippet = String(item.content || item.snippet || item.description || item.text || '').trim();
+    if (!url && !title) return null;
+    return { title, url, snippet };
+  }).filter(Boolean);
 }
 
-function buildQueryUrl(config, query) {
+function buildQueryUrl(config, query, limit = config.maxResults || DEFAULTS.maxResults) {
   const encoded = encodeURIComponent(query);
   if (config.endpoint.includes('{query}')) return config.endpoint.split('{query}').join(encoded);
   const separator = config.endpoint.includes('?') ? '&' : '?';
-  if (config.backend === 'searxng') return config.endpoint + separator + 'q=' + encoded + '&format=json';
+  const provider = config.provider || config.backend;
+  if (provider === 'searxng') return config.endpoint + separator + 'q=' + encoded + '&format=json';
+  if (provider === 'google') return config.endpoint + separator + 'q=' + encoded + '&key=' + encodeURIComponent(config.apiKey) + '&cx=' + encodeURIComponent(config.engineId) + '&num=' + Math.min(10, limit);
   return config.endpoint + separator + 'q=' + encoded;
 }
 
-function register(registry) {
-  registry.register(
-    'web_search',
-    '联网搜索（用项目配置的搜索后端）：返回标题/链接/摘要。用于查文档、找报错原因、核对版本等「先搜再读」的场景。',
-    {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '搜索词' },
-        maxResults: { type: 'integer', minimum: 1, maximum: 20, description: '最多返回几条（默认取配置值）' },
-      },
-      required: ['query'],
-    },
-    async (context, args) => {
-      const query = String((args && args.query) || '').trim();
-      if (!query) return AgentToolResult.error('缺少 query');
-      const config = typeof context.webSearchConfig === 'function' ? context.webSearchConfig() : null;
-      if (!config || !config.enabled || !config.endpoint) {
-        return AgentToolResult.error('web_search 未启用或未配置后端（config/agent.properties 的 web_search.enabled / web_search.endpoint）', {
-          code: 'ARG_SCHEMA',
-          tool: 'web_search',
-        });
-      }
-      const policy = typeof context.sandbox === 'function' ? context.sandbox() : null;
-      if (policy && policy.network === 'deny') {
-        // 出厂默认断网：如实说清「为什么搜不了」和「怎么放开」，不要静默失败
-        return AgentToolResult.error('联网搜索需要出网，但当前 sandbox.network=deny（出厂默认）：请把 sandbox.network 设为 allow 或 inherit', {
-          code: 'NETWORK_DENIED',
-          tool: 'web_search',
-        });
-      }
-      const limit = Math.min(20, Math.max(1, Number((args && args.maxResults) || config.maxResults)));
-      const url = buildQueryUrl(config, query);
-      try {
-        /** @type {Record<string, string>} */
-        const headers = config.apiKey ? { authorization: 'Bearer ' + config.apiKey } : {};
-        /**
-         * 走 `publicHttp.request` 而不是 `fetchPublicText`：搜索端点由**用户自己配置**，
-         * 自建 SearxNG 十有八九在 `http://127.0.0.1:8888`（`fetchPublicText` 只允许公网地址 → 必被 SSRF 判据拦下）。
-         * 仍然保留地址解析与连接固定、字节上限；「能不能联网」由 sandbox.network 另行约束。
-         */
-        const result = await request(url, {
-          headers,
-          signal: context.signal && context.signal(),
-          timeoutMs: config.timeoutMs,
-          maxBytes: DEFAULTS.maxBytes,
-          allowPrivateHosts: true,
-        });
-        let payload = null;
-        try {
-          payload = JSON.parse(result.text);
-        } catch {
-          return AgentToolResult.error('搜索后端应答不是 JSON（backend=' + config.backend + '）：' + String(result.text || '').slice(0, 120), {
-            code: 'FATAL_FAILURE',
-            tool: 'web_search',
-            backend: config.backend,
-          });
-        }
-        const results = normalizeResults(payload, limit);
-        if (results === null) {
-          return AgentToolResult.error('搜索后端应答里没有 results 数组（backend=' + config.backend + '）：' + JSON.stringify(payload).slice(0, 160), {
-            code: 'FATAL_FAILURE',
-            tool: 'web_search',
-            backend: config.backend,
-          });
-        }
-        if (!results.length) {
-          // 空就是空 —— 绝不编造「看起来合理」的结果
-          return AgentToolResult.ok('搜索「' + query + '」没有返回结果（后端：' + config.backend + '）。可以换关键词，或用 fetch_url 直接读已知文档地址。', {
-            query,
-            backend: config.backend,
-            count: 0,
-            results: [],
-          });
-        }
-        const lines = results.map((r, i) => i + 1 + '. ' + r.title + (r.url ? '\n   ' + r.url : '') + (r.snippet ? '\n   ' + r.snippet.replace(/\s+/g, ' ').slice(0, 300) : ''));
-        return AgentToolResult.ok('搜索「' + query + '」（后端：' + config.backend + '，' + results.length + ' 条）\n' + lines.join('\n'), {
-          query,
-          backend: config.backend,
-          count: results.length,
-          results,
-        });
-      } catch (error) {
-        return AgentToolResult.error('搜索失败：' + String((error && error.message) || error), { code: 'FATAL_FAILURE', tool: 'web_search', backend: config.backend });
-      }
-    }
-  );
-  require('../builtInOutputSchemas.cjs').declareOutputContracts(registry, ["web_search"]);
+function buildRequest(config, query, limit) {
+  const provider = config.provider || config.backend || 'custom';
+  /** @type {Record<string,string>} */
+  const headers = { accept: 'application/json' };
+  let method = 'GET', body = null, url = buildQueryUrl(config, query, limit);
+  if (provider === 'tavily') {
+    method = 'POST'; headers['content-type'] = 'application/json'; url = config.endpoint;
+    body = JSON.stringify({ api_key: config.apiKey, query, max_results: limit, search_depth: 'basic', include_answer: false, include_raw_content: false });
+  } else if (provider === 'brave') {
+    headers['x-subscription-token'] = config.apiKey;
+    url += (url.includes('?') ? '&' : '?') + 'count=' + limit;
+  } else if (provider === 'serper') {
+    method = 'POST'; headers['content-type'] = 'application/json'; headers['x-api-key'] = config.apiKey; url = config.endpoint;
+    body = JSON.stringify({ q: query, num: limit });
+  } else if ((provider === 'custom' || provider === 'searxng') && config.apiKey) {
+    headers.authorization = 'Bearer ' + config.apiKey;
+  }
+  return { provider, url, method, headers, body };
 }
 
-module.exports = { register, parseWebSearchConfig, normalizeResults, buildQueryUrl, DEFAULTS };
+async function performSearch(config, query, limit, options = {}) {
+  const spec = buildRequest(config, query, limit);
+  const response = await request(spec.url, {
+    method: spec.method,
+    headers: spec.headers,
+    body: spec.body,
+    signal: options.signal,
+    timeoutMs: config.timeoutMs,
+    maxBytes: DEFAULTS.maxBytes,
+    // 本地 SearxNG / 企业中转站是用户明确配置的端点；仍固定 DNS 解析结果以防 rebinding。
+    allowPrivateHosts: spec.provider === 'searxng' || spec.provider === 'custom',
+  });
+  let payload;
+  try { payload = JSON.parse(response.text); }
+  catch { throw Object.assign(new Error('搜索后端应答不是 JSON（provider=' + spec.provider + '）：' + String(response.text || '').slice(0, 120)), { code: 'INVALID_JSON' }); }
+  const results = normalizeResults(payload, limit, spec.provider);
+  if (results === null) throw Object.assign(new Error('搜索后端应答里没有 results 数组或可识别的供应商结果（provider=' + spec.provider + '）：' + JSON.stringify(payload).slice(0, 160)), { code: 'INVALID_SHAPE' });
+  return { provider: spec.provider, results };
+}
+
+function register(registry) {
+  registry.register('web_search', '联网搜索：返回标题、链接和摘要，用于查文档、错误与版本信息。', {
+    type: 'object',
+    properties: {
+      query: { type: 'string', minLength: 1, maxLength: 600, description: '搜索词' },
+      maxResults: { type: 'integer', minimum: 1, maximum: 20, description: '最多返回几条' },
+    },
+    required: ['query'],
+  }, async (context, args) => {
+    const query = String(args?.query || '').trim();
+    if (!query) return AgentToolResult.error('缺少 query');
+    const config = typeof context.webSearchConfig === 'function' ? context.webSearchConfig() : null;
+    if (!config?.enabled || !config.endpoint) return AgentToolResult.error('web_search 未启用或未配置后端', { code: 'ARG_SCHEMA', tool: 'web_search' });
+    const policy = typeof context.sandbox === 'function' ? context.sandbox() : null;
+    const networkDenied = context.exec?.networkDenied === true || (!context.exec && policy?.network === 'deny' && config.networkAllowed !== true);
+    if (networkDenied) return AgentToolResult.error('联网搜索需要出网，但当前 sandbox.network=deny 且尚未获得 web_search 独立联网授权（请在“设置 → 联网搜索”中开启）', { code: 'NETWORK_DENIED', tool: 'web_search' });
+    const limit = Math.min(20, Math.max(1, Number(args?.maxResults || config.maxResults)));
+    try {
+      const searched = await performSearch(config, query, limit, { signal: context.signal && context.signal() });
+      if (!searched.results.length) return AgentToolResult.ok('搜索「' + query + '」没有返回结果（后端：' + searched.provider + '）。', { query, backend: searched.provider, count: 0, results: [] });
+      const lines = searched.results.map((item, index) => index + 1 + '. ' + item.title + (item.url ? '\n   ' + item.url : '') + (item.snippet ? '\n   ' + item.snippet.replace(/\s+/g, ' ').slice(0, 300) : ''));
+      return AgentToolResult.ok('搜索「' + query + '」（后端：' + searched.provider + '，' + searched.results.length + ' 条）\n' + lines.join('\n'), { query, backend: searched.provider, count: searched.results.length, results: searched.results });
+    } catch (error) {
+      return AgentToolResult.error('搜索失败：' + String(error?.message || error), { code: 'FATAL_FAILURE', tool: 'web_search', backend: config.provider || config.backend });
+    }
+  });
+  require('../builtInOutputSchemas.cjs').declareOutputContracts(registry, ['web_search']);
+}
+
+module.exports = { register, parseWebSearchConfig, normalizeResults, buildQueryUrl, buildRequest, performSearch, PROVIDERS, DEFAULT_ENDPOINTS, DEFAULTS };
