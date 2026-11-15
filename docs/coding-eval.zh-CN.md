@@ -34,7 +34,7 @@
 
 JSON 的 `assessment` 和 `trackSummary` 区分机制、编码、流程与可靠性场景，以及 `scripted-regression`、`model-coding-outcome`、`model-contract-outcome` 和 `not-executed`。runner 启动异常标为 `runner-error`；没有完整模型轮次的错误标为 `model-unavailable`。保留的 `totals.successRate` 和重复报告的总体均值是所有判据的兼容诊断统计，不是综合模型能力分。历史报告没有分类时保留 `unclassified`，不根据模型名补猜。
 
-重复报告另按轨道与证据类型汇总，并拒绝混合不同任务或 grader 契约。运行状态、持久证据、重评、容器通道、可靠性任务和统计比较已增加独立入口，详见[运行与验收说明](agent-evaluation-operations.zh-CN.md)；实际容器和独立人审仍未完成验收。
+重复报告另按轨道与证据类型汇总，并拒绝混合不同任务或 grader 契约。运行状态、持久证据、重评、容器通道、可靠性任务和统计比较已增加独立入口，详见[运行与验收说明](agent-evaluation-operations.zh-CN.md)；容器工程验收已通过，独立人审仍待完成；真实隔离模型结果与工程 smoke 分开登记。
 
 扩展开发任务还覆盖超时零值、文本归一化、用户搜索、端口解析；保留任务覆盖库存累计与 HTTP 状态判断。改名、需求改写和首次读取故障变体关联原题，同源变体不当作独立家族扩充分数。完整列表可用 `npm run test:eval:list` 查看。
 

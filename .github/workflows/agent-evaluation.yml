@@ -11,6 +11,10 @@ on:
       - 'scripts/core/eval-*.cjs'
       - 'benchmarks/**'
       - '.github/workflows/agent-evaluation.yml'
+      - '.github/workflows/agent-evaluation-live.yml'
+      - '.github/workflows/capability-release.yml'
+      - 'scripts/eval/eval-ci.cjs'
+      - 'config/eval-budget-policy.json'
   workflow_dispatch:
     inputs:
       live:
@@ -52,6 +56,7 @@ jobs:
       - run: npm run test:coding-grader
       - run: npm run test:eval-system
       - run: npm run test:eval-campaign
+      - run: npm run test:eval-ci
       - run: npm run test:eval -- --report-dir=out/evals/ci-contracts
       - if: always()
         uses: actions/upload-artifact@v7
@@ -80,35 +85,10 @@ jobs:
       - run: npm run test:benchmark-adapter
       - run: npm run test:eval-harbor-smoke
 
-  live-pilot:
-    needs: contracts
-    if: >-
-      github.event_name != 'pull_request' &&
-      ((github.event_name == 'workflow_dispatch' && inputs.live) ||
-       (github.event_name == 'schedule' && vars.CODENODE_EVAL_SCHEDULED == 'true'))
+  moved-live-entry:
+    if: github.event_name == 'workflow_dispatch' && inputs.live
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - name: Freeze bounded pilot
-        env:
-          CODENODE_EVAL_BASE_URL: ${{ vars.CODENODE_EVAL_BASE_URL }}
-          CODENODE_EVAL_MODEL: ${{ vars.CODENODE_EVAL_MODEL }}
-        run: npm run eval:system -- prepare --output=out/evals/live --tasks=coding-timeout-default,coding-port-parser --trials=2 --mode=model --max-tokens=300000
-      - name: Run diagnostic only
-        run: npm run eval:system -- run --plan=out/evals/live/plan.json
-        env:
-          CODENODE_EVAL_API_KEY: ${{ secrets.CODENODE_EVAL_API_KEY }}
-          CODENODE_EVAL_BASE_URL: ${{ vars.CODENODE_EVAL_BASE_URL }}
-          CODENODE_EVAL_MODEL: ${{ vars.CODENODE_EVAL_MODEL }}
-      - if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: agent-evaluation-live-pilot
-          path: out/evals/live/
-          retention-days: 30
+      - run: |
+          echo "::error::Paid model runs moved to agent-evaluation-live.yml; its persistent budget cannot be bypassed."
+          exit 1

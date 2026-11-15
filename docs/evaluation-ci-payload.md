@@ -23,3 +23,7 @@ The checks establish evaluation integration, not application release approval or
 ## Verified remote run
 
 [Run 43687779566](https://github.com/yimi528/CodeNode/actions/runs/43687779566) completed successfully for commit `5924dfb8c937c6d0a319f85f6fe3ee15bddcc7b1`. Both contracts and isolated-verifier jobs ran successfully. Application verification, packaging and live-model jobs were skipped by the evaluation-only mode. The default and delivery branches were not updated.
+
+## Main integration and paid follow-up
+
+PR #27 merged into main at 800212a; normal three-platform verification, production gates and packaging passed before and after merge. The isolated model follow-up uses a persistent cumulative budget and a separate credential. It cannot reset the existing authorization. Capability release checks are separate from engineering CI and continue to reject pending human review.

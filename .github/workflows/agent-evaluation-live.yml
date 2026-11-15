@@ -1,0 +1,79 @@
+name: Isolated model evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      purpose:
+        description: Frozen confirmation experiment or periodic diagnostic
+        type: choice
+        options: [confirmation, diagnostic]
+        default: confirmation
+  schedule:
+    - cron: '17 19 * * 1'
+  workflow_call:
+    inputs:
+      purpose:
+        type: string
+        default: diagnostic
+    secrets:
+      CODENODE_EVAL_ISOLATED_KEY:
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codenode-isolated-model-budget
+  cancel-in-progress: false
+
+jobs:
+  model:
+    if: github.event_name != 'schedule' || vars.CODENODE_EVAL_SCHEDULED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CODENODE_EVAL_API_KEY: ${{ secrets.CODENODE_EVAL_ISOLATED_KEY }}
+      CODENODE_EVAL_MODEL: ${{ vars.CODENODE_EVAL_MODEL }}
+      CODENODE_EVAL_BASE_URL: ${{ vars.CODENODE_EVAL_BASE_URL }}
+      CODENODE_EVAL_PURPOSE: ${{ inputs.purpose || 'diagnostic' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Require explicit model credentials
+        run: node -e "if(!process.env.CODENODE_EVAL_API_KEY)throw Error('Missing isolated evaluation credential')"
+      - name: Install locked Harbor SDK
+        run: |
+          python3 -m venv /tmp/codenode-eval-tooling
+          /tmp/codenode-eval-tooling/bin/pip install uv==0.9.5
+          /tmp/codenode-eval-tooling/bin/uv sync --project benchmarks --locked
+      - run: docker pull node:22.23.1-bookworm-slim
+      - name: Acquire persistent shared budget lease
+        id: budget
+        run: node scripts/eval/eval-ci.cjs acquire
+      - name: Freeze isolated experiment
+        id: plan
+        if: steps.budget.outputs.runnable == 'true'
+        run: node scripts/eval/eval-ci.cjs prepare
+      - name: Run planned attempts without automatic retries
+        if: steps.budget.outputs.runnable == 'true'
+        env:
+          EVALUATION_PLAN: ${{ steps.plan.outputs.plan }}
+        run: npm run eval:system -- run --plan="$EVALUATION_PLAN"
+      - name: Record confirmation decision; pending review never approves release
+        if: always() && steps.plan.outcome == 'success' && env.CODENODE_EVAL_PURPOSE == 'confirmation'
+        run: node scripts/eval/eval-ci.cjs decision
+      - name: Persist all usage and unresolved reservations
+        if: always() && steps.budget.outputs.runnable == 'true'
+        run: node scripts/eval/eval-ci.cjs persist
+      - name: Archive evidence and explicit budget-blocked status
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-evaluation-live-evidence
+          path: out/evals/live/
+          retention-days: 90

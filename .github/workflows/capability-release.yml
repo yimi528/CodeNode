@@ -1,0 +1,45 @@
+name: Capability release decision
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_run_id:
+        description: Completed isolated confirmation run for this exact commit
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      evidence_run_id:
+        type: string
+        required: true
+    secrets:
+      CODENODE_EVAL_INDEPENDENT_REVIEW:
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  capability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Recompute strict capability gate from bound evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODENODE_EVAL_EVIDENCE_RUN: ${{ inputs.evidence_run_id }}
+          CODENODE_EVAL_INDEPENDENT_REVIEW: ${{ secrets.CODENODE_EVAL_INDEPENDENT_REVIEW }}
+        run: node scripts/eval/eval-ci.cjs fetch
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: capability-release-decision
+          path: out/evals/live/confirmation/gate.json
+          if-no-files-found: warn

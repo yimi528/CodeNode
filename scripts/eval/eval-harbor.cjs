@@ -4,6 +4,7 @@ const path=require('node:path');
 const {spawn,spawnSync}=require('node:child_process');
 const protocol=require('../lib/eval-protocol.cjs');
 const {startBroker}=require('../lib/eval-broker.cjs');
+const {validateLedger}=require('../lib/eval-transport.cjs');
 const ROOT=path.resolve(__dirname,'../..');
 const python=process.env.CODENODE_BENCHMARK_PYTHON||path.join(ROOT,'benchmarks/.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
 
@@ -45,14 +46,18 @@ function snapshots(root) {
 async function runHarbor(planFile) {
   const {readPlan,analyze,verifyRuntime}=require('./eval-system.cjs');
   const plan=readPlan(planFile),directory=path.dirname(planFile);
+  if(plan.mode==='model'&&!process.env.CODENODE_EVAL_API_KEY)throw Error('Missing explicit evaluation credential');
   const readiness=doctor();if(!readiness.pass)throw Error(JSON.stringify(readiness));
   const exported=exportHarbor(planFile);
   const buildxConfig=path.join(directory,'buildx');fs.mkdirSync(buildxConfig,{recursive:true});
   const lock=path.join(directory,'run.lock'),fd=fs.openSync(lock,'wx',0o600);
   try {
+    let unavailable=0;
     for(const entry of plan.schedule) {
       verifyRuntime(plan.runtime);
       const stateFile=path.join(directory,'states',entry.id+'.json');if(fs.existsSync(stateFile))continue;
+      const ledger=protocol.readJson(plan.budgetLedger),balance=validateLedger(ledger);
+      if(plan.mode==='model'&&(ledger.boundViolation||balance.pending||balance.remaining<16385))break;
       const task=plan.taskSpecs.find(t=>t.id===entry.taskId),secrets=[process.env.CODENODE_EVAL_API_KEY||''];
       const writer=protocol.createTrial(path.join(directory,'evidence'),task,{mode:plan.mode,isolation:'harbor',profile:plan.profile,agent:plan.runtime.hash},secrets);
       const broker=await startBroker(writer,{model:plan.model,apiBase:plan.apiBase,apiKey:secrets[0],ledger:plan.budgetLedger,mockTask:plan.mode==='offline'?task:null});
@@ -86,6 +91,7 @@ async function runHarbor(planFile) {
       const integrity=!fs.existsSync(candidate)?'UNKNOWN':Object.entries(task.fixture).filter(([file])=>!file.startsWith('src/')).every(([file,text])=>after[file]===text)?'CLEAN':'VIOLATION';
       const reward=raw.verifier_result?.rewards?.reward;
       const state={executionStatus:final.state?protocol.classifyExecution(final):raw.exception_info?.exception_type==='AgentTimeoutError'?'BUDGET_EXHAUSTED':'UNKNOWN',gradingStatus:reward===1?'PASS':reward===0?'FAIL':'ERROR',integrityStatus:integrity};
+      if(String(final.error||'').includes('EVAL_TOKEN_BUDGET'))state.executionStatus='BUDGET_EXHAUSTED';
       const networkFile=path.join(nativeTrial,'verifier-network.json');
       const network=fs.existsSync(networkFile)?protocol.readJson(networkFile):null;
       if(network?.enforced!==true||network.networkMode!=='none')state.gradingStatus='ERROR';
@@ -103,6 +109,8 @@ async function runHarbor(planFile) {
       protocol.writeNew(reportFile,{datasetVersion:'harbor-coding-v1',mode:plan.mode,model:plan.model,tasks:[result],rawResult:resultFile,exitCode:result.status==='pass'?0:1});
       protocol.atomicJson(stateFile,{phase:'FINISHED',exitCode:status,reportFile,...entry});
       console.log(`${entry.id} ${task.id} ${entry.arm}: reward=${reward}`);analyze(planFile);
+      unavailable=result.modelSteps===0&&result.error?unavailable+1:0;
+      if(plan.mode==='model'&&(String(result.error||'').includes('EVAL_TOKEN_BUDGET')||unavailable>=(plan.haltAfterUnavailable||2)))break;
     }
     return analyze(planFile);
   } finally {fs.closeSync(fd);fs.unlinkSync(lock);}

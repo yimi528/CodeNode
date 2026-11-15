@@ -5,7 +5,7 @@ name: CodeNode CI
 # The focused evaluation branch is manually dispatched, without production side effects.
 on:
   push:
-    branches-ignore: [codex/agent-evaluation-ci]
+    branches-ignore: [codex/agent-evaluation-ci, codex/agent-evaluation-budget]
   pull_request:
   workflow_dispatch:
     inputs:

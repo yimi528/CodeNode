@@ -659,7 +659,11 @@ function buildOpenAiRequest(cfg, messages, /** @type {{ stream?: boolean, tools?
   /** @type {any} */
   const body = {
     model: cfg.model,
-    messages,
+    // DeepSeek thinking/tool turns require full reasoning_content history.
+    // Other OpenAI-compatible providers keep their existing wire contract.
+    messages: !/^deepseek-/i.test(cfg.model || '') && Array.isArray(messages) && messages.some(m => m && Object.hasOwn(m, 'reasoning_content'))
+      ? messages.map(m => { if (!m || !Object.hasOwn(m, 'reasoning_content')) return m; const {reasoning_content, ...rest} = m; return rest; })
+      : messages,
     stream: !!stream,
   };
   /**

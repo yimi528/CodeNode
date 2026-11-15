@@ -6,7 +6,7 @@ name: production-gate
 # The focused evaluation branch is manually dispatched, without production side effects.
 on:
   push:
-    branches-ignore: [codex/agent-evaluation-ci]
+    branches-ignore: [codex/agent-evaluation-ci, codex/agent-evaluation-budget]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -18,11 +18,26 @@ on:
         options:
           - gate
           - release
+      capability_run_id:
+        description: Isolated confirmation evidence run for this exact release commit
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
+  capability:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'release'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/capability-release.yml
+    with:
+      evidence_run_id: ${{ inputs.capability_run_id }}
+    secrets:
+      CODENODE_EVAL_INDEPENDENT_REVIEW: ${{ secrets.CODENODE_EVAL_INDEPENDENT_REVIEW }}
+
   # fail-closed 前置校验：发布模式缺少必需凭据时直接失败，绝不以成功码跳过。
   credentials:
     name: 凭据前置校验（fail-closed）
