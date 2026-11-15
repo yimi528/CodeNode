@@ -50,6 +50,7 @@ const CORE = [
   'test:eval-system',
   'test:eval-campaign',
   'test:eval-ci',
+  'test:deepseek-reasoning',
   'test:backend-workflow',
   'test:soul',
   'test:session',

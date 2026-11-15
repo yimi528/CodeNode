@@ -189,3 +189,10 @@ gh workflow run capability-release.yml --repo yimi528/CodeNode -f evidence_run_i
 ```
 
 当前人审仍待完成。正式实验是否覆盖完整、统计能支持什么结论，以及剩余余额，以对应 Actions 工件和生成报告为准；工程 smoke、历史宿主模型报告与新隔离结果不相互回填。
+
+
+## 当前供应商契约核对
+
+本轮通过供应商 `/models` 查询确认凭据有效，当前返回 `deepseek-flash` 和 `deepseek-v4-pro`；新实验固定使用 `deepseek-flash`，不把旧 `deepseek-chat` 诊断与新模型结果合并。元数据查询不产生生成 tokens。实际返回的模型标识、response ID 和 fingerprint 由请求证据记录，未提供的底层版本保持未知。
+
+当前 DeepSeek 思考工具轮次要求完整回传 reasoning_content；源码在工具结果、截断续写和校验重试中保留该字段，仅 DeepSeek 的 OpenAI 格式请求发送它，其他 OpenAI 兼容端点保持原格式。零外部调用的 test:deepseek-reasoning 先复现了字段丢失，再验证真实工具循环、无工具续写及其他模型的负向约束。契约来源：[DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)。

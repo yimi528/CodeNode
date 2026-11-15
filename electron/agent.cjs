@@ -2078,6 +2078,8 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
         }
       };
       const res = await sendTurn();
+      const assistantReasoning = res?.reasoning && /^deepseek-/i.test(res.actualModel || cfg.model || '')
+        ? { reasoning_content: res.reasoning } : {};
       if (res && res.traceContext && tools && tools.context) {
         // Tool calls belong under the model span that produced them. The
         // context object is intentionally mutable only inside the trusted
@@ -2259,7 +2261,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
       }
       if (!toolCalls.length && finishReason === 'length' && truncationNudges < maxTruncationNudges) {
         truncationNudges += 1;
-        messages.push({ role: 'assistant', content: String(res.content || '') });
+        messages.push({ role: 'assistant', content: String(res.content || ''), ...assistantReasoning });
         messages.push({
           role: 'user',
           content:
@@ -2281,6 +2283,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
         messages.push({
           role: 'assistant',
           content: res.content || '',
+          ...assistantReasoning,
           tool_calls: toolCalls.map((tc) => ({
             id: tc.callId,
             type: 'function',
@@ -2924,7 +2927,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
           if (signal?.aborted) throw Error('任务验收已取消');
           if (totalToolCalls >= maxTotalToolCalls || cfg.requestBudget?.remaining() <= 0) throw Object.assign(Error('验收未通过且运行额度已耗尽。'), { code: cfg.requestBudget?.remaining() <= 0 ? 'BUDGET_EXCEEDED' : 'TASK_ACCEPTANCE_FAILED' });
           if (verificationRetries++ >= 1) throw Object.assign(Error('显式任务验收未通过，修改已保留。'), { code: 'TASK_ACCEPTANCE_FAILED' });
-          messages.push({ role: 'assistant', content: content || res.content || '' }, { role: 'user', content: runner.note() });
+          messages.push({ role: 'assistant', content: content || res.content || '', ...assistantReasoning }, { role: 'user', content: runner.note() });
           content = ''; onDelta?.({ kind: 'content_reset', reason: 'task_acceptance_failed' }); continue;
         }
       }
@@ -2935,7 +2938,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
         if (codeVerifier.blocked()) {
           if (verificationRetries < 1) {
             verificationRetries++;
-            messages.push({ role: 'assistant', content: content || res.content || '' });
+            messages.push({ role: 'assistant', content: content || res.content || '', ...assistantReasoning });
             messages.push({ role: 'user', content: '【系统提示】代码校验尚未通过。根据校验报告修复，再交付；不能用旧结果声明当前版本已通过。' });
             content = ''; onDelta && onDelta({ kind: 'content_reset', reason: 'code_verification_failed' }); continue;
           }
@@ -2953,7 +2956,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
         const pending = await checkGrounding(content);
         if (deliveryRejected(pending)) {
           groundingRetries += 1;
-          messages.push({ role: 'assistant', content: content });
+          messages.push({ role: 'assistant', content: content, ...assistantReasoning });
           const taskReminder = groundingTask ? '【任务回顾】本轮用户请求：' + JSON.stringify(groundingTask.slice(0, 4000)) +
             (groundingTask.length > 4000 ? '（此处节选，完整请求仍以用户消息为准）' : '') +
             '\n请按这项请求重写最终答案，不要逐项回答校验报告中的旁支问题。\n' : '';
