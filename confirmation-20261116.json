@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "ledger": {
+    "schemaVersion": 1,
+    "ledgerId": "4e0f8d5c-6e33-4ccb-b3fd-dd5953550459",
+    "limit": 1000000,
+    "charged": 0,
+    "reported": 0,
+    "reservations": {},
+    "attempts": []
+  },
+  "lease": null,
+  "closed": false,
+  "history": [],
+  "authorization": {
+    "purpose": "confirmation",
+    "additionalTokens": 1000000,
+    "date": "2026-11-16",
+    "statement": "User explicitly authorized up to 1000000 additional tokens on 2026-11-16 for completing the fixed confirmation plan; stop on exhaustion. Original and periodic funding unchanged.",
+    "originalLedgerId": "2655e414-d88e-4b3e-a250-2ebcb7c9eaaa",
+    "originalStateBlobSha": "d779e112c9758e2fd1df77560c65476f5152268e",
+    "originalCharged": 946675,
+    "originalRemaining": 53325,
+    "periodicDiagnosticsMayUseThisPool": false,
+    "closeOnFixedPlanCompletion": true
+  }
+}
