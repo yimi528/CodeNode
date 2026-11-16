@@ -30,7 +30,7 @@ jobs:
   model:
     if: github.event_name != 'schedule' || vars.CODENODE_EVAL_SCHEDULED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       CODENODE_EVAL_API_KEY: ${{ secrets.CODENODE_EVAL_ISOLATED_KEY }}

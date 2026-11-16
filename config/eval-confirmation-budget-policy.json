@@ -13,6 +13,7 @@
   "purpose": "confirmation",
   "originalLedgerId": "2655e414-d88e-4b3e-a250-2ebcb7c9eaaa",
   "authorizationDate": "2026-11-16",
-  "plannedAttempts": 8,
+  "plannedAttempts": 12,
+  "trialsPerArm": 3,
   "closeOnComplete": true
 }

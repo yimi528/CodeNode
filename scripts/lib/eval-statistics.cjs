@@ -46,9 +46,12 @@ function compareTasks(rows, options = /** @type {any} */ ({})) {
     if(options.scope==='population'){interval=null;boundaryInsufficient=true;intervalMethod='unavailable-for-boundary-population';}
     else {
       const alpha=0.05,totalWeight=complete.reduce((n,r)=>n+(r.weight??1),0);
-      const radius=complete.reduce((n,r)=>n+(r.weight??1)/totalWeight*(Math.sqrt(Math.log(4*complete.length/alpha)/(2*r.baseline.length))+Math.sqrt(Math.log(4*complete.length/alpha)/(2*r.improved.length))),0);
+      // Apply Hoeffding directly to the weighted difference, whose independent
+      // Bernoulli coefficients have squared ranges summing to this value.
+      const squaredRanges=complete.reduce((n,r)=>n+((r.weight??1)/totalWeight)**2*(1/r.baseline.length+1/r.improved.length),0);
+      const radius=Math.sqrt(Math.log(2/alpha)*squaredRanges/2);
       interval=[Math.max(-1,estimate-radius),Math.min(1,estimate+radius)];
-      boundaryInsufficient=radius>=1;intervalMethod='hoeffding-union-bound-fixed-suite';
+      boundaryInsufficient=radius>=1||1-radius<=Math.min(minimum,regression);intervalMethod='weighted-hoeffding-fixed-suite';
     }
   }
   const covered=complete.length===rows.length;

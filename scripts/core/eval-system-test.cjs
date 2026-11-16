@@ -58,7 +58,9 @@ async function main(){
     const partialBoundary=stats.compareTasks([{taskId:'a',family:'a',baseline:[0,0],improved:[1,1]},{taskId:'b',family:'b',baseline:[0,1],improved:[1,1]}],{samples:500});
     assert.equal(partialBoundary.decision,'insufficient-evidence','a single varying group must not make eight observations look conclusive');
     assert.ok(partialBoundary.interval[0]<=0);
-    assert.ok('intervalMethod' in partialBoundary&&partialBoundary.intervalMethod==='hoeffding-union-bound-fixed-suite');
+    assert.ok('intervalMethod' in partialBoundary&&partialBoundary.intervalMethod==='weighted-hoeffding-fixed-suite');
+    const minimumDesign=stats.compareTasks([{taskId:'a',family:'a',baseline:[0,0,0],improved:[1,1,1]},{taskId:'b',family:'b',baseline:[0,0,0],improved:[1,1,1]}],{samples:100});
+    assert.equal(minimumDesign.decision,'improvement-supported');assert.ok(minimumDesign.interval[0]>0.05,'the twelve-attempt design can support the prespecified effect in principle');
     const reversed=stats.compareTasks(rows.map(r=>({...r,baseline:r.improved,improved:r.baseline})),{samples:500,seed:7});
     assert.equal(reversed.decision,'regression-supported');
     assert.equal(stats.compareTasks(rows.slice(0,2),{scope:'population'}).interval,null);

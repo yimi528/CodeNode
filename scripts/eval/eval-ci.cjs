@@ -52,8 +52,9 @@ function main(argv) {
     const {prepare}=require('./eval-system.cjs');
     const created=prepare({output:path.join(directory,purpose),subset:purpose==='confirmation'?'holdout':'coding',
       ...(purpose==='diagnostic'?{subset:undefined,tasks:'coding-timeout-default',arms:'single'}:{}),
-      trials:purpose==='confirmation'?'2':'1',mode:'model',kind:purpose==='confirmation'?'confirmation':'pilot',
+      trials:purpose==='confirmation'?String(policy.trialsPerArm||2):'1',mode:'model',kind:purpose==='confirmation'?'confirmation':'pilot',
       isolation:'harbor',profile:'native-product','budget-ledger':path.join(directory,'token-ledger.json')});
+    if(purpose==='confirmation'&&policy.plannedAttempts&&created.attempts!==policy.plannedAttempts)throw Error('Prepared attempt count differs from the registered confirmation policy');
     protocol.atomicJson(path.join(directory,'ci-source.json'),{schemaVersion:1,repository:policy.repository,purpose,
       runId:process.env.GITHUB_RUN_ID,sourceCommit:process.env.GITHUB_SHA,fundingLedgerId:policy.ledgerId,
       fundingStatePath:policy.path,providerMetadataHash:fs.existsSync(path.join(directory,'provider-metadata.json'))?protocol.hash(fs.readFileSync(path.join(directory,'provider-metadata.json'))):null,
