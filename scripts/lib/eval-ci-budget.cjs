@@ -25,6 +25,16 @@ function storeFor(policy) {
     },
   };
 }
+function policyForPurpose(purpose, original, confirmation) {
+  if(!['diagnostic','confirmation'].includes(purpose))throw Error('Unknown evaluation purpose');
+  if(purpose!=='confirmation'||!confirmation)return original;
+  if(confirmation.repository!==original.repository||confirmation.branch!==original.branch||
+      confirmation.path===original.path||confirmation.ledgerId===original.ledgerId||
+      !/^confirmation-[a-z0-9-]+\.json$/.test(confirmation.path)||confirmation.purpose!=='confirmation'||
+      !Number.isSafeInteger(confirmation.limit)||confirmation.limit<=0||confirmation.limit>1000000||
+      !confirmation.authorization)throw Error('Invalid separate confirmation funding policy');
+  return confirmation;
+}
 function validatePolicy(ledger, policy) {
   const balance = validateLedger(ledger);
   if (ledger.ledgerId !== policy.ledgerId || ledger.limit !== policy.limit ||
@@ -39,8 +49,8 @@ function acquire(directory, policy, store, owner) {
   if (remote.value.lease) throw Error('Previous budget lease is unresolved; paid execution blocked');
   const ledger = remote.value.ledger, balance = validatePolicy(ledger, policy);
   fs.mkdirSync(directory,{recursive:true});
-  if (ledger.boundViolation || balance.pending || balance.remaining < policy.minimumStartTokens) {
-    atomicJson(path.join(directory,'budget-status.json'),{status:'blocked',remaining:balance.remaining,minimumStartTokens:policy.minimumStartTokens,pending:balance.pending,boundViolation:!!ledger.boundViolation});
+  if (remote.value.closed || ledger.boundViolation || balance.pending || balance.remaining < policy.minimumStartTokens) {
+    atomicJson(path.join(directory,'budget-status.json'),{status:remote.value.closed?'closed':'blocked',remaining:balance.remaining,minimumStartTokens:policy.minimumStartTokens,pending:balance.pending,boundViolation:!!ledger.boundViolation});
     return {runnable:false,remaining:balance.remaining};
   }
   const lease = {id:crypto.randomUUID(),owner,startedAt:new Date().toISOString()};
@@ -58,10 +68,13 @@ function persist(directory, policy, store) {
       JSON.stringify(ledger.attempts.slice(0,before.attempts.length)) !== JSON.stringify(before.attempts)) throw Error('Budget history rollback or mutation');
   const remote = store.get();
   if (remote.sha !== session.sha || remote.value.lease?.id !== session.lease.id || remote.value.lease?.owner !== session.lease.owner) throw Error('Budget lease ownership changed');
-  store.put(remote.sha,{...remote.value,schemaVersion:1,ledger,lease:null,history:[...(remote.value.history||[]),{
+  const summaryFile=path.join(directory,'confirmation/summary.json');
+  const summary=policy.closeOnComplete&&policy.purpose==='confirmation'&&fs.existsSync(summaryFile)?readJson(summaryFile):null;
+  const closure=summary?.complete===true?{closed:true,closure:{reason:'fixed-confirmation-plan-complete',experimentId:summary.experimentId,at:new Date().toISOString()}}:{};
+  store.put(remote.sha,{...remote.value,...closure,schemaVersion:1,ledger,lease:null,history:[...(remote.value.history||[]),{
     ...session.lease,finishedAt:new Date().toISOString(),charged:ledger.charged-before.charged,remaining:balance.remaining,
   }]});
-  atomicJson(path.join(directory,'budget-status.json'),{status:'persisted',charged:ledger.charged,reported:ledger.reported,...balance});
+  atomicJson(path.join(directory,'budget-status.json'),{status:'persisted',closed:!!closure.closed,charged:ledger.charged,reported:ledger.reported,...balance});
   return {persisted:true,charged:ledger.charged,...balance};
 }
-module.exports = {github,storeFor,validatePolicy,acquire,persist};
+module.exports = {github,storeFor,policyForPurpose,validatePolicy,acquire,persist};

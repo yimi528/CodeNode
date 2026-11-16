@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "repository": "yimi528/CodeNode",
+  "branch": "codex/agent-evaluation-budget",
+  "path": "confirmation-20261116.json",
+  "ledgerId": "4e0f8d5c-6e33-4ccb-b3fd-dd5953550459",
+  "limit": 1000000,
+  "minimumCharged": 0,
+  "minimumReported": 0,
+  "minimumStartTokens": 70404,
+  "minimumStartBasis": "Observed initial native-product request reservation in run 43697561600; does not increase the total allowance.",
+  "authorization": "User explicitly authorized up to 1000000 additional tokens on 2026-11-16 for completing the fixed confirmation plan; stop on exhaustion. Original and periodic funding unchanged.",
+  "purpose": "confirmation",
+  "originalLedgerId": "2655e414-d88e-4b3e-a250-2ebcb7c9eaaa",
+  "authorizationDate": "2026-11-16",
+  "plannedAttempts": 8,
+  "closeOnComplete": true
+}

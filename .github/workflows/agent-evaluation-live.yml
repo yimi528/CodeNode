@@ -36,7 +36,7 @@ jobs:
       CODENODE_EVAL_API_KEY: ${{ secrets.CODENODE_EVAL_ISOLATED_KEY }}
       CODENODE_EVAL_MODEL: ${{ vars.CODENODE_EVAL_MODEL }}
       CODENODE_EVAL_BASE_URL: ${{ vars.CODENODE_EVAL_BASE_URL }}
-      CODENODE_EVAL_PURPOSE: ${{ inputs.purpose || 'diagnostic' }}
+      CODENODE_EVAL_PURPOSE: ${{ github.event_name == 'schedule' && 'diagnostic' || inputs.purpose || 'diagnostic' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -48,6 +48,9 @@ jobs:
       - name: Acquire persistent shared budget lease
         id: budget
         run: node scripts/eval/eval-ci.cjs acquire
+      - name: Check current model metadata without generating tokens
+        if: steps.budget.outputs.runnable == 'true'
+        run: node scripts/eval/eval-ci.cjs provider
       - name: Install application dependencies only for funded runs
         if: steps.budget.outputs.runnable == 'true'
         run: npm ci
