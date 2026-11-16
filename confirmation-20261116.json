@@ -9,7 +9,11 @@
     "reservations": {},
     "attempts": []
   },
-  "lease": null,
+  "lease": {
+    "id": "3f74cd6d-465d-4286-8e59-63ad46040616",
+    "owner": "43797984829/1",
+    "startedAt": "2026-11-16T03:24:32.425Z"
+  },
   "closed": false,
   "history": [],
   "authorization": {
