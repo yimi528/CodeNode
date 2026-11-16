@@ -55,6 +55,10 @@ async function main(){
     assert.deepEqual(comparison,stats.compareTasks(rows,{scope:'population',samples:500,seed:7}));
     const boundary=stats.compareTasks([{taskId:'a',family:'a',baseline:Array(1000).fill(0),improved:Array(1000).fill(1)},{taskId:'b',family:'b',baseline:Array(1000).fill(0),improved:Array(1000).fill(1)}],{samples:100});
     assert.equal(boundary.decision,'improvement-supported');assert.ok(boundary.interval[0]<1);
+    const partialBoundary=stats.compareTasks([{taskId:'a',family:'a',baseline:[0,0],improved:[1,1]},{taskId:'b',family:'b',baseline:[0,1],improved:[1,1]}],{samples:500});
+    assert.equal(partialBoundary.decision,'insufficient-evidence','a single varying group must not make eight observations look conclusive');
+    assert.ok(partialBoundary.interval[0]<=0);
+    assert.ok('intervalMethod' in partialBoundary&&partialBoundary.intervalMethod==='hoeffding-union-bound-fixed-suite');
     const reversed=stats.compareTasks(rows.map(r=>({...r,baseline:r.improved,improved:r.baseline})),{samples:500,seed:7});
     assert.equal(reversed.decision,'regression-supported');
     assert.equal(stats.compareTasks(rows.slice(0,2),{scope:'population'}).interval,null);
