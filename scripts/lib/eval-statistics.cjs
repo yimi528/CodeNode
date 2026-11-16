@@ -36,23 +36,28 @@ function compareTasks(rows, options = /** @type {any} */ ({})) {
   }
   let interval=[percentile(deltas,0.025),percentile(deltas,0.975)];
   const minimum=options.minimumEffect ?? 0.05, regression=options.maxRegression ?? 0.05;
-  // A zero-width plug-in bootstrap interval from saturated tiny samples is not evidence of certainty.
+  // Any constant task/arm group can make a tiny-sample plug-in bootstrap falsely
+  // precise, even when other groups vary. Protect partial as well as full boundaries.
   const saturated=complete.every(r=>new Set(r.baseline).size===1 && new Set(r.improved).size===1);
+  const hasBoundaryGroup=complete.some(r=>new Set(r.baseline).size===1 || new Set(r.improved).size===1);
   let intervalMethod='task-stratified-bootstrap';
   let boundaryInsufficient=false;
-  if(saturated) {
-    if(options.scope==='population'){interval=null;boundaryInsufficient=true;intervalMethod='unavailable-for-saturated-population';}
+  if(hasBoundaryGroup) {
+    if(options.scope==='population'){interval=null;boundaryInsufficient=true;intervalMethod='unavailable-for-boundary-population';}
     else {
       const alpha=0.05,totalWeight=complete.reduce((n,r)=>n+(r.weight??1),0);
-      const radius=complete.reduce((n,r)=>n+(r.weight??1)/totalWeight*(Math.sqrt(Math.log(4*complete.length/alpha)/(2*r.baseline.length))+Math.sqrt(Math.log(4*complete.length/alpha)/(2*r.improved.length))),0);
+      // Apply Hoeffding directly to the weighted difference, whose independent
+      // Bernoulli coefficients have squared ranges summing to this value.
+      const squaredRanges=complete.reduce((n,r)=>n+((r.weight??1)/totalWeight)**2*(1/r.baseline.length+1/r.improved.length),0);
+      const radius=Math.sqrt(Math.log(2/alpha)*squaredRanges/2);
       interval=[Math.max(-1,estimate-radius),Math.min(1,estimate+radius)];
-      boundaryInsufficient=radius>=1;intervalMethod='hoeffding-union-bound-fixed-suite';
+      boundaryInsufficient=radius>=1||1-radius<=Math.min(minimum,regression);intervalMethod='weighted-hoeffding-fixed-suite';
     }
   }
   const covered=complete.length===rows.length;
   const decision=!covered||boundaryInsufficient ? 'insufficient-evidence' : interval[0]>minimum ? 'improvement-supported' : interval[1]<-regression ? 'regression-supported' : 'inconclusive';
   return {estimate,interval,decision,scope:options.scope || 'fixed-suite',completeTasks:complete.length,plannedTasks:rows.length,
-    families:families.length,intervalMethod,assumptions:'Independent bounded trial outcomes within each task and arm; task-population claims require family sampling.',bootstrapSamples:trials,seed:options.seed||1,saturated,differences};
+    families:families.length,intervalMethod,assumptions:'Independent bounded trial outcomes within each task and arm; task-population claims require family sampling.',bootstrapSamples:trials,seed:options.seed||1,saturated,hasBoundaryGroup,differences};
 }
 function coverage(records, planned) {
   const complete=records.filter(r=>r.protocol?.gradingStatus==='PASS'||r.protocol?.gradingStatus==='FAIL');

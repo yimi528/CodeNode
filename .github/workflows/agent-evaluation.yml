@@ -15,6 +15,7 @@ on:
       - '.github/workflows/capability-release.yml'
       - 'scripts/eval/eval-ci.cjs'
       - 'config/eval-budget-policy.json'
+      - 'config/eval-confirmation-budget-policy.json'
   workflow_dispatch:
     inputs:
       live:

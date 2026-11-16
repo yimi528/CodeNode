@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const os=require('node:os');
-const {acquire,persist}=require('../lib/eval-ci-budget.cjs');
+const {acquire,persist,policyForPurpose}=require('../lib/eval-ci-budget.cjs');
 const {reserve,settle,validateLedger}=require('../lib/eval-transport.cjs');
 const {readJson,atomicJson}=require('../lib/eval-protocol.cjs');
 const {verifySource}=require('../eval/eval-ci.cjs');
@@ -14,6 +14,26 @@ function fixture(){
   return {get:()=>({sha:String(version),value:structuredClone(state)}),put:(sha,value)=>{assert.equal(sha,String(version));state=structuredClone(value);return String(++version);}};
 }
 try{
+  const originalPolicy={...policy,repository:'yimi528/CodeNode',branch:'codex/agent-evaluation-budget',path:'state.json'};
+  const confirmationPolicy={...originalPolicy,purpose:'confirmation',path:'confirmation-synthetic.json',ledgerId:'confirmation-1',minimumCharged:0,minimumReported:0,closeOnComplete:true,authorization:'Synthetic test authorization'};
+  assert.equal(policyForPurpose('diagnostic',originalPolicy,confirmationPolicy),originalPolicy,'periodic diagnostics cannot use confirmation funding');
+  assert.equal(policyForPurpose('confirmation',originalPolicy,null),originalPolicy,'without additional authorization the original guard remains');
+  assert.equal(policyForPurpose('confirmation',originalPolicy,confirmationPolicy),confirmationPolicy);
+  assert.throws(()=>policyForPurpose('confirmation',originalPolicy,{...confirmationPolicy,path:'state.json'}),/separate/);
+  assert.throws(()=>policyForPurpose('confirmation',originalPolicy,{...confirmationPolicy,ledgerId:originalPolicy.ledgerId}),/separate/);
+  assert.throws(()=>policyForPurpose('confirmation',originalPolicy,{...confirmationPolicy,repository:'other/repo'}),/separate/);
+  const priorPool=fixture(),priorSnapshot=priorPool.get(),newPool=fixture(),newState=newPool.get();
+  Object.assign(newState.value.ledger,{ledgerId:confirmationPolicy.ledgerId,charged:0,reported:0});newPool.put(newState.sha,newState.value);
+  const fundingDirectory=path.join(root,'new-confirmation-pool');
+  acquire(fundingDirectory,confirmationPolicy,newPool,'confirmation-run');
+  const newTicket=reserve(path.join(fundingDirectory,'token-ledger.json'),200,'new-confirmation');
+  settle(path.join(fundingDirectory,'token-ledger.json'),newTicket,50);
+  atomicJson(path.join(fundingDirectory,'confirmation/summary.json'),{complete:true,experimentId:'synthetic-confirmation'});
+  persist(fundingDirectory,confirmationPolicy,newPool);
+  assert.deepEqual(priorPool.get(),priorSnapshot,'new funding never resets or mutates original budget history');
+  assert.equal(newPool.get().value.ledger.charged,50);
+  assert.equal(newPool.get().value.closed,true,'a completed fixed experiment closes unused funding instead of rerunning to obtain significance');
+  assert.equal(acquire(path.join(root,'replayed-confirmation'),confirmationPolicy,newPool,'another-run').runnable,false);
   const store=fixture(),dir=path.join(root,'first');
   assert.equal(acquire(dir,policy,store,'run-1').remaining,500);
   assert.throws(()=>acquire(path.join(root,'concurrent'),policy,store,'run-2'),/unresolved/,'crashed and concurrent sessions cannot spend');

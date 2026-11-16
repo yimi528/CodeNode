@@ -18,13 +18,17 @@ function decision(directory, reviewFile) {
   const plan=path.join(directory,'confirmation/plan.json');
   if(!fs.existsSync(plan))throw Error('Missing confirmation plan');
   const source=protocol.readJson(path.join(directory,'ci-source.json'));
+  if(source.providerMetadataHash&&protocol.hash(fs.readFileSync(path.join(directory,'provider-metadata.json')))!==source.providerMetadataHash)throw Error('Provider metadata changed after preparation');
   if(readPlan(plan).runtime.sourceCommit!==source.sourceCommit)throw Error('Frozen runtime differs from evidence source commit');
   return gate(plan,reviewFile);
 }
 function main(argv) {
   const command=argv[0];
   const directory=path.resolve(process.env.CODENODE_EVAL_CI_DIRECTORY||path.join(ROOT,'out/evals/live'));
-  const policy=require('../../config/eval-budget-policy.json');
+  const purpose=process.env.CODENODE_EVAL_PURPOSE||'diagnostic';
+  const confirmationPolicy=path.join(ROOT,'config/eval-confirmation-budget-policy.json');
+  const policy=budget.policyForPurpose(purpose,require('../../config/eval-budget-policy.json'),
+    fs.existsSync(confirmationPolicy)?protocol.readJson(confirmationPolicy):null);
   if(process.env.GITHUB_REPOSITORY&&process.env.GITHUB_REPOSITORY!==policy.repository)throw Error('Unexpected budget repository');
   if(command==='acquire') {
     if(!process.env.GITHUB_RUN_ID||!process.env.GITHUB_RUN_ATTEMPT)throw Error('Missing CI run identity');
@@ -33,16 +37,28 @@ function main(argv) {
     return result;
   }
   if(command==='persist')return budget.persist(directory,policy,budget.storeFor(policy));
+  if(command==='provider')return (async()=>{
+    const key=process.env.CODENODE_EVAL_API_KEY,model=process.env.CODENODE_EVAL_MODEL;
+    if(!key||!model)throw Error('Explicit model and credential required for metadata check');
+    const endpoint=(process.env.CODENODE_EVAL_BASE_URL||'https://api.deepseek.com').replace(/\/+$/,'')+'/models';
+    const response=await fetch(endpoint,{headers:{authorization:'Bearer '+key},signal:AbortSignal.timeout(30000)});
+    if(!response.ok)throw Error('Model metadata check failed: HTTP '+response.status);
+    const value=/** @type {{data?:Array<{id?:string}>,[key:string]:unknown}} */ (await response.json());
+    if(!value||typeof value!=='object'||!Array.isArray(value.data)||!value.data.some(item=>item.id===model))throw Error('Selected model is not advertised by the configured endpoint');
+    protocol.atomicJson(path.join(directory,'provider-metadata.json'),protocol.redact({checkedAt:new Date().toISOString(),endpoint,selectedModel:model,response:value},[key]));
+    return {modelMetadataVerified:true,selectedModel:model,generationRequests:0};
+  })();
   if(command==='prepare') {
     const {prepare}=require('./eval-system.cjs');
-    const purpose=process.env.CODENODE_EVAL_PURPOSE||'diagnostic';
-    if(!['confirmation','diagnostic'].includes(purpose))throw Error('Unknown evaluation purpose');
     const created=prepare({output:path.join(directory,purpose),subset:purpose==='confirmation'?'holdout':'coding',
       ...(purpose==='diagnostic'?{subset:undefined,tasks:'coding-timeout-default',arms:'single'}:{}),
-      trials:purpose==='confirmation'?'2':'1',mode:'model',kind:purpose==='confirmation'?'confirmation':'pilot',
+      trials:purpose==='confirmation'?String(policy.trialsPerArm||2):'1',mode:'model',kind:purpose==='confirmation'?'confirmation':'pilot',
       isolation:'harbor',profile:'native-product','budget-ledger':path.join(directory,'token-ledger.json')});
+    if(purpose==='confirmation'&&policy.plannedAttempts&&created.attempts!==policy.plannedAttempts)throw Error('Prepared attempt count differs from the registered confirmation policy');
     protocol.atomicJson(path.join(directory,'ci-source.json'),{schemaVersion:1,repository:policy.repository,purpose,
-      runId:process.env.GITHUB_RUN_ID,sourceCommit:process.env.GITHUB_SHA,preparedAt:new Date().toISOString()});
+      runId:process.env.GITHUB_RUN_ID,sourceCommit:process.env.GITHUB_SHA,fundingLedgerId:policy.ledgerId,
+      fundingStatePath:policy.path,providerMetadataHash:fs.existsSync(path.join(directory,'provider-metadata.json'))?protocol.hash(fs.readFileSync(path.join(directory,'provider-metadata.json'))):null,
+      preparedAt:new Date().toISOString()});
     if(purpose==='confirmation') {
       const {reviewPack}=require('../lib/eval-reviews.cjs');
       reviewPack(require('./eval-system.cjs').readPlan(created.plan).taskSpecs,path.join(directory,'review-pack'));
@@ -67,7 +83,7 @@ function main(argv) {
     if(!value.pass)process.exitCode=1;
     return value;
   }
-  throw Error('Commands: acquire, prepare, persist, decision, fetch');
+  throw Error('Commands: acquire, provider, prepare, persist, decision, fetch');
 }
-if(require.main===module)Promise.resolve().then(()=>main(process.argv.slice(2))).then(r=>console.log(JSON.stringify(r,null,2))).catch(e=>{console.error(e.message);process.exitCode=1;});
+if(require.main===module)(async()=>console.log(JSON.stringify(await main(process.argv.slice(2)),null,2)))().catch(e=>{console.error(e.message);process.exitCode=1;});
 module.exports={main,verifySource,decision};
