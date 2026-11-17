@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "purpose": "trusted historical-source calibration; excluded from capability scores",
+  "tasks": [
+    {
+      "id": "repository-null-tools",
+      "family": "runtime-nullability",
+      "base": "e5b3871",
+      "fix": "1a03105",
+      "checker": "null-tools",
+      "paths": [
+        "electron/agent.cjs"
+      ],
+      "failure": "NULL_TOOL_CONTEXT",
+      "prompt": "Pure chat without a tool context crashes during workspace-cache initialization. Preserve normal behavior for null and undefined tools.",
+      "equivalent": [
+        {
+          "path": "electron/agent.cjs",
+          "from": "limits.workspaceCacheVersions === true, tools?.context",
+          "to": "limits.workspaceCacheVersions === true, tools && tools.context"
+        }
+      ],
+      "wrong": [
+        {
+          "path": "electron/agent.cjs",
+          "from": "limits.workspaceCacheVersions === true, tools?.context",
+          "to": "limits.workspaceCacheVersions === true, tools === null ? undefined : tools.context"
+        }
+      ],
+      "baseCommit": "e5b3871772a48ff3419f55dc9ade5e8487a95b5e",
+      "referenceCommit": "1a03105ab81fedaaefb22d971ca611c8e4eb085a",
+      "equivalentCommit": null,
+      "repository": "https://github.com/yimi528/CodeNode",
+      "provenance": "historical-commit-regression",
+      "admission": {
+        "status": "development-calibration-only",
+        "modelEligible": false,
+        "review": "unreviewed",
+        "reasons": [
+          "self-hosted runtime may contain the reference repair",
+          "trusted-process calibration is not an untrusted-candidate sandbox",
+          "independent task review pending"
+        ]
+      }
+    },
+    {
+      "id": "repository-deepseek-history",
+      "family": "provider-tool-history",
+      "base": "2ae1c8d",
+      "fix": "8d65fc3",
+      "checker": "deepseek-history",
+      "paths": [
+        "electron/agent.cjs",
+        "electron/modelProtocol.cjs"
+      ],
+      "failure": "DEEPSEEK_HISTORY",
+      "prompt": "Thinking-model tool and continuation turns lose provider reasoning history. Preserve full DeepSeek history while keeping tool execution intact.",
+      "equivalent": [
+        {
+          "path": "electron/agent.cjs",
+          "from": "res?.reasoning && /^deepseek-/i.test",
+          "to": "Boolean(res?.reasoning) && /^deepseek-/i.test"
+        }
+      ],
+      "wrong": [
+        {
+          "path": "electron/agent.cjs",
+          "from": "content: String(res.content || ''), ...assistantReasoning",
+          "to": "content: String(res.content || '')"
+        }
+      ],
+      "baseCommit": "2ae1c8d0cc36995ab749fda799fee04ffaa75968",
+      "referenceCommit": "8d65fc353857b6a2a390bf8d5ce74adbf8755f42",
+      "equivalentCommit": null,
+      "repository": "https://github.com/yimi528/CodeNode",
+      "provenance": "historical-commit-regression",
+      "admission": {
+        "status": "development-calibration-only",
+        "modelEligible": false,
+        "review": "unreviewed",
+        "reasons": [
+          "self-hosted runtime may contain the reference repair",
+          "trusted-process calibration is not an untrusted-candidate sandbox",
+          "independent task review pending"
+        ]
+      }
+    },
+    {
+      "id": "repository-budget-accounting",
+      "family": "budget-accounting",
+      "base": "e5b3871",
+      "fix": "40019c7",
+      "checker": "budget-accounting",
+      "paths": [
+        "scripts/lib/eval-transport.cjs"
+      ],
+      "failure": "LEDGER_ACCOUNTING",
+      "prompt": "Invalid reservations can corrupt the cumulative budget. Reject negative input, preserve unknown billing conservatively, and settle each request once.",
+      "equivalent": [
+        {
+          "path": "scripts/lib/eval-transport.cjs",
+          "from": "tokens <= 0",
+          "to": "tokens < 1"
+        }
+      ],
+      "wrong": [
+        {
+          "path": "scripts/lib/eval-transport.cjs",
+          "from": "known ? Math.max(usage, 0) : reserved",
+          "to": "known ? Math.max(usage, 0) : 0"
+        }
+      ],
+      "baseCommit": "e5b3871772a48ff3419f55dc9ade5e8487a95b5e",
+      "referenceCommit": "40019c723c3dba9722e70ca9567cd9f11c62d335",
+      "equivalentCommit": null,
+      "repository": "https://github.com/yimi528/CodeNode",
+      "provenance": "historical-commit-regression",
+      "admission": {
+        "status": "development-calibration-only",
+        "modelEligible": false,
+        "review": "unreviewed",
+        "reasons": [
+          "self-hosted runtime may contain the reference repair",
+          "trusted-process calibration is not an untrusted-candidate sandbox",
+          "independent task review pending"
+        ]
+      }
+    },
+    {
+      "id": "repository-partial-boundary",
+      "family": "statistical-calibration",
+      "base": "fac1afa",
+      "fix": "cde30e9",
+      "checker": "partial-boundary",
+      "paths": [
+        "scripts/lib/eval-statistics.cjs"
+      ],
+      "failure": "PARTIAL_BOUNDARY",
+      "prompt": "Partly constant task groups produce an overconfident small-sample gain. Reject that false precision while retaining support for sufficiently large effects.",
+      "equivalentCommit": "f5a2da92a9cb04a167d4eab6d266fc0284235195",
+      "equivalent": [],
+      "wrong": [
+        {
+          "path": "scripts/lib/eval-statistics.cjs",
+          "from": "const decision=!covered||boundaryInsufficient ? 'insufficient-evidence' : interval[0]>minimum ? 'improvement-supported' : interval[1]<-regression ? 'regression-supported' : 'inconclusive';",
+          "to": "const decision='insufficient-evidence';"
+        }
+      ],
+      "baseCommit": "fac1afa55dda5f32bef769b9497907eeecc11186",
+      "referenceCommit": "cde30e96246ec7796784a86969488d9e61378fe7",
+      "repository": "https://github.com/yimi528/CodeNode",
+      "provenance": "historical-commit-regression",
+      "admission": {
+        "status": "development-calibration-only",
+        "modelEligible": false,
+        "review": "unreviewed",
+        "reasons": [
+          "self-hosted runtime may contain the reference repair",
+          "trusted-process calibration is not an untrusted-candidate sandbox",
+          "independent task review pending"
+        ]
+      }
+    }
+  ]
+}

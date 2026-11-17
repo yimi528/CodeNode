@@ -298,7 +298,11 @@
     "test:eval-ci": "node scripts/core/eval-ci-test.cjs",
     "test:deepseek-reasoning": "node scripts/core/deepseek-reasoning-test.cjs",
     "test:harbor-result": "node scripts/core/harbor-result-test.cjs",
-    "eval:reanalyze-harbor": "node scripts/eval/reanalyze-harbor.cjs"
+    "eval:reanalyze-harbor": "node scripts/eval/reanalyze-harbor.cjs",
+    "test:eval-tool-metrics": "node scripts/core/eval-tool-metrics-test.cjs",
+    "test:repository-calibration": "node scripts/core/repository-calibration-test.cjs",
+    "eval:calibrate-traces": "node scripts/eval/calibrate-trace-metrics.cjs",
+    "eval:repository-quality": "node scripts/eval/repository-calibration.cjs"
   },
   "build": {
     "appId": "com.codenode.desktop",

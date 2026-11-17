@@ -31,7 +31,13 @@ function sensitiveFile(context, file) {
 
 function workingDirectory(context, cwd) {
   const target = resolveToolPath(context, cwd || '.');
-  if (!target || !fs.statSync(target).isDirectory()) throw Error('cwd 不存在或越过授权边界');
+  if (!target) throw Object.assign(Error('cwd 越过授权边界'),{code:'CWD_OUT_OF_ROOT'});
+  try {
+    if (!fs.statSync(target).isDirectory()) throw Object.assign(Error('cwd 不是目录'),{code:'ENOTDIR'});
+  } catch(error) {
+    if (['ENOENT','ENOTDIR'].includes(error.code)) throw Object.assign(Error('cwd 不存在或不是目录'),{code:'CWD_NOT_FOUND'});
+    throw Object.assign(Error('cwd 无法访问：'+error.message),{code:['EACCES','EPERM'].includes(error.code)?'PERMISSION_DENIED':'SYSTEM_ERROR'});
+  }
   return target;
 }
 

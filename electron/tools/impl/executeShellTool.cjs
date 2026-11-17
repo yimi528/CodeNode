@@ -336,30 +336,31 @@ function hasShellOperators(command) {
 }
 
 function invocation(context, args) {
+  const invalid=message=>Object.assign(Error(message),{code:'ARG_SCHEMA'});
   const benchmark = context.benchmarkContainer?.() === true;
   const mode = args.mode || (benchmark ? 'shell' : 'legacy');
-  if (!['argv', 'shell', 'legacy'].includes(mode) || args.mode === 'legacy') throw Error('无效执行模式');
+  if (!['argv', 'shell', 'legacy'].includes(mode) || args.mode === 'legacy') throw invalid('无效执行模式');
   let tokens, command, spec;
   if (mode === 'argv') {
     if (args.command != null || typeof args.program !== 'string' || !args.program.trim() ||
-        !Array.isArray(args.args) || args.args.some(arg => typeof arg !== 'string')) throw Error('argv 模式需要 program 和 args，不能同时传 command');
+        !Array.isArray(args.args) || args.args.some(arg => typeof arg !== 'string')) throw invalid('argv 模式需要 program 和 args，不能同时传 command');
     tokens = [args.program, ...args.args];
     command = tokens.map(value => JSON.stringify(value)).join(' ');
     spec = { file: args.program, args: args.args.slice() };
   } else {
-    if (args.program != null || args.args != null || typeof args.command !== 'string' || !args.command.trim()) throw Error('命令模式需要 command，不能同时传 program/args');
+    if (args.program != null || args.args != null || typeof args.command !== 'string' || !args.command.trim()) throw invalid('命令模式需要 command，不能同时传 program/args');
     command = args.command;
     if (mode === 'shell') {
-      if (!benchmark || process.platform === 'win32') throw Error('shell 模式仅在 POSIX 评测容器启用；桌面请使用 argv 或既有 cmd/powershell 入口');
+      if (!benchmark || process.platform === 'win32') throw Object.assign(Error('shell 模式仅在 POSIX 评测容器启用；桌面请使用 argv 或既有 cmd/powershell 入口'),{code:'EXECUTION_MODE_DENIED'});
       tokens = ['/bin/sh', '-c', command];
       spec = { file: '/bin/sh', args: ['-c', command] };
     } else {
       tokens = splitCommand(command);
-      if (!['cmd', 'powershell', 'pwsh'].includes(normalizeProgram(tokens[0])) && hasShellOperators(command)) throw Error('普通命令不解释 shell 运算符；请用 mode=argv 传递字面参数，或显式 cmd/powershell 入口');
+      if (!['cmd', 'powershell', 'pwsh'].includes(normalizeProgram(tokens[0])) && hasShellOperators(command)) throw invalid('普通命令不解释 shell 运算符；请用 mode=argv 传递字面参数，或显式 cmd/powershell 入口');
       spec = spawnSpec(normalizeProgram(tokens[0]), tokens);
     }
   }
-  if (!benchmark && !ALLOWED.has(normalizeProgram(tokens[0]))) throw Error('命令不在白名单：' + tokens[0]);
+  if (!benchmark && !ALLOWED.has(normalizeProgram(tokens[0]))) throw Object.assign(Error('命令不在白名单：' + tokens[0]),{code:'PROGRAM_NOT_ALLOWED',allowedPrograms:[...ALLOWED]});
   const cwd = workingDirectory(context, args.cwd);
   return { tokens, command, spec, execution: { executionMode: mode, cwd, program: spec.file } };
 }
@@ -405,7 +406,8 @@ function register(registry) {
       if (context.signal?.()?.aborted) return AgentToolResult.failure('CANCELLED', '已取消执行');
       let parsed;
       try { parsed = invocation(context, args); }
-      catch (error) { return AgentToolResult.failure('ARG_SCHEMA', error.message); }
+      catch (error) { return AgentToolResult.failure(error.code||'SYSTEM_ERROR', error.message,
+        error.allowedPrograms?{allowedPrograms:error.allowedPrograms}:undefined); }
       const { tokens, command, spec, execution } = parsed;
       const normalized = normalizeProgram(tokens[0]);
       const timeoutSeconds = typeof args.timeoutSeconds === 'number' && Number.isFinite(args.timeoutSeconds) ? Math.max(1, Math.floor(args.timeoutSeconds)) : 30;
@@ -480,7 +482,7 @@ function register(registry) {
       if (args.async === true) {
         const bgTimeout = typeof args.timeoutSeconds === 'number' && Number.isFinite(args.timeoutSeconds) ? Math.max(10, Math.floor(args.timeoutSeconds)) : 1800;
         const started = startBackgroundJob(root, spec, command, bgTimeout, context.signal && context.signal(), context, execution);
-        if (!started.jobId) return AgentToolResult.error('后台启动失败：' + (started.error || ''), { ...execution, command });
+        if (!started.jobId) return AgentToolResult.failure(context.signal?.()?.aborted?'CANCELLED':'SHELL_START_FAILED','后台启动失败：' + (started.error || ''), { ...execution, command });
         context.audit('execute_shell async=true jobId=' + started.jobId + ' command=' + command + ' timeout=' + bgTimeout);
         return AgentToolResult.ok(
           '已在后台启动命令（jobId=' + started.jobId + '，超时 ' + bgTimeout + ' 秒）。用 poll_job jobId="' + started.jobId + '" waitSeconds=5 轮询进度，任务完成后再继续后续步骤。',
@@ -496,7 +498,7 @@ function register(registry) {
           const env = safeEnvironment({ PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' });
           child = sandbox.guardedSpawn(spec, foregroundSpawnOptions(root, env, sandbox.currentPolicy(context), context));
         } catch (e) {
-          resolve(AgentToolResult.error('执行失败：' + describeSpawnError(e), { ...execution, command }));
+          resolve(AgentToolResult.failure('SHELL_START_FAILED','执行失败：' + describeSpawnError(e), { ...execution, command }));
           return;
         }
         // #19：收集侧有界（见 MAX_COLLECT_CHARS）—— 分页只限制返回的那一页，不是这里
@@ -533,7 +535,7 @@ function register(registry) {
         child.on('error', (e) => {
           clearTimeout(timer);
           cleanup();
-          resolve(AgentToolResult.error('执行失败：' + ((e && e.message) || e), { ...execution, command }));
+          resolve(AgentToolResult.failure('SHELL_START_FAILED','执行失败：' + ((e && e.message) || e), { ...execution, command }));
         });
         child.on('close', (exitCode) => {
           clearTimeout(timer);
@@ -612,7 +614,7 @@ function register(registry) {
           timer = setTimeout(finish, wait * 1000);
           signal && signal.addEventListener('abort', onAbort, { once: true });
         });
-        if (context.signal && context.signal() && context.signal().aborted) return AgentToolResult.error('轮询已取消', { jobId, status: 'cancelled' });
+        if (context.signal && context.signal() && context.signal().aborted) return AgentToolResult.failure('CANCELLED','轮询已取消', { jobId, status: 'cancelled' });
         sweepJobs();
         job = BACKGROUND_JOBS.get(jobId);
         if (!job) return AgentToolResult.error('后台任务已结束并被清理：' + jobId);
@@ -628,11 +630,12 @@ function register(registry) {
       }
       if (job.status === 'error') {
         BACKGROUND_JOBS.delete(jobId);
-        return AgentToolResult.error('后台任务执行失败：' + (job.error || '') + '\n' + collectedText(job).trim());
+        return AgentToolResult.failure('SHELL_START_FAILED','后台任务执行失败：' + (job.error || '') + '\n' + collectedText(job).trim(),
+          { ...job.execution, jobId, status: job.status, exitCode: job.exitCode, output: collectedText(job) });
       }
       if (job.status === 'cancelled') {
         BACKGROUND_JOBS.delete(jobId);
-        return AgentToolResult.error('后台任务已取消：' + jobId, { jobId, status: 'cancelled', exitCode: job.exitCode, output: collectedText(job) });
+        return AgentToolResult.failure('CANCELLED','后台任务已取消：' + jobId, { jobId, status: 'cancelled', exitCode: job.exitCode, output: collectedText(job) });
       }
       const done = job.status === 'done';
       const page = outputPage(collectedText(job), args.offset, args.maxChars, args.tail === true);

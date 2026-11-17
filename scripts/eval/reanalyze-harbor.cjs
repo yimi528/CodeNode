@@ -6,6 +6,7 @@ const crypto=require('node:crypto');
 const protocol=require('../lib/eval-protocol.cjs');
 const statistics=require('../lib/eval-statistics.cjs');
 const native=require('../lib/eval-harbor-result.cjs');
+const toolMetrics=require('../lib/eval-tool-metrics.cjs');
 
 // Reclassify archived events only. Never relocate by editing a sealed plan,
 // launch an agent/verifier, overwrite a grade, or replace the original report.
@@ -16,6 +17,7 @@ function reanalyze(input,output) {
   const bytes=relative=>{const file=protocol.safePath(input,relative),data=fs.readFileSync(file);inputs.push({path:relative,sha256:protocol.hash(data)});return data;};
   const json=relative=>JSON.parse(bytes(relative).toString('utf8'));
   const planBytes=bytes('confirmation/plan.json'),plan=JSON.parse(planBytes.toString('utf8'));
+  if(plan.primaryMetricVersion!=null&&!['legacy-arg-schema-v1',toolMetrics.VERSION].includes(plan.primaryMetricVersion))throw Error('Unsupported primary metric version');
   if(json('confirmation/plan.seal.json').sha256!==protocol.hash(planBytes)||protocol.hash(plan.taskSpecs)!==plan.taskHash)throw Error('Original plan seal mismatch');
   const sourceRoot=path.posix.dirname(plan.budgetLedger);
   const relative=original=>{
@@ -42,7 +44,11 @@ function reanalyze(input,output) {
     const status={...task.protocol,executionStatus:native.executionStatus(final)};
     status.delivered=protocol.verdict(status.executionStatus,status.gradingStatus,status.integrityStatus);
     const shell=final.toolCalls.find(c=>c.name==='execute_shell');
-    const firstShellValid=shell?(shell.ok===false&&shell.data?.code==='ARG_SCHEMA'?0:1):null;
+    const outcome=shell&&toolMetrics.classify(shell);
+    const accepted=outcome&&toolMetrics.acceptance(outcome);
+    const firstShellValid=plan.primaryMetricVersion===toolMetrics.VERSION
+      ? !shell||accepted===null?null:accepted?1:0
+      : shell?(shell.ok===false&&shell.data?.code==='ARG_SCHEMA'?0:1):null;
     if(firstShellValid!==row.firstShellValid)throw Error('Unexpected primary metric drift');
     return {...row,originalProtocol:row.protocol,protocol:status,availability:native.availability(final),
       firstShellValid,
@@ -57,7 +63,7 @@ function reanalyze(input,output) {
   const comparison=statistics.compareTasks(plan.taskSpecs.map(task=>({taskId:task.id,family:task.evaluation.family,weight:1/familyCounts[task.evaluation.family],
     baseline:rows.filter(r=>r.taskId===task.id&&r.arm==='baseline').map(r=>r.firstShellValid),
     improved:rows.filter(r=>r.taskId===task.id&&r.arm==='improved').map(r=>r.firstShellValid)})),{seed:plan.seed,minimumEffect:plan.minimumEffect,maxRegression:plan.maxRegression});
-  const sourceHash=protocol.hash(Buffer.concat([fs.readFileSync(__filename),fs.readFileSync(require.resolve('../lib/eval-harbor-result.cjs')),fs.readFileSync(require.resolve('../lib/eval-statistics.cjs'))]));
+  const sourceHash=protocol.hash(Buffer.concat([fs.readFileSync(__filename),fs.readFileSync(require.resolve('../lib/eval-harbor-result.cjs')),fs.readFileSync(require.resolve('../lib/eval-statistics.cjs')),fs.readFileSync(require.resolve('../lib/eval-tool-metrics.cjs'))]));
   const result={schemaVersion:1,analysisId:crypto.randomUUID(),analysisSourceHash:sourceHash,createdAt:new Date().toISOString(),
     sourceExperimentId:plan.experimentId,sourceCommit:source.sourceCommit,model:plan.model,profile:plan.profile,
     modelRequests:0,originalEvidenceUnchanged:true,gradesUnchanged:rows.every(r=>!r.reportFile||r.gradingUnchanged),

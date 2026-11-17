@@ -9,6 +9,8 @@ on:
       - 'scripts/lib/eval-*.cjs'
       - 'scripts/lib/coding-*.cjs'
       - 'scripts/core/eval-*.cjs'
+      - 'scripts/core/repository-calibration-test.cjs'
+      - 'scripts/core/harbor-result-test.cjs'
       - 'benchmarks/**'
       - '.github/workflows/agent-evaluation.yml'
       - '.github/workflows/agent-evaluation-live.yml'
@@ -16,6 +18,7 @@ on:
       - 'scripts/eval/eval-ci.cjs'
       - 'config/eval-budget-policy.json'
       - 'config/eval-confirmation-budget-policy.json'
+      - 'config/repository-eval-calibration.json'
   workflow_dispatch:
     inputs:
       live:
@@ -59,6 +62,10 @@ jobs:
       - run: npm run test:eval-campaign
       - run: npm run test:eval-ci
       - run: npm run test:harbor-result
+      - run: npm run test:eval-tool-metrics
+      - run: npm run test:repository-calibration
+      - name: Calibrate trusted historical repository contracts (no model calls)
+        run: npm run eval:repository-quality -- --repository=. --output=out/evals/repository-calibration
       - run: npm run test:eval -- --report-dir=out/evals/ci-contracts
       - if: always()
         uses: actions/upload-artifact@v7

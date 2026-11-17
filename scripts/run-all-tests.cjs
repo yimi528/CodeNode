@@ -52,6 +52,8 @@ const CORE = [
   'test:eval-ci',
   'test:deepseek-reasoning',
   'test:harbor-result',
+  'test:eval-tool-metrics',
+  'test:repository-calibration',
   'test:backend-workflow',
   'test:soul',
   'test:session',
