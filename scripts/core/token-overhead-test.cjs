@@ -140,7 +140,8 @@ async function runTurn(registry, script) {
   );
   const navigationNames = new Set(['find_definition', 'find_references', 'get_callers', 'get_callees']);
   const legacyTools = baseTools.filter((tool) => !navigationNames.has(tool.function.name) && !['inspect_subagent_retry', 'retry_subagent_task'].includes(tool.function.name));
-  const legacyGuide = agent.buildToolGuide(base.listTools().filter((tool) => !navigationNames.has(tool.name)));
+  const legacyNames = new Set(legacyTools.map(tool => tool.function.name));
+  const legacyGuide = agent.buildToolGuide(base.listTools().filter(tool => legacyNames.has(tool.name)));
   const legacyPure = agent.buildSystemPrompt(soul, '', legacyGuide, '', '', { prompt: '把 add 改成加法', canvasMode: 'auto' });
   const legacyCanvas = agent.buildSystemPrompt(soul, '[{"id":"n1"}]', legacyGuide, '', '', { prompt: '画布上建一条链路', canvasMode: 'always' });
   const legacyPureFixed = compaction.estimateTokens([{ role: 'system', content: legacyPure }], legacyTools);

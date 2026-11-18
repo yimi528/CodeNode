@@ -43,7 +43,7 @@ const PROJECT_SAVE_KEY = 'resource:project-save';
  * 从一次工具调用推出它要占用的资源键。只有写类工具会返回非空数组。
  * @param {string} name 工具名
  * @param {any} args 工具参数
- * @param {{projectRoot?: string}} [options]
+ * @param {{projectRoot?: string, accessRoot?: string}} [options]
  * @returns {string[]} 去重后的资源键
  */
 function resourceKeysFor(name, args, options = {}) {
@@ -53,7 +53,10 @@ function resourceKeysFor(name, args, options = {}) {
   const pushFile = (p) => {
     const raw = String(p || '').trim();
     if (!raw) return;
-    const abs = path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(projectRoot, raw);
+    const abs = ['write_file', 'edit_file', 'bulk_edit'].includes(name)
+      ? require('./paths.cjs').resolveToolPath({ projectRoot: () => projectRoot, accessRoot: () => options.accessRoot || projectRoot }, raw)
+      : path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(projectRoot, raw);
+    if (!abs) return;
     // 统一成 posix 风格：Windows 上反斜杠/大小写差异不能让同一个文件变成两把锁
     keys.push('file:' + canonicalPath(abs));
   };

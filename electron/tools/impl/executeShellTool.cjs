@@ -9,6 +9,7 @@ const { ConfirmationLevel } = require('../context.cjs');
 const { safeEnvironment } = require('../../envPolicy.cjs');
 const sandbox = require('../../sandbox.cjs');
 const shellGuard = require('../shellGuard.cjs');
+const { workingDirectory } = require('../paths.cjs');
 
 const ALLOWED = new Set([
   'mvn', 'mvnw', 'mvnw.cmd', 'git', 'java', 'javac', 'gradle', 'gradlew', 'gradlew.bat',
@@ -117,14 +118,13 @@ function sweepJobs() {
 }
 
 /** 后台启动一个白名单命令，立即返回 jobId。 */
-function startBackgroundJob(root, tokens, normalized, command, timeoutSeconds, signal, context) {
+function startBackgroundJob(root, spec, command, timeoutSeconds, signal, context, execution) {
   sweepJobs();
   if (signal && signal.aborted) return { jobId: null, error: '已取消执行' };
   const jobId = 'job-' + Date.now().toString(36) + '-' + (++jobSeq).toString(36);
   const env = safeEnvironment({ PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' });
   let child;
   try {
-    const spec = spawnSpec(normalized, tokens);
     // 经执行隔离层启动（Windows Job Object / Linux bwrap / macOS sandbox-exec）；
     // 策略关闭或无后端时自动退回原生 spawn，并在审计中留痕。
     child = sandbox.guardedSpawn(spec, {
@@ -137,7 +137,7 @@ function startBackgroundJob(root, tokens, normalized, command, timeoutSeconds, s
   } catch (e) {
     return { jobId: null, error: describeSpawnError(e) };
   }
-  const job = { jobId, projectRoot: root, command, startedAt: Date.now(), status: 'running', output: '', tail: '', droppedChars: 0, exitCode: null, error: /** @type {string|null} */ (null), child };
+  const job = { jobId, execution, projectRoot: context.projectRoot(), command, startedAt: Date.now(), status: 'running', output: '', tail: '', droppedChars: 0, exitCode: null, error: /** @type {string|null} */ (null), child };
   BACKGROUND_JOBS.set(jobId, job);
   const onAbort = () => {
     if (job.status !== 'running') return;
@@ -170,11 +170,11 @@ function startBackgroundJob(root, tokens, normalized, command, timeoutSeconds, s
   return { jobId };
 }
 
-function storeCompletedOutput(root, command, output, exitCode) {
+function storeCompletedOutput(root, command, output, exitCode, execution) {
   sweepJobs();
   const jobId = 'job-' + Date.now().toString(36) + '-' + (++jobSeq).toString(36);
   BACKGROUND_JOBS.set(jobId, {
-    jobId,
+    jobId, execution,
     projectRoot: root,
     command,
     startedAt: Date.now(),
@@ -321,42 +321,105 @@ function spawnSpec(base, tokens) {
   return { file: '/bin/sh', args: ['-lc', parts.join('; ') || 'true'] };
 }
 
+// This lexer only detects ambiguous legacy syntax; shell scripts are never
+// tokenized. Explicit argv goes to spawn without quote or platform rewriting.
+function hasShellOperators(command) {
+  let quote = '', escaped = false;
+  for (const c of command) {
+    if (escaped) { escaped = false; continue; }
+    if (c === '\\' && quote !== "'") { escaped = true; continue; }
+    if (quote) { if (c === quote) quote = ''; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if ('|&<>;\n\r`'.includes(c)) return true;
+  }
+  return false;
+}
+
+function invocation(context, args) {
+  const invalid=message=>Object.assign(Error(message),{code:'ARG_SCHEMA'});
+  const benchmark = context.benchmarkContainer?.() === true;
+  const mode = args.mode || (benchmark ? 'shell' : 'legacy');
+  if (!['argv', 'shell', 'legacy'].includes(mode) || args.mode === 'legacy') throw invalid('无效执行模式');
+  let tokens, command, spec;
+  if (mode === 'argv') {
+    if (args.command != null || typeof args.program !== 'string' || !args.program.trim() ||
+        !Array.isArray(args.args) || args.args.some(arg => typeof arg !== 'string')) throw invalid('argv 模式需要 program 和 args，不能同时传 command');
+    tokens = [args.program, ...args.args];
+    command = tokens.map(value => JSON.stringify(value)).join(' ');
+    spec = { file: args.program, args: args.args.slice() };
+  } else {
+    if (args.program != null || args.args != null || typeof args.command !== 'string' || !args.command.trim()) throw invalid('命令模式需要 command，不能同时传 program/args');
+    command = args.command;
+    if (mode === 'shell') {
+      if (!benchmark || process.platform === 'win32') throw Object.assign(Error('shell 模式仅在 POSIX 评测容器启用；桌面请使用 argv 或既有 cmd/powershell 入口'),{code:'EXECUTION_MODE_DENIED'});
+      tokens = ['/bin/sh', '-c', command];
+      spec = { file: '/bin/sh', args: ['-c', command] };
+    } else {
+      tokens = splitCommand(command);
+      if (!['cmd', 'powershell', 'pwsh'].includes(normalizeProgram(tokens[0])) && hasShellOperators(command)) throw invalid('普通命令不解释 shell 运算符；请用 mode=argv 传递字面参数，或显式 cmd/powershell 入口');
+      spec = spawnSpec(normalizeProgram(tokens[0]), tokens);
+    }
+  }
+  if (!benchmark && !ALLOWED.has(normalizeProgram(tokens[0]))) throw Object.assign(Error('命令不在白名单：' + tokens[0]),{code:'PROGRAM_NOT_ALLOWED',allowedPrograms:[...ALLOWED]});
+  const cwd = workingDirectory(context, args.cwd);
+  return { tokens, command, spec, execution: { executionMode: mode, cwd, program: spec.file } };
+}
+
+function auditInvocation(parsed, options) {
+  const reports = [shellGuard.analyzeShellCommand(parsed.command, options)];
+  if (parsed.execution.executionMode === 'argv') {
+    const [program, ...args] = parsed.tokens, base = normalizeProgram(program);
+    // Audit interpreter source as the actual argument bytes. JSON used in the
+    // display command escapes quotes and cannot be used as a source-code audit.
+    const flags = ['node'].includes(base) ? ['-e', '--eval', '-p', '--print'] :
+      ['python', 'python3', 'py'].includes(base) ? ['-c'] : ['powershell', 'pwsh'].includes(base) ? ['-command', '-c'] : base === 'cmd' ? ['/c', '/k'] : [];
+    for (let i = 0; i < args.length; i++) {
+      if (flags.includes(args[i].toLowerCase()) && args[i + 1] != null) reports.push(shellGuard.analyzeShellCommand(args[i + 1], options));
+      if (base === 'node' && /^--(?:eval|print)=/.test(args[i])) reports.push(shellGuard.analyzeShellCommand(args[i].slice(args[i].indexOf('=') + 1), options));
+    }
+  }
+  return Object.fromEntries(['outsideWrites', 'unresolvedWrites', 'network', 'reasons'].map(key => [key, [...new Set(reports.flatMap(report => report[key]))]]));
+}
+
 function register(registry) {
   registry.register(
     'execute_shell',
-      '在项目根目录执行跨平台白名单命令（mvn/mvnw/git/java/javac/go/python/node/npm/npx/cmd/powershell 等构建/工具命令）。' +
-      '命令会按当前系统适配；探索项目优先使用 scan_project / read_file。' +
-      '危险命令（删除/清理/强改/提交推送等）执行前需用户确认；超时自动强杀。' +
-      '【长任务】预估耗时超过约 30 秒的任务：用 async=true 后台执行（立即返回 jobId），再用 poll_job jobId=… waitSeconds=… 轮询进度与结果，不要一次性前台等待。',
+      'cwd 默认任务目录；mode=argv 原样执行 program+args。桌面受程序白名单和审批约束，旧 command 为程序模式。' +
+      '仅隔离评测容器支持任意程序及 mode=shell（command 原文交给 /bin/sh -c，旧 command 同样）。' +
+      '删除/清理/强改/提交/推送须确认，超时强杀。预计>30秒设 async=true，按返回的 jobId 用 poll_job/waitSeconds 轮询。',
     {
       type: 'object',
       properties: {
-        command: { type: 'string', description: '要执行的命令行' },
+        mode: { type: 'string', enum: ['argv', 'shell'] },
+        program: { type: 'string', minLength: 1 },
+        args: { type: 'array', items: { type: 'string' }, maxItems: 1000 },
+        cwd: { type: 'string', description: '单次工作目录；默认工程目录，不影响下一次调用' },
+        command: { type: 'string', description: 'shell 脚本或旧命令行；与 program/args 互斥' },
         timeoutSeconds: { type: 'integer', description: '超时秒数，默认 30；长任务请按预估耗时调大（如 300/600）' },
         async: { type: 'boolean', description: 'true = 后台执行立即返回 jobId（用于长任务），用 poll_job 轮询；默认 false 前台等待' },
         outputOffset: { type: 'integer', description: '同步命令输出起始游标，默认 0' },
         maxOutputChars: { type: 'integer', description: '单次返回的最大输出字符数，默认 12000；超出时返回 jobId 并用 poll_job 分页' },
       },
-      required: ['command'],
+      anyOf: [{ required: ['command'] }, { required: ['mode', 'program', 'args'] }],
     },
     async (context, args) => {
-      const command = String(args.command || '').trim();
-      if (!command) return AgentToolResult.error('缺少 command');
-      const tokens = splitCommand(command);
-      if (tokens.length === 0) return AgentToolResult.error('空命令');
-      // #8：白名单与「是否高危」共用这一个归一化结果（见 normalizeProgram）
+      if (context.signal?.()?.aborted) return AgentToolResult.failure('CANCELLED', '已取消执行');
+      let parsed;
+      try { parsed = invocation(context, args); }
+      catch (error) { return AgentToolResult.failure(error.code||'SYSTEM_ERROR', error.message,
+        error.allowedPrograms?{allowedPrograms:error.allowedPrograms}:undefined); }
+      const { tokens, command, spec, execution } = parsed;
       const normalized = normalizeProgram(tokens[0]);
-      if (!ALLOWED.has(normalized)) return AgentToolResult.error('命令不在白名单：' + tokens[0]);
       const timeoutSeconds = typeof args.timeoutSeconds === 'number' && Number.isFinite(args.timeoutSeconds) ? Math.max(1, Math.floor(args.timeoutSeconds)) : 30;
 
-      const root = context.projectRoot();
+      const root = execution.cwd;
       const policy = sandbox.currentPolicy(context);
       // 命令静态审计：Windows 后端（windows-job）**不隔离文件系统**，writeRoots 只对
       // Linux bwrap / macOS sandbox-exec 生效。越界写必须在能力层拒绝 —— 不能指望用户
       // 从「执行命令」这句确认文案里看出它要写到工作区外面（2026-09-15 实测复现）。
-      const guard = shellGuard.analyzeShellCommand(command, {
+      const guard = auditInvocation(parsed, {
         projectRoot: root,
-        writeRoots: policy && Array.isArray(policy.writeRoots) && policy.writeRoots.length ? policy.writeRoots : undefined,
+        writeRoots: policy && Array.isArray(policy.writeRoots) && policy.writeRoots.length ? policy.writeRoots : [context.accessRoot?.() || context.projectRoot()],
       });
       if (guard.outsideWrites.length) {
         const backend = (policy && policy.capabilities && policy.capabilities.backend) || 'none';
@@ -418,12 +481,12 @@ function register(registry) {
       // 后台执行：长任务立即返回 jobId，用 poll_job 轮询
       if (args.async === true) {
         const bgTimeout = typeof args.timeoutSeconds === 'number' && Number.isFinite(args.timeoutSeconds) ? Math.max(10, Math.floor(args.timeoutSeconds)) : 1800;
-        const started = startBackgroundJob(root, tokens, normalized, command, bgTimeout, context.signal && context.signal(), context);
-        if (!started.jobId) return AgentToolResult.error('后台启动失败：' + (started.error || ''));
+        const started = startBackgroundJob(root, spec, command, bgTimeout, context.signal && context.signal(), context, execution);
+        if (!started.jobId) return AgentToolResult.failure(context.signal?.()?.aborted?'CANCELLED':'SHELL_START_FAILED','后台启动失败：' + (started.error || ''), { ...execution, command });
         context.audit('execute_shell async=true jobId=' + started.jobId + ' command=' + command + ' timeout=' + bgTimeout);
         return AgentToolResult.ok(
           '已在后台启动命令（jobId=' + started.jobId + '，超时 ' + bgTimeout + ' 秒）。用 poll_job jobId="' + started.jobId + '" waitSeconds=5 轮询进度，任务完成后再继续后续步骤。',
-          { jobId: started.jobId, async: true, command, status: 'running', timeoutSeconds: bgTimeout }
+          { ...execution, jobId: started.jobId, async: true, command, status: 'running', timeoutSeconds: bgTimeout }
         );
       }
 
@@ -433,10 +496,9 @@ function register(registry) {
         let cancelled = false;
         try {
           const env = safeEnvironment({ PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' });
-          const spec = spawnSpec(normalized, tokens);
           child = sandbox.guardedSpawn(spec, foregroundSpawnOptions(root, env, sandbox.currentPolicy(context), context));
         } catch (e) {
-          resolve(AgentToolResult.error('执行失败：' + describeSpawnError(e)));
+          resolve(AgentToolResult.failure('SHELL_START_FAILED','执行失败：' + describeSpawnError(e), { ...execution, command }));
           return;
         }
         // #19：收集侧有界（见 MAX_COLLECT_CHARS）—— 分页只限制返回的那一页，不是这里
@@ -463,7 +525,7 @@ function register(registry) {
           context.audit('execute_shell ' + command + ' exit=TIMEOUT');
           // 超时强杀不是成功：ok=true 会让模型把「被杀掉的命令」当作已完成（实测后台 git 超时仍报成功）
           resolve(AgentToolResult.error('执行超时（' + timeoutSeconds + ' 秒），已强制终止\n' + output.trim(), {
-            code: 'TIMEOUT',
+            ...execution, code: 'TIMEOUT',
             exitCode: -1,
             command,
             timedOut: true,
@@ -473,21 +535,21 @@ function register(registry) {
         child.on('error', (e) => {
           clearTimeout(timer);
           cleanup();
-          resolve(AgentToolResult.error('执行失败：' + ((e && e.message) || e)));
+          resolve(AgentToolResult.failure('SHELL_START_FAILED','执行失败：' + ((e && e.message) || e), { ...execution, command }));
         });
         child.on('close', (exitCode) => {
           clearTimeout(timer);
           cleanup();
           if (cancelled) {
             context.audit('execute_shell ' + command + ' exit=CANCELLED');
-            resolve(AgentToolResult.error('执行已取消', { exitCode: -1, command, cancelled: true, output: collectedText(collected).slice(0, 4000) }));
+            resolve(AgentToolResult.error('执行已取消', { ...execution, exitCode: -1, command, cancelled: true, output: collectedText(collected).slice(0, 4000) }));
             return;
           }
           context.audit('execute_shell ' + command + ' exit=' + exitCode);
           const output = collectedText(collected);
           const page = outputPage(output, args.outputOffset, args.maxOutputChars, false);
           const paged = page.hasMore;
-          const jobId = paged ? storeCompletedOutput(root, command, output, exitCode) : null;
+          const jobId = paged ? storeCompletedOutput(context.projectRoot(), command, output, exitCode, execution) : null;
           const suffix = paged
             ? '\n输出过长，已返回第 ' + page.offset + '-' + page.nextOffset + '/' + page.totalChars + ' 字符；请使用 poll_job jobId="' + jobId + '" offset=' + page.nextOffset + ' 继续读取。'
             : '';
@@ -498,7 +560,7 @@ function register(registry) {
           // 失败路径**不动**：失败结果的 [data] 里 code/retryable/userActionRequired 是判据。
           const shellText = '退出码 ' + exitCode + truncNote + '\n' + page.output.trim() + suffix;
           resolve(AgentToolResult.ok(shellText, {
-            exitCode,
+            ...execution, exitCode,
             command,
             output: page.output,
             outputOffset: page.offset,
@@ -535,6 +597,7 @@ function register(registry) {
       sweepJobs();
       let job = BACKGROUND_JOBS.get(jobId);
       if (!job) return AgentToolResult.error('后台任务不存在或已清理：' + jobId);
+      if (require('node:path').resolve(job.projectRoot) !== require('node:path').resolve(context.projectRoot())) return AgentToolResult.error('后台任务不属于当前工程');
       const wait = typeof args.waitSeconds === 'number' && Number.isFinite(args.waitSeconds) ? Math.max(0, Math.min(60, Math.floor(args.waitSeconds))) : 0;
       if (wait > 0 && job.status === 'running') {
         await new Promise((resolve) => {
@@ -551,7 +614,7 @@ function register(registry) {
           timer = setTimeout(finish, wait * 1000);
           signal && signal.addEventListener('abort', onAbort, { once: true });
         });
-        if (context.signal && context.signal() && context.signal().aborted) return AgentToolResult.error('轮询已取消', { jobId, status: 'cancelled' });
+        if (context.signal && context.signal() && context.signal().aborted) return AgentToolResult.failure('CANCELLED','轮询已取消', { jobId, status: 'cancelled' });
         sweepJobs();
         job = BACKGROUND_JOBS.get(jobId);
         if (!job) return AgentToolResult.error('后台任务已结束并被清理：' + jobId);
@@ -562,16 +625,17 @@ function register(registry) {
         const page = outputPage(live, args.offset, args.maxChars, args.tail === true);
         return AgentToolResult.ok(
           '后台任务仍在运行（elapsed=' + Math.round((Date.now() - job.startedAt) / 1000) + 's，已输出 ' + live.length + ' 字符）。可继续 poll_job 或带 waitSeconds 等待。\n' + live.slice(-1500),
-          { jobId, status: 'running', startedAt: job.startedAt, elapsedMs: Date.now() - job.startedAt, ...page }
+          { ...job.execution, jobId, status: 'running', startedAt: job.startedAt, elapsedMs: Date.now() - job.startedAt, ...page }
         );
       }
       if (job.status === 'error') {
         BACKGROUND_JOBS.delete(jobId);
-        return AgentToolResult.error('后台任务执行失败：' + (job.error || '') + '\n' + collectedText(job).trim());
+        return AgentToolResult.failure('SHELL_START_FAILED','后台任务执行失败：' + (job.error || '') + '\n' + collectedText(job).trim(),
+          { ...job.execution, jobId, status: job.status, exitCode: job.exitCode, output: collectedText(job) });
       }
       if (job.status === 'cancelled') {
         BACKGROUND_JOBS.delete(jobId);
-        return AgentToolResult.error('后台任务已取消：' + jobId, { jobId, status: 'cancelled', exitCode: job.exitCode, output: collectedText(job) });
+        return AgentToolResult.failure('CANCELLED','后台任务已取消：' + jobId, { jobId, status: 'cancelled', exitCode: job.exitCode, output: collectedText(job) });
       }
       const done = job.status === 'done';
       const page = outputPage(collectedText(job), args.offset, args.maxChars, args.tail === true);
@@ -580,8 +644,8 @@ function register(registry) {
       const head = '后台任务' + (done ? '完成：退出码 ' + job.exitCode : '超时被强制终止') + '\n';
       const body = page.output.trim() + (page.hasMore ? '\n输出未读完，请使用 offset=' + page.nextOffset + ' 继续读取。' : '');
       return done
-        ? AgentToolResult.ok(head + body, { jobId, status: job.status, exitCode: job.exitCode, ...page })
-        : AgentToolResult.error(head + body, { code: 'TIMEOUT', jobId, status: job.status, exitCode: job.exitCode, timedOut: true, ...page });
+        ? AgentToolResult.ok(head + body, { ...job.execution, jobId, status: job.status, exitCode: job.exitCode, ...page })
+        : AgentToolResult.error(head + body, { ...job.execution, code: 'TIMEOUT', jobId, status: job.status, exitCode: job.exitCode, timedOut: true, ...page });
     }
   );
   require('../builtInOutputSchemas.cjs').declareOutputContracts(registry, ["execute_shell","poll_job"]);
@@ -591,6 +655,7 @@ function register(registry) {
 // 直接用生产同一份实现（用例自己重写一遍上限逻辑就等于没有锁住生产行为）。
 module.exports = {
   register,
+  invocation,
   BACKGROUND_JOBS,
   foregroundSpawnOptions,
   makeOutputCollector,

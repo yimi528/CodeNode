@@ -3,6 +3,7 @@
  * 超过 maxLines 截断并标注总行数；analyze=true 返回结构化摘要（import/class/function/变量）而非原文。
  */
 'use strict';
+const { resolveToolPath, sensitiveFile } = require('../paths.cjs');
 
 const fs = require('fs');
 const path = require('path');
@@ -11,7 +12,7 @@ const crypto = require('crypto');
 // worker 固定往返约 24ms —— 搬 worker 是净变慢，所以这里用上限把最坏情况钉住。
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 const { AgentToolResult } = require('../result.cjs');
-const { resolveInRoot, resolveFileFuzzy, detectLanguage, readTextFile, isSensitivePath } = require('./shared.cjs');
+const { resolveFileFuzzy, detectLanguage, readTextFile, isSensitivePath } = require('./shared.cjs');
 const fsRunner = require('../fsRunner.cjs');
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
@@ -103,7 +104,7 @@ function register(registry) {
       if (!relative) return AgentToolResult.error('缺少 path');
       if (isSensitivePath(relative)) return AgentToolResult.error('出于凭据保护，Agent 不能读取敏感文件：' + relative);
       const root = path.resolve(context.projectRoot());
-      const exact = resolveInRoot(root, relative);
+      const exact = resolveToolPath(context, relative);
       if (!exact) return AgentToolResult.error('路径越过项目边界');
       let file = exact;
       let fuzzyMatched = null;
@@ -121,7 +122,7 @@ function register(registry) {
       // #17：敏感判定必须落在 **realpath** 上。resolveInRoot 只保证 realpath 在根内，
       // 但仓库自带的符号链接（`notes.md -> .env`）在它眼里完全合法；只查模型给的 relative
       // 等于给凭据开了一条「改个名字就读」的通道，而 read_file 是凭据直接外发进上下文的那条路。
-      if (isSensitivePath(path.relative(fs.realpathSync(root), fs.realpathSync(file)))) {
+      if (sensitiveFile(context, file)) {
         return AgentToolResult.error('出于凭据保护，Agent 不能读取敏感文件：' + relative);
       }
 

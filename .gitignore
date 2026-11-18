@@ -36,3 +36,16 @@ docs/eval-reports/
 
 # 生成物：右侧侧栏 UI 校验截图（scripts/side-panel-check.cjs 输出）
 /out/
+
+# Optional evaluation tooling and local project instructions
+/AGENTS.md
+benchmarks/.venv/
+benchmarks/*.egg-info/
+benchmarks/**/__pycache__/
+
+# Local dependency symlinks are local artifacts too.
+/node_modules
+
+# Python bytecode is generated during SDK tests.
+**/__pycache__/
+*.py[cod]

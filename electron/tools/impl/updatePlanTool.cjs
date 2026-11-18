@@ -42,6 +42,7 @@ const INPUT_SCHEMA = {
           dependsOn: { type: 'array', description: '前置步骤 ID；被依赖步骤完成前不能开始', maxItems: planLib.MAX_DEPENDENCIES, items: { type: 'string', maxLength: planLib.MAX_STEP_ID_CHARS } },
           ownerTaskId: { type: 'string', description: '负责此步骤的子代理 taskId（需先用 delegate_task 创建）', maxLength: 120 },
           reason: { type: 'string', description: 'blocked/cancelled 必填：阻塞或取消原因', maxLength: planLib.MAX_REASON_CHARS },
+          hypothesis: { type: 'string', description: '待验证假设（未核实）', maxLength: 500 },
         },
         required: ['step', 'acceptanceCriteria', 'status'],
         additionalProperties: false,

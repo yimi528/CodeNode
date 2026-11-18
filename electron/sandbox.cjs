@@ -14,8 +14,9 @@
  *             文件系统与网络 = 本平台无等价无管理员方案，退回工具层路径边界（writeRoots 校验）。
  *   linux   → bubblewrap（bwrap）：只读根 + 工作区可写 + 可选断网，全部由内核 namespace 强制。
  *   darwin  → sandbox-exec：deny default + 全读 + 仅白名单目录可写 + 可选 deny network*。
- *   其它/后端缺失 → 能力为 none，strict 模式下拒绝执行（fail-closed），best-effort 模式下
- *             降级执行并写入审计（明确标注「未隔离」）。
+ *   其它/后端缺失 → 能力为 none；内置工具在 strict 模式下拒绝执行、best-effort 模式下
+ *             降级并写入审计。外部 Agent 自带文件/终端工具，除非用户显式关闭沙箱，
+ *             否则缺少真实文件系统隔离时一律拒绝启动。
  *
  * 三种策略模式（config/agent.properties → sandbox.mode）：
  *   off         完全关闭，走原生 spawn（等价旧行为）
@@ -348,10 +349,10 @@ function externalAgentPolicy(policy, options = {}) {
   if (!isolation.lifetime && caps.backend === 'none') degraded.push('lifetime');
   if (!isolation.filesystem) degraded.push('filesystem');
   const unsatisfied = [];
-  if (policy.mode === 'strict') {
-    if (caps.backend === 'none') unsatisfied.push('backend');
-    if (!isolation.filesystem) unsatisfied.push('filesystem');
-  }
+  // 外部 Agent 可以绕过 CodeNode 的工具层路径检查，best-effort 降级会把整个用户文件系统
+  // 暴露给它。这里对所有启用沙箱的模式 fail-closed；需要承担风险时必须显式 mode=off。
+  if (caps.backend === 'none') unsatisfied.push('backend');
+  if (!isolation.filesystem) unsatisfied.push('filesystem');
   return {
     ...policy,
     network: 'inherit',
@@ -363,6 +364,16 @@ function externalAgentPolicy(policy, options = {}) {
     externalAgent: true,
     access: readOnly ? 'read-only' : 'workspace-write',
   };
+}
+
+function requiresFailClosed(policy) {
+  return !!policy && (policy.mode === 'strict' || policy.externalAgent === true);
+}
+
+function unavailablePrefix(policy, subject = '当前平台') {
+  return policy && policy.externalAgent
+    ? '外部 Agent 必须在文件系统隔离中运行，但' + subject + '无法满足：'
+    : '隔离策略为 strict，但' + subject + '无法满足：';
 }
 
 // ---------------------------------------------------------------------------
@@ -412,9 +423,9 @@ function bwrapArgs(policy, spec) {
 function wrapCommand(policy, spec) {
   if (!policy || policy.mode === 'off') return null;
   const caps = policy.capabilities || {};
-  if (policy.mode === 'strict' && policy.unsatisfied && policy.unsatisfied.length) {
+  if (requiresFailClosed(policy) && policy.unsatisfied && policy.unsatisfied.length) {
     throw Object.assign(
-      new Error('隔离策略为 strict，但当前平台无法满足：' + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
+      new Error(unavailablePrefix(policy) + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
       { code: 'SANDBOX_UNAVAILABLE' }
     );
   }
@@ -553,8 +564,8 @@ function spawnWindowsJob(spec, options, policy, baseOptions, interactive = false
   const context = options.context;
   const helper = ensureWinJobHelper(options);
   if (!helper.ok) {
-    if (policy.mode === 'strict') {
-      throw Object.assign(new Error('隔离策略为 strict，但 Windows Job Object helper 不可用：' + helper.reason), {
+    if (requiresFailClosed(policy)) {
+      throw Object.assign(new Error(unavailablePrefix(policy, 'Windows Job Object helper') + helper.reason), {
         code: 'SANDBOX_UNAVAILABLE',
       });
     }
@@ -580,8 +591,8 @@ function spawnWindowsJob(spec, options, policy, baseOptions, interactive = false
   try {
     fs.writeFileSync(specFile, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
   } catch (error) {
-    if (policy.mode === 'strict') {
-      throw Object.assign(new Error('隔离策略为 strict，但无法写入 spec 文件：' + error.message), {
+    if (requiresFailClosed(policy)) {
+      throw Object.assign(new Error(unavailablePrefix(policy, 'Windows Job Object 规格文件') + error.message), {
         code: 'SANDBOX_UNAVAILABLE',
       });
     }
@@ -618,10 +629,10 @@ function guardedSpawn(spec, options = {}) {
 
   const context = options.context;
   const caps = policy.capabilities || {};
-  // strict = fail-closed：策略声明必须满足的隔离项无法满足时，拒绝执行而不是静默降级
-  if (policy.mode === 'strict' && policy.unsatisfied && policy.unsatisfied.length) {
+  // strict 与外部 Agent = fail-closed：策略声明必须满足的隔离项无法满足时，拒绝执行而不是静默降级
+  if (requiresFailClosed(policy) && policy.unsatisfied && policy.unsatisfied.length) {
     throw Object.assign(
-      new Error('隔离策略为 strict，但当前平台无法满足：' + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
+      new Error(unavailablePrefix(policy) + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
       { code: 'SANDBOX_UNAVAILABLE' }
     );
   }
@@ -659,9 +670,9 @@ function guardedMcpSpawn(spec, options = {}) {
   const baseOptions = { cwd, env, shell: false, windowsHide: true };
   if (!policy || policy.mode === 'off') return plainSpawn(spec.file, spec.args, baseOptions);
   const caps = policy.capabilities || {};
-  if (policy.mode === 'strict' && policy.unsatisfied && policy.unsatisfied.length) {
+  if (requiresFailClosed(policy) && policy.unsatisfied && policy.unsatisfied.length) {
     throw Object.assign(
-      new Error('隔离策略为 strict，但 MCP 所需的隔离项无法满足：' + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
+      new Error(unavailablePrefix(policy, policy.externalAgent ? '当前平台' : 'MCP 所需的隔离项') + policy.unsatisfied.join('、') + '（' + (caps.detail || '') + '）'),
       { code: 'SANDBOX_UNAVAILABLE' }
     );
   }
@@ -672,7 +683,7 @@ function guardedMcpSpawn(spec, options = {}) {
   try {
     wrapped = wrapCommand(policy, { ...spec, cwd, env });
   } catch (error) {
-    if (policy.mode === 'strict') throw error;
+    if (requiresFailClosed(policy)) throw error;
     audit(options.context, 'sandbox-mcp-fallback:' + error.message);
     return plainSpawn(spec.file, spec.args, baseOptions);
   }

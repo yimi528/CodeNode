@@ -55,7 +55,7 @@ function sessionPlanFile(projectRoot, sessionId) {
  * 失败分支带 error + code（供工具直接回给模型，让它改参数重试）。
  * @param {any} rawItems
  * @param {{previousItems?: Array<any>}} [options]
- * @returns {{ok: true, items: Array<{id: string, step: string, acceptanceCriteria: string, status: string, evidenceCallIds?: string[], reason?: string, dependsOn?: string[], ownerTaskId?: string}>}|{ok: false, error: string, code: string}}
+ * @returns {{ok: true, items: Array<{id: string, step: string, acceptanceCriteria: string, status: string, evidenceCallIds?: string[], reason?: string, dependsOn?: string[], ownerTaskId?: string, hypothesis?: string}>}|{ok: false, error: string, code: string}}
  */
 function normalizePlan(rawItems, options = {}) {
   if (!Array.isArray(rawItems)) {
@@ -107,6 +107,8 @@ function normalizePlan(rawItems, options = {}) {
     if (!acceptanceCriteria) return { ok: false, error: `items[${i}].acceptanceCriteria 不能为空（写清这一步如何验收）`, code: 'ARG_SCHEMA' };
     if (acceptanceCriteria.length > MAX_ACCEPTANCE_CHARS) return { ok: false, error: `items[${i}].acceptanceCriteria 超过 ${MAX_ACCEPTANCE_CHARS} 字符`, code: 'ARG_SCHEMA' };
     const status = String(raw.status == null ? '' : raw.status).trim();
+    const hypothesis = String(raw.hypothesis == null ? previous?.hypothesis || '' : raw.hypothesis).trim();
+    if (hypothesis.length > 500) return { ok: false, error: 'hypothesis 超过 500 字符', code: 'ARG_SCHEMA' };
     if (!PLAN_STATUSES.includes(status)) {
       return { ok: false, error: `items[${i}].status 必须是 ${PLAN_STATUSES.join('|')} 之一`, code: 'ARG_SCHEMA' };
     }
@@ -134,7 +136,7 @@ function normalizePlan(rawItems, options = {}) {
     }
     const ownerTaskId = String(raw.ownerTaskId == null ? (previous && previous.ownerTaskId) || '' : raw.ownerTaskId).trim();
     if (ownerTaskId.length > 120) return { ok: false, error: `items[${i}].ownerTaskId 最多 120 字符`, code: 'ARG_SCHEMA' };
-    items.push({ id, step, acceptanceCriteria, status, ...(evidenceCallIds.length ? { evidenceCallIds } : {}), ...(reason ? { reason } : {}), ...(dependsOn.length ? { dependsOn } : {}), ...(ownerTaskId ? { ownerTaskId } : {}) });
+    items.push({ id, step, acceptanceCriteria, status, ...(hypothesis ? { hypothesis } : {}), ...(evidenceCallIds.length ? { evidenceCallIds } : {}), ...(reason ? { reason } : {}), ...(dependsOn.length ? { dependsOn } : {}), ...(ownerTaskId ? { ownerTaskId } : {}) });
   }
   for (const old of previousItems) {
     if (old && old.id && !usedIds.has(String(old.id))) {
@@ -198,7 +200,7 @@ function isTerminalPlan(plan) {
 
 /**
  * 渲染成给模型看的文本（工具结果与进度提示共用 —— 两处文案必须同源，否则模型看到两种口径）。
- * @param {{items?: Array<{id?: string, step: string, acceptanceCriteria?: string, status: string, evidenceCallIds?: string[], reason?: string, dependsOn?: string[], ownerTaskId?: string}>}|null} plan
+ * @param {{items?: Array<{id?: string, step: string, acceptanceCriteria?: string, status: string, evidenceCallIds?: string[], reason?: string, dependsOn?: string[], ownerTaskId?: string, hypothesis?: string}>}|null} plan
  * @returns {string}
  */
 function renderPlan(plan) {
@@ -211,6 +213,7 @@ function renderPlan(plan) {
     if (i.status === 'completed' && Array.isArray(i.evidenceCallIds)) lines.push('  证据调用：' + i.evidenceCallIds.join('、'));
     if (Array.isArray(i.dependsOn) && i.dependsOn.length) lines.push('  前置步骤：' + i.dependsOn.join('、'));
     if (i.ownerTaskId) lines.push('  子代理任务：' + i.ownerTaskId);
+    if (i.hypothesis) lines.push('  待验证假设（模型陈述）：' + i.hypothesis);
     if (i.reason) lines.push('  说明：' + i.reason);
     return lines.join('\n');
   }).join('\n');
@@ -243,7 +246,7 @@ function migrateLegacyPlan(parsed) {
 /**
  * 读取该 run 的计划（不存在/损坏都返回 null —— 调用方按"没有计划"处理，不抛）。
  * @param {string} projectRoot @param {string} runId
- * @returns {{items: Array<{id: string, step: string, acceptanceCriteria: string, status: string, evidenceCallIds?: string[], reason?: string, dependsOn?: string[], ownerTaskId?: string}>, updatedAt?: string, runId?: string, sessionId?: string}|null}
+ * @returns {{items: Array<{id: string, step: string, acceptanceCriteria: string, status: string, evidenceCallIds?: string[], reason?: string, dependsOn?: string[], ownerTaskId?: string, hypothesis?: string}>, updatedAt?: string, runId?: string, sessionId?: string}|null}
  */
 function readPlan(projectRoot, runId) {
   if (!projectRoot || !runId) return null;
@@ -273,7 +276,7 @@ function readSessionPlan(projectRoot, sessionId) {
 /**
  * 原子写入计划（目录不存在时自动建）。
  * @param {string} projectRoot @param {string} runId
- * @param {Array<{id?: string, step: string, acceptanceCriteria?: string, status: string, evidenceCallIds?: string[], reason?: string, dependsOn?: string[], ownerTaskId?: string}>} items
+ * @param {Array<{id?: string, step: string, acceptanceCriteria?: string, status: string, evidenceCallIds?: string[], reason?: string, dependsOn?: string[], ownerTaskId?: string, hypothesis?: string}>} items
  * @param {{updatedAt?: string, sessionId?: string}} [meta]
  * @returns {string|null} 实际写入的文件路径；无 runId / 写失败返回 null
  */

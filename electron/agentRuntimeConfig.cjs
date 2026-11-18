@@ -31,6 +31,10 @@ function configNumber(cfg, key, fallback, min, max) {
 function configList(cfg, key) {
   return String(cfg[key] || '').split(',').map(item => item.trim()).filter(Boolean);
 }
+function configFlag(cfg, key, fallback) {
+  if (cfg[key] == null) return fallback;
+  return String(cfg[key]).replace(/\s+#.*$/, '').trim().toLowerCase() !== 'false';
+}
 
 const REASONING_EFFORT_DEFAULT = 'medium';
 const REASONING_EFFORT_OFF = new Set(['none', 'off', 'false', 'no', '-', 'null', 'disabled']);
@@ -67,6 +71,11 @@ function parseSandboxConfig(cfg) {
 
 function parseLimitsConfig(cfg) {
   return {
+    budgetWrapUp: configFlag(cfg, 'agent.budget.wrap_up', false),
+    noProgressDetection: configFlag(cfg, 'agent.no_progress.enabled', false),
+    noProgressRounds: configInteger(cfg, 'agent.no_progress.rounds', 3, 2, 20),
+    workspaceCacheVersions: configFlag(cfg, 'agent.cache.workspace_versions', true),
+    workingState: configFlag(cfg, 'agent.working_state.enabled', false),
     progressEvery: configInteger(cfg, 'agent.progress_every', 3, 0, 50),
     outputTiers: cfg['agent.output_budget_tiers'] == null ? true : String(cfg['agent.output_budget_tiers']).toLowerCase() !== 'false',
     toolMaxTokens: configInteger(cfg, 'agent.output_budget_tool', 12000, 1000, 200000),
@@ -92,6 +101,7 @@ module.exports = {
   configInteger,
   configNumber,
   configList,
+  configFlag,
   parseReasoningEffort,
   parseReliabilityConfig,
   parseSandboxConfig,

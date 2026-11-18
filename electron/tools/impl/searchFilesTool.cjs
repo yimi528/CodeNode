@@ -2,12 +2,12 @@
  * search_files：跨项目文件按正则搜索内容（UTF-8 文本），返回 文件:行号:内容。跳过构建/缓存/二进制。
  */
 'use strict';
+const { resolveToolPath } = require('../paths.cjs');
 
 const fs = require('fs');
-const path = require('path');
 const { AgentToolResult } = require('../result.cjs');
 const { shouldSkipDir, isBinaryFileName } = require('../toolFiles.cjs');
-const { globToRegExp, isSensitivePath, resolveInRoot, isCancelled } = require('./shared.cjs');
+const { globToRegExp, isSensitivePath, isCancelled } = require('./shared.cjs');
 const fsRunner = require('../fsRunner.cjs');
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -41,11 +41,9 @@ function register(registry) {
         : DEFAULT_MAX_RESULTS;
       const offset = typeof args.offset === 'number' && Number.isFinite(args.offset) ? Math.max(0, Math.floor(args.offset)) : 0;
       const caseSensitive = args.caseSensitive === true;
-      const root = path.resolve(context.projectRoot());
       const subDir = String(args.path || '').trim();
-      const start = resolveInRoot(root, subDir || '.');
+      const start = resolveToolPath(context, subDir || '.');
       if (!start) return AgentToolResult.error('路径越过项目边界');
-      if (start !== root && !start.startsWith(root + path.sep)) return AgentToolResult.error('路径越过项目边界');
       if (!fs.existsSync(start) || !fs.statSync(start).isDirectory()) return AgentToolResult.error('目录不存在：' + (subDir || '.'));
       let regex;
       try {
@@ -67,7 +65,7 @@ function register(registry) {
       const outcome = await fsRunner.runFsTask(
         'searchFiles',
         {
-          root,
+          root: start,
           start,
           pattern: patternText,
           caseSensitive,

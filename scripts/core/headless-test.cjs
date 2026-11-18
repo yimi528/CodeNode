@@ -197,6 +197,21 @@ function runCli(args, env) {
     check('[E] 有 result 行且带 runId/state/content', !!result && /^run-/.test(String(result.runId)) && result.state === 'COMPLETED' && /结构化输出/.test(String(result.content)), JSON.stringify(result && { runId: result.runId, state: result.state }));
   }
 
+  {
+    const contract = path.join(root, 'acceptance.json');
+    fs.writeFileSync(contract, JSON.stringify({version:1,artifacts:[{id:'required',path:'missing.txt',maxBytes:10}]}));
+    const mock = await startScriptedServer([{content:'已完成'},{content:'已完成'}]);
+    const res = await runCli(['--project',root,'--prompt','交付文件','--acceptance-file',contract,'--json'], {CODENODE_API_KEY:'fixture',CODENODE_BASE_URL:'http://127.0.0.1:'+mock.port,CODENODE_MODEL:'mock-model'});
+    await mock.stop();
+    const result = res.stdout.split(/\r?\n/).map(line=>{try{return JSON.parse(line)}catch{return null}}).find(row=>row?.kind==='result');
+    check('[F] 显式文件缺失：CLI 退出 1，FAILED，独立验收失败且只给一次修正',res.code===1&&result?.state==='FAILED'&&result?.taskAcceptance?.status==='failed'&&mock.requests.length===2,JSON.stringify({code:res.code,result}));
+    const expanded = await runCli(['--project',root,'--prompt','x','--access-root',path.dirname(root)],{CODENODE_API_KEY:'fixture'});
+    check('[F] 桌面入口不能用参数扩大访问范围',expanded.code===2&&/仅允许评测/.test(expanded.stderr));
+    fs.writeFileSync(contract, JSON.stringify({version:1,artifacts:[{id:'bad',path:'missing.txt',maxByte:10}]}));
+    const invalid = await runCli(['--project',root,'--prompt','x','--acceptance-file',contract],{CODENODE_API_KEY:'fixture'});
+    check('[F] 错误验收配置在模型请求前拒绝',invalid.code===2&&/任务验收配置错误/.test(invalid.stderr));
+  }
+
   try {
     fs.rmSync(root, { recursive: true, force: true });
   } catch {}

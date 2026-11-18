@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "repository": "yimi528/CodeNode",
+  "branch": "codex/agent-evaluation-budget",
+  "path": "state.json",
+  "ledgerId": "2655e414-d88e-4b3e-a250-2ebcb7c9eaaa",
+  "limit": 1000000,
+  "minimumCharged": 882845,
+  "minimumReported": 482782,
+  "minimumStartTokens": 70404,
+  "minimumStartBasis": "Observed initial native-product request reservation in run 43697561600; does not increase the total allowance.",
+  "authorization": "Continue the existing one-million-token authorization; no additional funding."
+}

@@ -1,0 +1,103 @@
+name: Agent evaluation evidence
+
+on:
+  pull_request:
+    paths:
+      - 'electron/**'
+      - 'bin/codenode-agent.cjs'
+      - 'scripts/eval/**'
+      - 'scripts/lib/eval-*.cjs'
+      - 'scripts/lib/coding-*.cjs'
+      - 'scripts/core/eval-*.cjs'
+      - 'scripts/core/repository-calibration-test.cjs'
+      - 'scripts/core/harbor-result-test.cjs'
+      - 'benchmarks/**'
+      - '.github/workflows/agent-evaluation.yml'
+      - '.github/workflows/agent-evaluation-live.yml'
+      - '.github/workflows/capability-release.yml'
+      - 'scripts/eval/eval-ci.cjs'
+      - 'config/eval-budget-policy.json'
+      - 'config/eval-confirmation-budget-policy.json'
+      - 'config/repository-eval-calibration.json'
+  workflow_dispatch:
+    inputs:
+      live:
+        type: boolean
+        default: false
+        description: Run a bounded model pilot using configured secrets
+  workflow_call:
+    inputs:
+      live:
+        type: boolean
+        default: false
+        required: false
+  schedule:
+    - cron: '17 19 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-evaluation-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:development-log
+      - run: npm run eval:quality
+      - run: npm run test:eval-quality
+      - run: npm run test:coding-grader
+      - run: npm run test:eval-system
+      - run: npm run test:eval-campaign
+      - run: npm run test:eval-ci
+      - run: npm run test:harbor-result
+      - run: npm run test:eval-tool-metrics
+      - run: npm run test:repository-calibration
+      - name: Calibrate trusted historical repository contracts (no model calls)
+        run: npm run eval:repository-quality -- --repository=. --output=out/evals/repository-calibration
+      - run: npm run test:eval -- --report-dir=out/evals/ci-contracts
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-evaluation-contract-evidence
+          path: out/evals/
+          retention-days: 14
+
+  isolated-verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: docker pull node:22.23.1-bookworm-slim
+      - run: npm run test:eval-docker
+      - name: Install pinned Harbor SDK
+        run: |
+          python3 -m venv /tmp/codenode-eval-tooling
+          /tmp/codenode-eval-tooling/bin/pip install uv==0.9.5
+          /tmp/codenode-eval-tooling/bin/uv sync --project benchmarks --locked
+      - run: npm run test:benchmark-adapter
+      - run: npm run test:eval-harbor-smoke
+
+  moved-live-entry:
+    if: github.event_name == 'workflow_dispatch' && inputs.live
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::Paid model runs moved to agent-evaluation-live.yml; its persistent budget cannot be bypassed."
+          exit 1

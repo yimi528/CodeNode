@@ -34,7 +34,7 @@ const executionContextBases = new WeakMap();
 
 /** 所有能力都可用的方法（跨切面） */
 const COMMON_METHODS = Object.freeze([
-  'projectRoot', 'model', 'runId', 'sourceMessageId', 'taskId', 'role', 'readOnly', 'signal', 'cancelled', 'fsWorkerEnabled',
+  'projectRoot', 'accessRoot', 'benchmarkContainer', 'model', 'runId', 'sourceMessageId', 'taskId', 'role', 'readOnly', 'signal', 'cancelled', 'fsWorkerEnabled',
   'confirm', 'notifyState', 'setStateNotifier', 'conversationHistory', 'ragConfig',
   'checkpointMessages', 'beginSideEffect', 'commitSideEffect', 'failSideEffect', 'skillMaxChars', 'webSearchConfig',
 ]);
@@ -180,7 +180,10 @@ function createExecutionContext(source, descriptor, callInfo) {
   const attemptId = info.attemptId == null ? (toolCallId ? toolCallId + '#1' : null) : String(info.attemptId);
   const networkDenied = safeCall(() => {
     const policy = typeof base.sandbox === 'function' ? base.sandbox() : null;
-    return !!(policy && policy.network === 'deny');
+    if (!policy || policy.network !== 'deny') return false;
+    // 用户在搜索设置里只授权了 web_search 访问所选端点；不放开 shell、MCP 或其他网络工具。
+    const search = toolName === 'web_search' && typeof base.webSearchConfig === 'function' ? base.webSearchConfig() : null;
+    return !(search && search.networkAllowed === true);
   }, false);
 
   const ctx = {};

@@ -1,9 +1,9 @@
 'use strict';
+const { resolveToolPath } = require('../paths.cjs');
 const fs = require('fs');
-const path = require('path');
 const { AgentToolResult } = require('../result.cjs');
 const { ConfirmationLevel } = require('../context.cjs');
-const { resolveInRoot, checkExpectedHash, sha256OfFile } = require('./shared.cjs');
+const { checkExpectedHash, sha256OfFile } = require('./shared.cjs');
 const { atomicWriteFile } = require('../../atomicFile.cjs');
 const { fileChangeReview } = require('../fileChangeReview.cjs');
 const editing = require('../../safeEditing.cjs');
@@ -22,7 +22,7 @@ function register(registry) {
     }, required: ['path'], anyOf: [{ required: ['oldText', 'newText'] }, { required: ['replacements'] }],
   }, async (context, args) => {
     const relative = String(args.path || '').trim();
-    const file = resolveInRoot(path.resolve(context.projectRoot()), relative);
+    const file = resolveToolPath(context, relative);
     if (!relative || !file) return AgentToolResult.error('路径越过项目边界或缺少 path');
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return AgentToolResult.error('文件不存在：' + relative);
     try {
