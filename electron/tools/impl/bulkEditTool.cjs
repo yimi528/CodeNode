@@ -111,8 +111,6 @@ function detailFor(action, args) {
   return sb.join('\n');
 }
 
-module.exports = { createNodes, createFiles, createAssets, deleteNodes, detailFor, describe, MAX_BATCH };
-
 async function createNodes(context, args) {
   const count = Math.max(1, Math.min(MAX_BATCH, intArg(args, 'count', 1)));
   const baseName = stringArg(args, 'name', '节点');

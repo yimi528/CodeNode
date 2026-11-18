@@ -216,7 +216,7 @@ function normalizeKindContract(kind, patch) {
  * 声明一个族工具的 kind 表。键 = kind 名；值 = 该 kind 的安全语义。
  * 返回值是冻结对象，适合直接塞进 descriptor.byKind。
  * @param {Record<string, any>} table
- * @returns {Readonly<Record<string, any>>}
+ * @returns {Readonly<Record<string, any>>|null} 空表 / 非对象时返回 null（调用方按「没有 kind 表」处理）
  */
 function normalizeByKind(table) {
   if (!table || typeof table !== 'object') return null;

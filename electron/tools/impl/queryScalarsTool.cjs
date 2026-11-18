@@ -41,7 +41,8 @@ async function execute(context, args) {
   const key = String(a.key || '').trim();
   const prefix = String(a.prefix || '').trim();
   const query = String(a.query || '').trim();
-  const max = Number.isFinite(a.max) && a.max > 0 ? Math.floor(a.max) : 50;
+  // typeof 先收窄：checkJs 不给 `a.max > 0` / `Math.floor(a.max)` 做「已排除 undefined」的推断
+  const max = typeof a.max === 'number' && Number.isFinite(a.max) && a.max > 0 ? Math.floor(a.max) : 50;
   const out = [];
   if (key) {
     for (const one of key.split(',')) {

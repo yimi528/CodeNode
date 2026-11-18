@@ -206,7 +206,6 @@ function register(registry) {
         prefix: { type: 'string', description: '标量前缀查询（如 node: 列出全部节点，node:task- 列出该前缀）；与 keys 并用时先精确后前缀' },
         key: { type: 'string', description: '标量精确 key（可逗号分隔多个，如 node:n1,node:n1:prompt）；等价于 keys 的单值形式' },
         max: { type: 'integer', description: 'mode=scalar 时最多返回条数，默认 50' },
-        query: { type: 'string', description: '主要检索问题、符号名、关键概念，或标量 key（如 node:n1）。名字/prompt/具体数据类查询无需知道精确 key，auto 会按语义在标量库中查找' },
         path: { type: 'string', description: '可选：限定到项目内目录，如 src 或 docs' },
         filePattern: { type: 'string', description: '可选：文件 glob，如 **/*.ts 或 docs/**' },
         topK: { type: 'integer', description: '返回片段数，默认由 rag.top_k 配置，最大 20' },

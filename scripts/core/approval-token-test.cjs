@@ -135,13 +135,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
    * 判据改成「按 kind 解出后**确实**声明了 requiresConfirmation」——合并前后强制力不变。
    */
   const declared = [];
-  for (const [name, args] of [
+  /** @type {Array<[string, any]>} */
+  const confirmCases = [
     ['workbench_edit', {}],
     ['workbench_edit', { kind: 'save_project' }],
     ['workbench_edit', { kind: 'bulk_delete_nodes', nodeIds: ['x'] }],
     ['get_workbench_model', { view: 'focus' }],
     ['memory', { action: 'save', content: 'x' }],
-  ]) {
+  ];
+  for (const [name, args] of confirmCases) {
     const descriptor = declRegistry.descriptorOf(name);
     if (!descriptor) continue;
     const effective = descriptorLib.effectiveDescriptor(descriptor, args);

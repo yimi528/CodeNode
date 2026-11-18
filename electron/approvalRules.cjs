@@ -93,7 +93,8 @@ function addRule(projectRoot, rule) {
 /**
  * 命中检查（纯函数）。
  * @param {Array<any>} rules
- * @param {{capability?: string|null, tool?: string|null, level?: string|null}} req
+ * @param {{capability?: string|null, tool?: string|null, aliasedTool?: string|null, level?: string|null}} req
+ *   aliasedTool —— 走旧名别名时「模型原本请求的名字」；规则文件里可能写着旧名，命中他即可
  * @returns {any|null}
  */
 function matchRule(rules, req) {

@@ -92,7 +92,7 @@ class ApprovalService {
 
   /**
    * 申请审批：只有 confirm 处理器明确返回 true 才签发令牌。
-   * @param {{capability?: string|null, level?: string, what?: string, detail?: string, scope?: any, toolCallId?: string|null, attemptId?: string|null}} req
+   * @param {{capability?: string|null, level?: string, what?: string, detail?: string, scope?: any, toolCallId?: string|null, attemptId?: string|null, aliasedTool?: string|null}} req
    * @returns {Promise<any|null>} 令牌或 null（未批准 / 无审批通道）
    */
   async request(req) {
@@ -202,7 +202,7 @@ class ApprovalService {
    * 用途：审计 P0-3 的动作级取舍 —— 意图分类唯一能改变的是「本来会放行 → 强制问一次」。
    *   - 命中了免打扰规则（`ruleAllows`）→ 静态层直接放行 → 分类**有意义**；
    *   - 没命中（`wouldAsk`）→ 静态层无论如何都要问用户 → 分类改不了结果，不必先花一次调用。
-   * @param {{capability?: string|null, tool?: string|null, level?: string, scope?: any}} [req]
+   * @param {{capability?: string|null, tool?: string|null, level?: string, scope?: any, aliasedTool?: string|null}} [req]
    * @returns {{available: boolean, ruleAllows: boolean, wouldAsk: boolean, rule: object|null, scope: any}}
    */
   preview(req = {}) {

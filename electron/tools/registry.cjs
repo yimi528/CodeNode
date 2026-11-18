@@ -131,6 +131,18 @@ function closeInputSchema(schema) {
   return { ...schema, additionalProperties: false };
 }
 
+/**
+ * 别名声明（`registerAlias` 的第二个参数）——调用方写的样子：只有 `family` 必填，
+ * 其余按需给。以前这里只声明了 `kind`/`note`，于是 `defaults`/`kindFromArgs`/
+ * `actionToView` 在 checkJs 眼里全是「不认识的属性」，CI 的静态检查直接红。
+ * @typedef {{family: string, kind?: string, defaults?: Record<string, any>, kindFromArgs?: Record<string, string>, actionToView?: boolean, note?: string}} AliasTargetInput
+ */
+
+/**
+ * 别名登记后的样子：字段已归一（未给的变成 ''/null/false），`resolveAlias` 直接消费这份。
+ * @typedef {{family: string, kind: string, defaults: Record<string, any>|null, kindFromArgs: Record<string, string>|null, actionToView: boolean, note: string}} AliasTargetRecord
+ */
+
 class AgentToolRegistry {
   constructor(options) {
     this.tools = new Map(); // name -> { spec, descriptor, executor }
@@ -142,7 +154,7 @@ class AgentToolRegistry {
      * 调过这些名字的消息，都还在用旧名。别名让「调用侧零改动、上下文照省」：
      * 别名**不注册成工具**（不进 `tools`、不进 schema、不占 token），只在 `execute` 时翻译成
      * 「族名 + kind」。
-     * @type {Map<string, {family: string, kind: string, note?: string}>}
+     * @type {Map<string, AliasTargetRecord>}
      */
     this.aliases = new Map();
     this.allowedTools = options && options.allowedTools ? new Set(options.allowedTools) : null;
@@ -379,14 +391,19 @@ class AgentToolRegistry {
   /**
    * 登记一个旧名别名。别名不进注册表 schema（不占 token），只在 execute 时翻译。
    * @param {string} legacyName 旧工具名（模型历史 / 角色白名单 / 用例里用的那个）
-   * @param {{family: string, kind?: string, defaults?: any, note?: string}} target
-   *   family  —— 目标族/工具名
-   *   kind    —— 可选：给族工具注入的 `kind`
-   *   defaults —— 可选：给目标工具注入的默认参数（如 query_scalars → mode=scalar）
+   * @param {AliasTargetInput} target
+   *   family     —— 目标族/工具名
+   *   kind       —— 可选：给族工具注入的 `kind`
+   *   defaults   —— 可选：给目标工具注入的默认参数（如 query_scalars → mode=scalar）
+   *   kindFromArgs —— 可选：旧 `action` → 新 `kind` 的映射表（bulk_edit 这类一字段多动作的旧工具）
+   *   actionToView —— 可选：旧 `action` 取值与族工具的 `view` 同源（ui_control → get_workbench_model）
+   *   note       —— 可选：审计用的说明
    */
   registerAlias(legacyName, target) {
     const from = String(legacyName || '').trim();
-    const t = target || {};
+    // `target || {}` 在宽松档（scripts 的 tsconfig 不带 strictNullChecks）会被推成
+    // `AliasTargetInput | {}`，属性访问随即全部报「不存在」——显式断言回声明形状
+    const t = /** @type {AliasTargetInput} */ (target || {});
     const family = String(t.family || '').trim();
     if (!from) throw new Error('别名需要 legacyName');
     if (!family) throw new Error('别名需要 family');

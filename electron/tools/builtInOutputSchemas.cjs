@@ -173,17 +173,12 @@ const schemas = {
   ask_user: object({ answer: str }),
   fetch_url: object({ url: nonempty, chars: nat, bytes: nat, truncated: bool }),
   save_project: object({ filePath: nonempty }),
-  code_review: object({ findings: list(object({ severity: str, message: nonempty, line: nullable(integer) })), total: nat, source: str }),
-  project_info: object({ buildSystem: nonempty, mainCandidates: strings, modules: strings, jdks: strings,
-    languages: dict(nat), fileCount: nat, root: nonempty, workerMode: nonempty, cancelled: { const: false }, scanned: nat }),
+  // code_review / project_info / analyze_project 已收编进 project_overview（见下方族契约）：
+  // 旧名只是别名，运行期解析到族工具，所以这里**不再**为旧名各留一份契约
+  // （同名键写两遍不仅等于死代码，还会让 checkJs 直接报 TS1117）。
   scan_project: object({ root: nonempty, workerMode: nonempty, workerFallback: nullable(str),
     sourceFiles: nat, assetFiles: nat, fileCount: nat, languageSummary: dict(nat), tree: strings, appliedToWorkbench: bool,
   }, ['root', 'workerMode', 'sourceFiles', 'assetFiles', 'fileCount', 'languageSummary', 'tree']),
-  analyze_project: object({ root: nonempty, workerMode: nonempty, buildSystem: nonempty,
-    mainCandidates: strings, modules: strings, jdks: strings, sourceFileCount: nat, assetFileCount: nat,
-    languageSummary: dict(nat), files: list(object({ relativePath: str, name: str, language: str, ext: str, lineCount: nat })), analyzedFileCount: nat,
-    fileAnalysis: list(object({ path: str, language: str, imports: strings, classes: strings, functions: strings, variables: strings, lineCount: nat })),
-  }, ['root', 'workerMode', 'buildSystem', 'mainCandidates', 'modules', 'jdks', 'sourceFileCount', 'assetFileCount', 'languageSummary', 'files', 'analyzedFileCount']),
   get_workbench_model: choice(
     // 读画布（原 get_workbench_model）。`allOf` 必须挂在**这个分支**上：
     // 族化之后整份契约是 anyOf，若把 allOf 挂在 anyOf 外层，视口动作的输出

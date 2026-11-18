@@ -120,6 +120,7 @@ function context() {
       ['workbench_edit', 'requiredCapability', 'workspace.write'],
     ];
     /** 旧名 → (族名, 参数)：收编后的语义必须逐字等价 */
+    /** @type {Array<[string, string, any, string, string]>} */
     const absorbedAgainst = [
       ['fetch_url', 'web', { kind: 'fetch' }, 'requiredCapability', 'network.request'],
       ['save_project', 'workbench_edit', { kind: 'save_project' }, 'requiredCapability', 'project.save'],

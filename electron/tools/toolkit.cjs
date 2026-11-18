@@ -203,10 +203,14 @@ function filterByConfig(registry, config) {
      * `retrieve_context` 现在是**检索 + 标量库**唯一的入口（收编了 query_scalars）。
      * 所以 `ragEnabled=false` 只裁掉文件检索能力，工具本身必须留着 —— 否则画布节点的精确属性
      * （prompt/goal/members）就没人能读了。关闭体现在 `mode=file/vector` 分支上（那两条需要索引）。
+     *
+     * 注意这里**只**声明「RAG 关了」，不 `continue` 跳过下面的名单过滤：`tools.allowed`
+     * 是显式白名单（用户配置 / 用例 / 角色契约都可能给），跳过它等于让白名单静默多出一个工具。
+     * 2026-11-18：正是这个 `continue` 让 `toolsAllowed:['read_file']` 也拿到了
+     * `retrieve_context`（工具面 +800 字符），把「压缩后仍然超窗」的用例顶成假红。
      */
     if (spec.name === 'retrieve_context' && cfg.ragEnabled === false) {
       registry.declareContract('retrieve_context', { ragDisabled: true });
-      continue;
     }
     /**
      * 联网：`web` 是**族**（fetch/search/dify）。fetch 是不依赖任何后端的公网抓取，按原来的口径它
