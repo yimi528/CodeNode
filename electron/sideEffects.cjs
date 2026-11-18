@@ -22,32 +22,110 @@ const { redact } = require('./redaction.cjs');
 
 /** 只读工具：可安全重复执行（结果相同，不产生副作用） */
 const READ_TOOLS = new Set([
-  'read_file', 'list_directory', 'find_files', 'search_files', 'scan_project', 'analyze_project',
-  'find_definition', 'find_references', 'get_callers', 'get_callees',
-  'get_workbench_model', 'query_scalars', 'project_info', 'code_review', 'retrieve_context',
-  'read_project', 'read_run', 'poll_job', 'ask_user', 'user_memory_read',
+  'read_file', 'list_files', 'search_files', 'scan_project', 'project_overview',
+  'symbol_nav', 'retrieve_context',
+  'poll_job', 'ask_user', 'user_memory_read',
   'inspect_subagent_retry',
 ]);
 
-/** 写工具：本地状态变更，幂等键可去重 */
+/**
+ * 写工具：本地状态变更，幂等键可去重。
+ * 族工具（memory / get_workbench_model）**故意不在这里**：它们的副作用按 kind 不同，
+ * 由 `classify(name, args)` 走 KIND_EFFECTS 判定（见下）。
+ */
 const WRITE_TOOLS = new Set([
-  'write_file', 'edit_file', 'bulk_edit', 'write_analysis_md', 'workbench_edit',
-  'save_project', 'memory_save', 'user_memory_save', 'apply_patch', 'rename_file', 'review_subagent_result',
+  'write_file', 'edit_file', 'workbench_edit',
+  'memory_save', 'user_memory_save', 'apply_patch', 'rename_file', 'review_subagent_result',
 ]);
 
 /** 外部副作用（不可完全观测）：永不自动重放，只做人工核对 */
 const UNKNOWN_TOOLS = new Set([
-  'execute_shell', 'run_project', 'delegate_subagent', 'subagent', 'ui_control', 'run_workflow',
+  'execute_shell', 'run_project', 'delegate_subagent', 'subagent', 'run_workflow',
+  'web',
 ]);
 
-function classify(toolName) {
+/**
+ * 副作用分类。
+ *
+ * 工具面收敛后（见 docs/tool-consolidation.zh-CN.md），一个工具名可以承载多个 `kind`，
+ * 而「这个动作能不能重放」正是按 kind 不同的（`memory` 的 save 是写、search 是读）。
+ * 所以这里接受第二个参数：
+ *   - `args`（或直接给 kind 字符串）：族工具的 descriptor 在 `byKind` 里声明的 `effect` 优先；
+ *   - 没给 args 时退回按名字判定 —— **与本合并方案之前逐字节一致**，老调用点不受影响。
+ * @param {string} toolName
+ * @param {any} [args]
+ * @returns {'read'|'write'|'unknown'}
+ */
+function classify(toolName, args) {
   const name = String(toolName || '').trim();
   if (!name) return 'unknown';
+  const byKindEffect = resolveKindEffect(name, args);
+  if (byKindEffect) return byKindEffect;
   if (READ_TOOLS.has(name)) return 'read';
   if (WRITE_TOOLS.has(name)) return 'write';
   if (UNKNOWN_TOOLS.has(name)) return 'unknown';
   // 未登记的工具按最保守处理：未知副作用
   return 'unknown';
+}
+
+/**
+ * 族工具的 kind → 副作用类别。
+ *
+ * 与各 impl 里 `byKind` 的 `effect` 声明**必须一致**（用例会核对）。
+ * 只有「与族名默认不同」的 kind 需要登记：未登记的 kind 返回 null →
+ * classify 退回按名字判定（该名字若是写族则仍是 write）。
+ * 判别字段默认是 `kind`；`get_workbench_model` 用 `view`（见 KIND_FIELD）。
+ */
+const KIND_EFFECTS = Object.freeze({
+  memory: Object.freeze({ save: 'write', search: 'read' }),
+  web: Object.freeze({ fetch: 'unknown', search: 'unknown', dify: 'unknown' }),
+  symbol_nav: Object.freeze({ definition: 'read', references: 'read', callers: 'read', callees: 'read' }),
+  list_files: Object.freeze({ glob: 'read', dir: 'read' }),
+  project_overview: Object.freeze({ info: 'read', structure: 'read', review: 'read' }),
+  retrieve_context: Object.freeze({ auto: 'read', file: 'read', vector: 'read', hybrid: 'read', scalar: 'read' }),
+  // workbench_edit 是写族：全部 kind 都是 write（写文件/写工程/改画布）
+  workbench_edit: Object.freeze({
+    bulk_create_nodes: 'write', bulk_create_files: 'write', bulk_create_assets: 'write',
+    bulk_delete_nodes: 'write', save_project: 'write', write_analysis: 'write',
+  }),
+  // get_workbench_model 的**判别字段是 view**：读画布是 read，视口动作对外部不可观测 → unknown
+  get_workbench_model: Object.freeze({
+    full: 'read', counts: 'read',
+    view_all: 'unknown', focus: 'unknown', zoom: 'unknown', pan: 'unknown', resize: 'unknown', toggle_panel: 'unknown',
+  }),
+});
+
+/** 族工具的判别字段名（必须与各 impl 的 descriptor.kindField 一致） */
+const KIND_FIELD = Object.freeze({
+  get_workbench_model: 'view',
+  // memory 用 action（把 `kind` 留给记忆类型 note/preference/fact/decision）
+  memory: 'action',
+});
+
+/**
+ * 从族工具的参数解出本次调用的副作用类别。
+ * @param {string} name
+ * @param {any} [args]
+ */
+function resolveKindEffect(name, args) {
+  if (args == null) return null;
+  let table = null;
+  if (typeof args === 'object' && args) {
+    // 优先用调用方直接塞进来的 descriptor（registry 已按 kind 解出 sideEffect）
+    if (typeof args.effectiveDescriptor === 'object' && args.effectiveDescriptor) {
+      const eff = args.effectiveDescriptor.sideEffect;
+      return ['read', 'write', 'unknown'].includes(eff) ? eff : null;
+    }
+    table = KIND_EFFECTS[name] || null;
+    if (!table) return null;
+    // 判别字段：默认 kind；get_workbench_model 用 view（与 descriptor 的 kindField 对齐）
+    const field = KIND_FIELD[name] || 'kind';
+    const key = String(args[field] || '').trim().toLowerCase();
+    if (!key) return null;
+    const hit = Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null;
+    return ['read', 'write', 'unknown'].includes(hit) ? hit : null;
+  }
+  return null;
 }
 
 function digest(value) {
@@ -465,6 +543,7 @@ module.exports = {
   SideEffectLedger,
   createGuard,
   classify,
+  KIND_EFFECTS,
   digest,
   idempotencyKey,
   canonicalArgsText,

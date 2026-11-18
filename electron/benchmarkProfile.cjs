@@ -1,6 +1,7 @@
 'use strict';
 const ARGV_GUIDE = '执行普通程序优先使用 execute_shell 的 argv 形式，例如 {"mode":"argv","program":"node","args":["test/public.cjs"]}；不要在普通 command 参数中混用管道或分号。复合命令需遵循工具声明的显式 shell 契约。';
-const TOOLS = ['read_file','write_file','edit_file','find_files','search_files','list_directory','execute_shell','poll_job'];
+// 工具面收敛后：find_files/list_directory → list_files（allowed 白名单用的是**注册名**，别名不进白名单）
+const TOOLS = ['read_file','write_file','edit_file','list_files','search_files','execute_shell','poll_job'];
 function apply(cfg, env = process.env) {
   if (env.CODENODE_BENCHMARK_CONTAINER !== '1') throw Error('benchmark profile requires an evaluator-owned container');
   if (!env.CODENODE_API_KEY) throw Error('benchmark profile requires an explicit CODENODE_API_KEY');

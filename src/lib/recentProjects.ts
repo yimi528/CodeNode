@@ -27,10 +27,13 @@ function dirOf(filePath: string): string {
   return String(filePath || '').replace(/[\\/][^\\/]*$/, '');
 }
 
-function sameProject(a: RecentProject, b: RecentProject): boolean {
-  const norm = (s?: string) => String(s || '').replace(/[\\/]+$/, '').toLowerCase();
-  if (norm(a.file) && norm(b.file)) return norm(a.file) === norm(b.file);
-  return norm(a.root) === norm(b.root);
+export function recentPathKey(path?: string): string {
+  return (path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+export function sameRecentProject(a: Pick<RecentProject, 'root' | 'file'>, b: Pick<RecentProject, 'root' | 'file'>): boolean {
+  if (a.file || b.file) return !!a.file && !!b.file && recentPathKey(a.file) === recentPathKey(b.file);
+  return recentPathKey(a.root) === recentPathKey(b.root);
 }
 
 export function readRecentProjects(): RecentProject[] {
@@ -95,7 +98,7 @@ export function rememberRecentProject(input: { root?: string | null; file?: stri
     name: input.name || nameOf(file || root),
     openedAt: Date.now(),
   };
-  const list = [entry, ...readRecentProjects().filter((x) => !sameProject(x, entry))];
+  const list = [entry, ...readRecentProjects().filter((x) => !sameRecentProject(x, entry))];
   writeRecent({ list, entry });
   void window.codenode?.recentProjectsRemember?.(entry).catch(() => {});
 }
@@ -112,7 +115,7 @@ export async function loadRecentProjects(): Promise<RecentProject[]> {
     if (!result?.ok) return local;
     const persisted = (result.projects || []).map(entry => ({ ...entry, openedAt: Number(entry.openedAt) || 0 }));
     const merged: RecentProject[] = [];
-    for (const entry of [...persisted, ...local].sort((a, b) => b.openedAt - a.openedAt)) if (!merged.some(item => sameProject(item, entry))) merged.push(entry);
+    for (const entry of [...persisted, ...local].sort((a, b) => b.openedAt - a.openedAt)) if (!merged.some(item => sameRecentProject(item, entry))) merged.push(entry);
     writeRecent({ list: merged });
     return merged.slice(0, MAX);
   } catch { return local; }
@@ -125,7 +128,7 @@ export function forgetRecentProject(target: { root?: string; file?: string }): R
     name: '',
     openedAt: 0,
   };
-  const list = readRecentProjects().filter((x) => !sameProject(x, key));
+  const list = readRecentProjects().filter((x) => !sameRecentProject(x, key));
   writeRecent({ list });
   void window.codenode?.recentProjectsForget?.(target).catch(() => {});
   return list;

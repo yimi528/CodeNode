@@ -59,7 +59,7 @@ interface ProjectState {
   setProjectFile: (filePath: string | null) => void;
 }
 
-function buildTree(files: { relPath: string; size: number }[]): FileNode[] {
+export function buildTree(files: { relPath: string; size: number }[]): FileNode[] {
   const root: FileNode[] = [];
   const map = new Map<string, FileNode>();
 

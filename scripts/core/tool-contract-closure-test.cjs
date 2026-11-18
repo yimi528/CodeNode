@@ -101,6 +101,12 @@ function context() {
     const legacy = descriptors.filter((d) => d.source !== 'explicit');
     check('C1 全部工具的契约都是显式声明（source=explicit）', legacy.length === 0, JSON.stringify(legacy.map((d) => d.name)));
 
+    /**
+     * 工具面收敛（docs/tool-consolidation.zh-CN.md）：`fetch_url` / `save_project` / `ui_control`
+     * 已并入族工具，不再是注册工具 —— 它们的语义现在由族工具的 `byKind` 承接。
+     * 所以这里按「族名 + kind」核对，而不是按旧名查 `descriptorOf`（那会返回 null）。
+     */
+    const effective = (name, args) => descriptorLib.effectiveDescriptor(registry.descriptorOf(name), args);
     /** @type {Array<[string, string, any]>} */
     const expectations = [
       // name, 字段, 期望值
@@ -110,16 +116,23 @@ function context() {
       ['write_file', 'mutatesWorkspace', true],
       ['write_file', 'idempotent', true],
       ['execute_shell', 'requiredCapability', 'shell.execute'],
-      ['fetch_url', 'requiredCapability', 'network.request'],
-      ['save_project', 'requiredCapability', 'project.save'],
       ['scan_project', 'requiredCapability', 'workspace.write'],
       ['workbench_edit', 'requiredCapability', 'workspace.write'],
-      ['ui_control', 'requiredCapability', 'ui.interact'],
+    ];
+    /** 旧名 → (族名, 参数)：收编后的语义必须逐字等价 */
+    const absorbedAgainst = [
+      ['fetch_url', 'web', { kind: 'fetch' }, 'requiredCapability', 'network.request'],
+      ['save_project', 'workbench_edit', { kind: 'save_project' }, 'requiredCapability', 'project.save'],
+      ['ui_control', 'get_workbench_model', { view: 'focus' }, 'requiredCapability', 'ui.interact'],
     ];
     const wrong = [];
     for (const [name, field, expected] of expectations) {
       const d = registry.descriptorOf(name);
       if (!d || d[field] !== expected) wrong.push({ name, field, actual: d && d[field], expected });
+    }
+    for (const [legacyName, family, args, field, expected] of absorbedAgainst) {
+      const d = effective(family, args);
+      if (!d || d[field] !== expected) wrong.push({ name: legacyName + '→' + family, field, actual: d && d[field], expected });
     }
     check('C2 显式契约的语义与 descriptor.cjs 名单一致', wrong.length === 0, JSON.stringify(wrong));
 
@@ -134,15 +147,21 @@ function context() {
       }));
     check('C4 S7 显式审批的画布类工具仍是 WRITE 级',
       registry.descriptorOf('workbench_edit').requiresConfirmation === 'WRITE' &&
-        registry.descriptorOf('ui_control').requiresConfirmation === 'WRITE' &&
-        registry.descriptorOf('save_project').requiresConfirmation === 'WRITE',
+        effective('get_workbench_model', { view: 'focus' }).requiresConfirmation === 'WRITE' &&
+        effective('workbench_edit', { kind: 'save_project' }).requiresConfirmation === 'WRITE',
       JSON.stringify(registry.listDescriptors().filter((d) => d.requiresConfirmation).map((d) => d.name + ':' + d.requiresConfirmation)));
 
-    check('C5 字段名撞车的语义没被漂移：readOnly 名单与后续 declareContract 一致',
-      descriptors.every((d) => d.readOnly === descriptorLib.READ_ONLY_TOOLS.has(d.name) ||
-        // scan_project 是「条件写入者」：名单里在只读集合内，但 mutatesWorkspace=true
-        d.name === 'scan_project'),
-      JSON.stringify(descriptors.filter((d) => d.readOnly !== descriptorLib.READ_ONLY_TOOLS.has(d.name)).map((d) => d.name)));
+    /**
+     * C5 的口径要跟上族化：族工具的 readOnly 由 `byKind` 决定，族级字段取的是**最保守值**，
+     * 因此不能再用「族级 readOnly === READ_ONLY_TOOLS.has(name)」来判。这里改成：
+     *   ① 非族工具仍按名单核对；
+     *   ② 族工具的每个 kind 都必须能在 byKind 里查到（否则执行时会 fail-closed 成写）。
+     */
+    check('C5 字段名撞车的语义没被漂移：单义工具与 READ_ONLY 名单一致；族工具每个 kind 都有声明',
+      descriptors.every((d) => (descriptorLib.FAMILY_TOOLS.has(d.name)
+        ? !!d.byKind && Object.keys(d.byKind).length > 0
+        : d.readOnly === descriptorLib.READ_ONLY_TOOLS.has(d.name) || d.name === 'scan_project')),
+      JSON.stringify(descriptors.filter((d) => !descriptorLib.FAMILY_TOOLS.has(d.name) && d.readOnly !== descriptorLib.READ_ONLY_TOOLS.has(d.name) && d.name !== 'scan_project').map((d) => d.name)));
 
     // 「文件在、工具却没注册」是一种静默漂移：每个工具实现都必须进入默认注册表。
     const implDir = path.join(__dirname, "../../electron/tools/impl");

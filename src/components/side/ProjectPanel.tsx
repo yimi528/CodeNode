@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useProjectStore, type FileNode } from '../../store/projectStore';
 import { useUiStore } from '../../store/uiStore';
 import { openProject } from '../../lib/projectActions';
@@ -92,57 +92,31 @@ function TreeRow({
 
 const TreeRowMemo = memo(TreeRow);
 
-/**
- * 标签页 2：项目树（原左侧「项目管理」栏的上半部分）。
- * 点击文件直接载入内容，并同步载入编辑器草稿。
- */
-export default function ProjectPanel({ onOpen, embedded = false }: { onOpen: (relPath: string) => void; embedded?: boolean }) {
-  const root = useProjectStore((s) => s.root);
-  const projectFile = useProjectStore((s) => s.projectFile);
-  const tree = useProjectStore((s) => s.tree);
-  const loading = useProjectStore((s) => s.loading);
-  const error = useProjectStore((s) => s.error);
-  const selected = useProjectStore((s) => s.selected);
-  const dirty = useProjectStore((s) => s.dirty);
-  const refresh = useProjectStore((s) => s.refresh);
-  const fileFilter = useProjectStore((s) => s.fileFilter);
-  const setFileFilter = useProjectStore((s) => s.setFileFilter);
-  const openFile = useProjectStore((s) => s.openFile);
-  const setSideOpen = useUiStore((s) => s.setSideOpen);
-
+export function ProjectFileTree({
+  root, tree, loading, error, selectedPath, dirty, fileFilter, setFileFilter, onOpen, workspaceLabel, actions,
+}: {
+  root: string | null;
+  tree: FileNode[];
+  loading: boolean;
+  error: string | null;
+  selectedPath: string | null;
+  dirty?: boolean;
+  fileFilter: string;
+  setFileFilter: (value: string) => void;
+  onOpen: (relPath: string) => void;
+  workspaceLabel: ReactNode;
+  actions: ReactNode;
+}) {
   const visible = useMemo(() => filterTree(tree, fileFilter), [tree, fileFilter]);
   const fileCount = useMemo(() => countFiles(tree), [tree]);
-  const rootName = root ? root.split(/[\\/]/).filter(Boolean).pop() : null;
-  const fileName = projectFile ? projectFile.split(/[\\/]/).filter(Boolean).pop() : null;
-
-  const handleOpen = useCallback(
-    (relPath: string) => {
-      if (useProjectStore.getState().selected?.relPath === relPath && useProjectStore.getState().dirty) { onOpen(relPath); return; }
-      void openFile(relPath).then(() => { if (useProjectStore.getState().selected?.relPath === relPath) onOpen(relPath); }).catch(() => useUiStore.getState().setToast('文件读取失败'));
-    },
-    [openFile, onOpen],
-  );
-
   return (
     <div className="sp-pane sp-pane-tree">
       <div className="sp-subhead">
         <div className="sp-path" title={root || ''}>
-          <span className="sp-path-name">{(embedded ? rootName || fileName : fileName || rootName) || '未打开项目'}</span>
+          {workspaceLabel}
           {root && <span className="sp-path-meta">{fileCount} 文件</span>}
         </div>
-        <div className="pm-actions">
-          {!embedded && <button onClick={() => void openProject()} title="选择项目目录">
-            {root ? '切换' : '打开'}
-          </button>}
-          {root && (
-            <button onClick={() => void refresh()} title="刷新文件树" disabled={loading}>
-              刷新
-            </button>
-          )}
-          {!embedded && <button onClick={() => setSideOpen(false)} title="收起侧栏 (Ctrl+B)">
-            »
-          </button>}
-        </div>
+        <div className="pm-actions">{actions}</div>
       </div>
 
       <div className="pm-search">
@@ -165,19 +139,61 @@ export default function ProjectPanel({ onOpen, embedded = false }: { onOpen: (re
         {root && loading && <div className="pm-empty">加载中…</div>}
         {root && !loading && tree.length === 0 && <div className="pm-empty">{error || '目录为空或无文件'}</div>}
         {root && !loading && tree.length > 0 && visible.length === 0 && <div className="pm-empty">没有匹配的文件</div>}
-        {root &&
-          !loading &&
-          visible.map((n) => (
-            <TreeRowMemo
-              key={n.relPath}
-              node={n}
-              depth={0}
-              onOpen={handleOpen}
-              selectedPath={selected?.relPath ?? null}
-              dirty={dirty}
-            />
-          ))}
+        {root && !loading && visible.map((node) => (
+          <TreeRowMemo key={node.relPath} node={node} depth={0} onOpen={onOpen} selectedPath={selectedPath} dirty={!!dirty} />
+        ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * 标签页 2：项目树（原左侧「项目管理」栏的上半部分）。
+ * 点击文件直接载入内容，并同步载入编辑器草稿。
+ */
+export default function ProjectPanel({ onOpen, embedded = false }: { onOpen: (relPath: string) => void; embedded?: boolean }) {
+  const root = useProjectStore((s) => s.root);
+  const projectFile = useProjectStore((s) => s.projectFile);
+  const tree = useProjectStore((s) => s.tree);
+  const loading = useProjectStore((s) => s.loading);
+  const error = useProjectStore((s) => s.error);
+  const selected = useProjectStore((s) => s.selected);
+  const dirty = useProjectStore((s) => s.dirty);
+  const refresh = useProjectStore((s) => s.refresh);
+  const fileFilter = useProjectStore((s) => s.fileFilter);
+  const setFileFilter = useProjectStore((s) => s.setFileFilter);
+  const openFile = useProjectStore((s) => s.openFile);
+  const setSideOpen = useUiStore((s) => s.setSideOpen);
+
+  const rootName = root ? root.split(/[\\/]/).filter(Boolean).pop() : null;
+  const fileName = projectFile ? projectFile.split(/[\\/]/).filter(Boolean).pop() : null;
+
+  const handleOpen = useCallback(
+    (relPath: string) => {
+      if (useProjectStore.getState().selected?.relPath === relPath && useProjectStore.getState().dirty) { onOpen(relPath); return; }
+      void openFile(relPath).then(() => { if (useProjectStore.getState().selected?.relPath === relPath) onOpen(relPath); }).catch(() => useUiStore.getState().setToast('文件读取失败'));
+    },
+    [openFile, onOpen],
+  );
+
+  return (
+    <ProjectFileTree
+      root={root} tree={tree} loading={loading} error={error} selectedPath={selected?.relPath ?? null}
+      dirty={dirty} fileFilter={fileFilter} setFileFilter={setFileFilter} onOpen={handleOpen}
+      workspaceLabel={<span className="sp-path-name">{(embedded ? rootName || fileName : fileName || rootName) || '未打开项目'}</span>}
+      actions={<>
+          {!embedded && <button onClick={() => void openProject()} title="选择项目目录">
+            {root ? '切换' : '打开'}
+          </button>}
+          {root && (
+            <button onClick={() => void refresh()} title="刷新文件树" disabled={loading}>
+              刷新
+            </button>
+          )}
+          {!embedded && <button onClick={() => setSideOpen(false)} title="收起侧栏 (Ctrl+B)">
+            »
+          </button>}
+      </>}
+    />
   );
 }

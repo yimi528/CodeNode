@@ -22,6 +22,7 @@ const os = require('os');
 const path = require('path');
 
 const toolkit = require("../../electron/tools/toolkit.cjs");
+const descriptorLib = require("../../electron/tools/descriptor.cjs");
 const sandbox = require("../../electron/sandbox.cjs");
 const { AgentToolContext } = require("../../electron/tools/context.cjs");
 const webSearch = require("../../electron/tools/impl/webSearchTool.cjs");
@@ -114,10 +115,21 @@ function registry(enabled, config) {
   console.log('\n== B. 注册 ==');
   {
     const off = registry(false);
-    check('[B] 未启用 → web_search **不注册**（schema 不进 prompt）', off.contains('web_search') === false);
-    check('[B] 未启用 → 描述符也拿不到（没有半个空壳工具）', off.descriptorOf('web_search') == null);
     const on = registry(true);
-    check('[B] 启用 → 注册且能力是 network.request', on.contains('web_search') === true && on.descriptorOf('web_search').requiredCapability === 'network.request', String(on.descriptorOf('web_search') && on.descriptorOf('web_search').requiredCapability));
+    /**
+     * 工具面收敛（L2）：`fetch_url` / `web_search` / `dify_call` 合并成族工具 `web`
+     * （kind=fetch/search/dify）。所以：
+     *   - **不再**出现「未启用就不注册」——族里还带着 fetch，注册与否不该被搜索开关决定；
+     *   - 搜索没启用时由 kind 分支如实报错（这是判据从「有没有注册」变成「调用会不会成功」）。
+     * 旧名 web_search 仍是别名，调用侧零改动。
+     */
+    check('[B] 未启用也注册 `web` 族（fetch 仍然可用）；搜索能力由调用结果体现',
+      off.contains('web') === true && off.listTools().every((tool) => tool.name !== 'web_search'),
+      JSON.stringify(off.listTools().map((t) => t.name)));
+    check('[B] 旧名 web_search 是 `web` 的别名（不占 schema）',
+      off.listAliases().some((alias) => alias.name === 'web_search' && alias.family === 'web'));
+    const webDescriptor = descriptorLib.effectiveDescriptor(on.descriptorOf('web'), { kind: 'search' });
+    check('[B] kind=search 的能力是 network.request', webDescriptor.requiredCapability === 'network.request', String(webDescriptor.requiredCapability));
     const noCfg = await on.execute('web_search', { query: 'x' }, contextFor(null));
     check('[B] 没拿到配置时如实报「未启用或未配置」', noCfg.ok === false && /未启用或未配置/.test(String(noCfg.text)), String(noCfg.text).slice(0, 60));
   }
@@ -187,7 +199,8 @@ function registry(enabled, config) {
     const res = await reg.execute('web_search', { query: 'x' }, contextFor(config, policyDeny));
     // 拒绝可能来自工具自身的联网判据，也可能来自更外层的执行隔离门禁 —— 两者都算「如实拒绝」，
     // 但都必须点名 sandbox.network=deny 与 web_search（否则用户不知道是谁拦的）
-    check('[F] network=deny → 拒绝且点名原因与工具', res.ok === false && /sandbox\.network=deny/.test(String(res.text)) && /web_search/.test(String(res.text)), String(res.text).slice(0, 90));
+    // 工具面收敛后拒绝文案里的工具名是族名 `web`（旧名 web_search 已并入），两种都认
+    check('[F] network=deny → 拒绝且点名原因与工具', res.ok === false && /sandbox\.network=deny/.test(String(res.text)) && /web_search|web/.test(String(res.text)), String(res.text).slice(0, 90));
     check('[F] 拒绝时不发任何请求（mock 一条都没收到）', mock.seen.length === 0, 'seen=' + mock.seen.length);
 
     /**
@@ -195,10 +208,13 @@ function registry(enabled, config) {
      * 于是工具**自身**的判据永远不会被触发，判据也就锁不住它（变异测试当场抓出：把这条
      * 内层判据删掉，用例照样绿）。这里绕过注册表直接调 handler，专门验内层那道。
      */
+    /**
+     * 工具面收敛后 `webSearch` 模块只导出执行体（不再自己 register）：
+     * `web` 族的 kind=search 直接调 `webSearch.execute`。所以这里直接调它验内层判据。
+     */
     /** @type {any} */
-    let handler = null;
-    webSearch.register({ register: (_name, _desc, _schema, fn) => { handler = fn; }, declareContract: () => true });
-    assert(typeof handler === 'function', '未能从 register 捕获 handler');
+    const handler = webSearch.execute;
+    assert(typeof handler === 'function', '未能从 web 族拿到 search 执行体');
     const inner = await handler(contextFor(config, policyDeny), { query: 'x' });
     check('[F] 工具自身也拦（纵深防御：注册表门禁之外的第二道）', inner.ok === false && /sandbox\.network=deny/.test(String(inner.text)), String(inner.text).slice(0, 80));
     check('[F] 内层拒绝同样不发请求', mock.seen.length === 0, 'seen=' + mock.seen.length);

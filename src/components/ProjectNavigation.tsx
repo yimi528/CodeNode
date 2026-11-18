@@ -2,8 +2,55 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useProjectStore } from '../store/projectStore';
 import { useSessionStore } from '../store/sessionStore';
 import { useUiStore } from '../store/uiStore';
+import { useProjectSaveStore } from '../store/projectSaveStore';
 import { newProject, openProject, openProjectFile, openRecentProject, saveProject } from '../lib/projectActions';
-import { readRecentProjects, projectNameOf, forgetRecentProject } from '../lib/recentProjects';
+import { readRecentProjects, projectNameOf, forgetRecentProject, recentPathKey, sameRecentProject, type RecentProject } from '../lib/recentProjects';
+
+type ProjectEntry = Pick<RecentProject, 'root' | 'file' | 'name'>;
+type SessionEntry = { id: string; label?: string; prompt?: string; archived?: boolean };
+
+function ProjectSessions({ target, liveSessions, activeId, busy, onSelect, onArchive }: {
+  target: string;
+  liveSessions: SessionEntry[] | null;
+  activeId?: string | null;
+  busy: boolean;
+  onSelect: (id: string) => void;
+  onArchive?: (id: string) => void;
+}) {
+  const current = liveSessions !== null;
+  const [saved, setSaved] = useState<SessionEntry[] | null>(null);
+  useEffect(() => {
+    if (current) return;
+    let alive = true;
+    setSaved(null);
+    const api = window.codenode;
+    if (!api) { setSaved([]); return; }
+    void api.loadProject(target).then(result => {
+      const sessions = result.data?.canvases?.sessions as SessionEntry[] | undefined;
+      if (alive) setSaved(result.ok && Array.isArray(sessions) ? sessions : []);
+    }).catch(() => { if (alive) setSaved([]); });
+    return () => { alive = false; };
+  }, [target, current]);
+
+  const entries = (liveSessions ?? saved)?.filter(session => typeof session?.id === 'string' && !session.archived);
+  return <div className="project-nav-sessions">
+    {!entries?.length && <div className="project-nav-empty">{entries ? '暂无已保存的对话' : '正在读取对话…'}</div>}
+    {entries?.map(session => {
+      const label = session.prompt && !session.prompt.startsWith('#') ? session.prompt : session.label || '未命名对话';
+      return <div key={session.id} className="project-session-row">
+        <button className={session.id === activeId ? 'active' : ''} disabled={busy} aria-current={session.id === activeId ? 'page' : undefined} onClick={() => onSelect(session.id)} title={label}>{label}</button>
+        {onArchive && <button className="session-archive" aria-label={`归档 ${session.label || label}`} title="归档聊天" disabled={busy} onClick={() => onArchive(session.id)}>▣</button>}
+      </div>;
+    })}
+  </div>;
+}
+
+function showConversation() {
+  const ui = useUiStore.getState();
+  ui.updatePreferences({ workbenchView: 'conversation' });
+  ui.setSideTab('agent');
+  useUiStore.setState({ conversationOpen: true, conversationAutoHidden: false, ...(window.innerWidth <= 600 ? { navigationOpen: false } : {}) });
+}
 
 /** Project/session navigation is independent of the conversation/inspector. */
 export default function ProjectNavigation() {
@@ -32,6 +79,7 @@ export default function ProjectNavigation() {
     window.addEventListener('blur',finish); window.addEventListener('pointermove',move); window.addEventListener('pointerup',finish); window.addEventListener('pointercancel',finish);
   };
   const [error, setError] = useState('');
+  const [switching, setSwitching] = useState(false);
   const [revision, refresh] = useState(0);
   const [projectOrder, setProjectOrder] = useState<string[]>(() => { try { const value = JSON.parse(localStorage.getItem('codenode.projectOrder') || '[]'); return Array.isArray(value) ? value.filter(key => typeof key === 'string') : []; } catch { return []; } });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -44,13 +92,41 @@ export default function ProjectNavigation() {
     return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', dismiss); };
   }, []);
   const act = async (operation: () => Promise<void>) => {
+    if (switching || useSessionStore.getState().streaming) return;
     setError('');
-    try { await operation(); const state = useProjectStore.getState(); changeMeta(state.projectFile || state.root || '', { hidden: false }); } catch (cause) { setError(cause instanceof Error ? cause.message : '打开项目失败'); }
+    setSwitching(true);
+    try {
+      await operation();
+      const state = useProjectStore.getState();
+      changeMeta(state.projectFile || state.root || '', { hidden: false });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '打开项目失败');
+    } finally {
+      setSwitching(false);
+    }
   };
-  const identity = (path: string) => path.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+  const openOtherProject = async (project: ProjectEntry, sessionId?: string) => {
+    const projectState = useProjectStore.getState();
+    if (projectState.dirty && !window.confirm('当前文件有未保存修改，是否放弃修改并切换项目？')) return false;
+    const saveState = useProjectSaveStore.getState();
+    if (projectState.projectFile && ['dirty', 'saving', 'error'].includes(saveState.status) && !await saveProject()) {
+      throw Error('当前项目未能保存，无法切换项目。');
+    }
+    if (useSessionStore.getState().streaming) return false;
+    await openRecentProject(project, sessionId);
+    const opened = useProjectStore.getState();
+    if (!project.file) return recentPathKey(opened.root || '') === recentPathKey(project.root);
+    return sameRecentProject({ root: opened.root || '', file: opened.projectFile || undefined }, project);
+  };
+
+  const currentProject = { root: root || '', file: file || undefined };
+  const isCurrent = (project: ProjectEntry) => sameRecentProject(project, currentProject);
   const recent = readRecentProjects();
-  const projects = [{ root: root || '', file: file || undefined, name: projectNameOf(root || file || '当前项目') }, ...recent.filter(item => identity(item.root) !== identity(root || ''))].filter(item => !meta[item.file || item.root]?.hidden);
-  const candidateKeys = projects.map(item => identity(item.root));
+  const projects = [
+    { ...currentProject, name: projectNameOf(file || root || '当前项目') },
+    ...recent.filter(item => !isCurrent(item)),
+  ].filter(item => !meta[item.file || item.root]?.hidden);
+  const candidateKeys = projects.map(item => recentPathKey(item.file || item.root));
   const candidateSignature = JSON.stringify(candidateKeys);
   useEffect(() => {
     const candidates: string[] = JSON.parse(candidateSignature);
@@ -60,36 +136,60 @@ export default function ProjectNavigation() {
       return next.length === previous.length ? previous : next;
     });
   }, [candidateSignature]);
-  const rank = (path: string) => { const key = identity(path); const index = projectOrder.indexOf(key); return index >= 0 ? index : projectOrder.length + candidateKeys.indexOf(key); };
-  projects.sort((a,b) => Number(!!meta[b.file || b.root]?.pinned)-Number(!!meta[a.file || a.root]?.pinned) || rank(a.root)-rank(b.root));
+  const rank = (project: ProjectEntry) => {
+    const key = recentPathKey(project.file || project.root);
+    const index = projectOrder.indexOf(key);
+    const legacy = projectOrder.indexOf(recentPathKey(project.root));
+    return Math.min(index >= 0 ? index : projectOrder.length + candidateKeys.indexOf(key), legacy >= 0 ? legacy : Infinity);
+  };
+  projects.sort((a,b) => Number(!!meta[b.file || b.root]?.pinned)-Number(!!meta[a.file || a.root]?.pinned) || rank(a)-rank(b));
+  const busy = streaming || switching;
   void revision;
   if (!open) return null;
   return <aside ref={panel} className="project-navigation" aria-label="项目与会话" style={{'--navigation-width':width+'px'} as CSSProperties}>
     <div className="navigation-resize" role="separator" aria-label="调整项目栏宽度" aria-orientation="vertical" aria-valuemin={180} aria-valuemax={400} aria-valuenow={width} tabIndex={0} onPointerDown={startResize} onDoubleClick={()=>setWidth(216)} onKeyDown={event => { if(event.key==='ArrowLeft'||event.key==='ArrowRight') { event.preventDefault(); setWidth(width+(event.key==='ArrowRight'?16:-16)); } }} />
     <div className="project-nav-head"><strong>CodeNode</strong></div>
-    <button className="project-nav-new" disabled={streaming} onClick={() => { useSessionStore.getState().newConversation(); useUiStore.getState().setSideTab('agent'); useUiStore.setState({conversationOpen:true,conversationAutoHidden:false,...(window.innerWidth<=600?{navigationOpen:false}:{})}); void saveProject(); }}>＋ 新对话</button>
-    <div className="project-nav-title"><span>项目</span><details className="project-actions"><summary aria-label="项目操作">＋</summary><div><button onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(newProject); }}>新建项目</button><button onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(openProject); }}>打开项目</button><button onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(openProjectFile); }}>打开工程文件</button></div></details></div>
+    <button className="project-nav-new" disabled={busy} onClick={() => { useSessionStore.getState().newConversation(); showConversation(); void saveProject(); }}>＋ 新对话</button>
+    <div className="project-nav-title"><span>最近项目</span><details className="project-actions"><summary aria-label="项目操作">＋</summary><div><button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(newProject); }}>新建项目</button><button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(openProject); }}>打开项目</button><button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(openProjectFile); }}>打开工程文件</button></div></details></div>
     <div className="project-nav-scroll">
       {projects.map(project => {
-        const key = project.file || project.root, current = identity(project.root) === identity(root || '');
-        const name = meta[key]?.name || project.name;
+        const key = project.file || project.root, current = isCurrent(project);
+        const name = meta[key]?.name || project.name.replace(/\.cnode$/i, '');
         const folded = collapsed[key] ?? !current;
         return <section className="project-group" key={key}>
           <div className="project-group-row">
-            <button className="project-group-name" aria-expanded={!folded} title={project.root} onClick={() => { setCollapsed(state => ({ ...state, [key]: !folded })); if (!current && folded) void act(() => openRecentProject(project)); }}><span>{folded ? '›' : '⌄'}</span><span>▱</span><span>{name}</span>{meta[key]?.pinned && <small>置顶</small>}</button>
-            <button className="project-new-chat" aria-label={`在 ${name} 新建聊天`} disabled={streaming} onClick={() => void act(async () => { if (!current) await openRecentProject(project); useSessionStore.getState().newConversation(); useUiStore.getState().setSideTab('agent'); useUiStore.setState({conversationOpen:true,conversationAutoHidden:false,...(window.innerWidth<=600?{navigationOpen:false}:{})}); void saveProject(); })}>＋</button>
+            <button className="project-group-name" aria-expanded={!folded} title={project.root} onClick={() => setCollapsed(state => ({ ...state, [key]: !folded }))}><span>{folded ? '›' : '⌄'}</span><span>▱</span><span>{name}</span>{meta[key]?.pinned && <small>置顶</small>}</button>
+            <button className="project-new-chat" aria-label={`在 ${name} 新建聊天`} disabled={busy} onClick={() => void act(async () => {
+              if (!current && !await openOtherProject(project)) return;
+              setCollapsed(state => ({ ...state, [key]: false }));
+              useSessionStore.getState().newConversation();
+              showConversation();
+              void saveProject();
+            })}>＋</button>
             <details className="project-row-menu"><summary aria-label={`${name} 项目菜单`}>⋯</summary><div onClick={event => event.currentTarget.parentElement?.removeAttribute('open')}>
+              {!current && <button disabled={busy} onClick={() => void act(async () => { if (await openOtherProject(project)) setCollapsed(state => ({ ...state, [key]: false })); })}>打开项目</button>}
               <button onClick={() => changeMeta(key, { pinned: !meta[key]?.pinned })}>{meta[key]?.pinned ? '取消置顶' : '置顶'}</button>
               <button onClick={() => setRenaming(key)}>编辑名称</button>
-              {current && <button disabled={streaming} onClick={() => { order.filter(id => !sessions[id]?.archived).forEach(id => useSessionStore.getState().setArchived(id, true)); void saveProject(); }}>归档聊天</button>}
+              {current && <button disabled={busy} onClick={() => { order.filter(id => !sessions[id]?.archived).forEach(id => useSessionStore.getState().setArchived(id, true)); void saveProject(); }}>归档聊天</button>}
               <button onClick={() => { changeMeta(key, { hidden: true }); forgetRecentProject(project); refresh(value => value+1); }}>从侧栏移除</button>
             </div></details>
           </div>
           {renaming === key && <input className="project-rename" aria-label="项目显示名称" autoFocus defaultValue={name} onKeyDown={event => { if(event.key === 'Enter') { changeMeta(key, { name: event.currentTarget.value.trim() || project.name }); setRenaming(null); } if(event.key === 'Escape') setRenaming(null); }} onBlur={event => { changeMeta(key, { name: event.currentTarget.value.trim() || project.name }); setRenaming(null); }} />}
-          {current && !folded && <div className="project-nav-sessions">{order.map(id => {
-            const session = sessions[id]; if (!session || session.archived) return null;
-            return <div key={id} className="project-session-row"><button className={id === activeId ? 'active' : ''} disabled={streaming} aria-current={id === activeId ? 'page' : undefined} onClick={() => { useSessionStore.getState().switchSession(id); useUiStore.getState().setSideTab('agent'); useUiStore.setState({conversationOpen:true,conversationAutoHidden:false,...(window.innerWidth<=600?{navigationOpen:false}:{})}); }} title={session.prompt || session.label}>{session.prompt && !session.prompt.startsWith('#') ? session.prompt : session.label}</button><button className="session-archive" aria-label={`归档 ${session.label}`} title="归档聊天" disabled={streaming} onClick={() => { useSessionStore.getState().setArchived(id, true); void saveProject(); }}>▣</button></div>;
-          })}</div>}
+          {!folded && <ProjectSessions
+            target={key}
+            liveSessions={current ? order.map(id => sessions[id]).filter(Boolean) : null}
+            activeId={current ? activeId : null}
+            busy={busy}
+            onSelect={id => {
+              if (current) {
+                useSessionStore.getState().switchSession(id);
+                showConversation();
+              } else void act(async () => {
+                if (await openOtherProject(project, id)) showConversation();
+              });
+            }}
+            onArchive={current ? id => { useSessionStore.getState().setArchived(id, true); void saveProject(); } : undefined}
+          />}
         </section>;
       })}
     </div>

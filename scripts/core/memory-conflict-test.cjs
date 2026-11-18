@@ -96,13 +96,13 @@ async function main() {
     const registry = new AgentToolRegistry();
     memoryTool.register(registry);
     const recallContext = new AgentToolContext({ projectRoot: root });
-    const recent = await registry.execute('recall', { query: 'package_manager' }, recallContext);
+    const recent = await registry.execute('memory', { query: 'package_manager' }, recallContext);
     assert.equal(recent.ok, true);
     assert.doesNotMatch(recent.text, /本项目用 npm/);
-    const allCurrent = await registry.execute('recall', { query: 'package_manager', scope: 'all' }, recallContext);
+    const allCurrent = await registry.execute('memory', { query: 'package_manager', scope: 'all' }, recallContext);
     assert.equal(allCurrent.ok, true);
     assert.match(allCurrent.text, /【用户级（跨项目）记忆】\n（无）/);
-    const history = await registry.execute('recall', { query: 'package_manager', includeHistory: true }, recallContext);
+    const history = await registry.execute('memory', { query: 'package_manager', includeHistory: true }, recallContext);
     assert.equal(history.ok, true);
     assert.match(history.text, /历史：superseded/);
     assert.match(history.text, /本项目用 npm/);
@@ -114,7 +114,7 @@ async function main() {
         return true;
       },
     });
-    const stale = await registry.execute('remember', { key: 'package_manager', kind: 'note', content: '本项目改用 bun' }, staleContext);
+    const stale = await registry.execute('memory', { action: 'save', key: 'package_manager', memoryKind: 'note', content: '本项目改用 bun' }, staleContext);
     assert.equal(stale.ok, false, '确认期间同槽位被修改时拒绝旧确认');
     assert.equal(stale.data.code, 'MEMORY_CONFLICT');
     assert.equal(memory.selectRelevant(memory.readMemory(root).entries, 'package_manager').entries[0].content, '本项目改用 yarn');
@@ -123,7 +123,7 @@ async function main() {
       projectRoot: root, runId: 'memory-conflict-test', sourceMessageId: 'user-msg-memory-1',
       confirm: async (_level, _what, detail) => { confirmationDetail = detail; return true; },
     });
-    const accepted = await registry.execute('remember', { key: 'package_manager', content: '本项目最终用 bun' }, approvedContext);
+    const accepted = await registry.execute('memory', { action: 'save', key: 'package_manager', content: '本项目最终用 bun' }, approvedContext);
     assert.equal(accepted.ok, true);
     assert.match(confirmationDetail, /本项目改用 yarn/, '取代前的确认展示旧内容');
     assert.equal(memory.selectRelevant(memory.readMemory(root).entries, 'package_manager').entries[0].content, '本项目最终用 bun');

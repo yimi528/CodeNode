@@ -13,17 +13,30 @@ const LABELS = Object.freeze({
 const NOTE_PREFIX = '【工具观察汇总】';
 
 const DOMAIN_BY_TOOL = Object.freeze({
-  scan_project: 'files', analyze_project: 'files', project_info: 'files', read_file: 'files',
-  find_files: 'files', search_files: 'files', list_directory: 'files', code_review: 'files',
-  find_definition: 'files', find_references: 'files', get_callers: 'files', get_callees: 'files',
-  write_file: 'files', edit_file: 'files', bulk_edit: 'files', write_analysis_md: 'files', view_image: 'files',
-  get_workbench_model: 'canvas', workbench_edit: 'canvas', query_scalars: 'canvas', save_project: 'canvas',
-  retrieve_context: 'context', recall: 'context', remember: 'context', read_skill: 'context',
+  scan_project: 'files', project_overview: 'files', read_file: 'files',
+  list_files: 'files', search_files: 'files', symbol_nav: 'files',
+  write_file: 'files', edit_file: 'files', view_image: 'files',
+  get_workbench_model: 'canvas', workbench_edit: 'canvas', retrieve_context: 'canvas',
+  memory: 'context', read_skill: 'context',
   update_plan: 'plan',
   execute_shell: 'execution', poll_job: 'execution', worktree: 'execution',
-  fetch_url: 'web', web_search: 'web',
+  web: 'web',
   ask_user: 'coordination', delegate_task: 'coordination', delegate_tasks: 'coordination',
   get_subagent_task: 'coordination', cancel_subagent_task: 'coordination',
+});
+/**
+ * 旧名 → 族名：工具面收敛后 run 记录里可能同时存在新旧两种名字（历史消息、别名调用）。
+ * 回灌归域必须两种都认，否则旧名会落到 `other`，观察视口里的分组就错位了。
+ */
+const LEGACY_DOMAIN_ALIASES = Object.freeze({
+  project_info: 'project_overview', analyze_project: 'project_overview', code_review: 'project_overview',
+  find_files: 'list_files', list_directory: 'list_files',
+  find_definition: 'symbol_nav', find_references: 'symbol_nav', get_callers: 'symbol_nav', get_callees: 'symbol_nav',
+  query_scalars: 'retrieve_context',
+  remember: 'memory', recall: 'memory',
+  bulk_edit: 'workbench_edit', write_analysis_md: 'workbench_edit', save_project: 'workbench_edit',
+  ui_control: 'get_workbench_model',
+  fetch_url: 'web', web_search: 'web', dify_call: 'web',
 });
 
 function parseConfig(cfg = {}) {
@@ -42,15 +55,24 @@ function parseArgs(raw) {
 }
 
 function resourceKey(name, args, callId) {
-  if (name === 'update_plan') return 'plan';
-  if (name === 'get_workbench_model') return 'workbench:model';
-  if (name === 'save_project') return 'workbench:save';
-  if (name === 'project_info' || name === 'scan_project' || name === 'analyze_project') return 'project:' + name;
-  if (name === 'read_file' || name === 'view_image') {
-    const path = args.path || args.filePath || args.file;
-    if (typeof path === 'string' && path) return name + ':' + path + ':' + String(args.offset || args.startLine || 0);
+  const n = LEGACY_DOMAIN_ALIASES[name] || name;
+  if (n === 'update_plan') return 'plan';
+  if (n === 'get_workbench_model') return 'workbench:model';
+  if (n === 'workbench_edit') {
+    // workbench_edit 现在也承载 save_project / write_analysis / bulk_* —— 各自的资源键不同
+    const kind = String((args && args.kind) || '').toLowerCase();
+    if (kind === 'save_project') return 'workbench:save';
+    if (kind === 'write_analysis') return 'workbench:analysis:' + String((args && args.relativePath) || '');
+    return 'workbench:' + (kind || 'edit');
   }
-  if (name === 'query_scalars' && typeof args.key === 'string') return 'scalar:' + args.key;
+  if (n === 'project_overview' || n === 'scan_project') {
+    return 'project:' + n + ':' + String((args && args.kind) || '');
+  }
+  if (n === 'read_file' || n === 'view_image') {
+    const path = args.path || args.filePath || args.file;
+    if (typeof path === 'string' && path) return n + ':' + path + ':' + String(args.offset || args.startLine || 0);
+  }
+  if (n === 'retrieve_context' && typeof args.key === 'string') return 'scalar:' + args.key;
   return 'call:' + callId;
 }
 
@@ -60,7 +82,8 @@ function adaptToolResult(record, content) {
   const callId = String((record && record.callId) || '');
   const args = parseArgs(record && record.args);
   const unsettled = record && (record.ok === false || record.partial);
-  const domain = unsettled ? 'diagnostics' : DOMAIN_BY_TOOL[name] || 'other';
+  const canonicalName = LEGACY_DOMAIN_ALIASES[name] || name;
+  const domain = unsettled ? 'diagnostics' : DOMAIN_BY_TOOL[canonicalName] || 'other';
   const key = unsettled ? 'call:' + callId : resourceKey(name, args, callId);
   return {
     domain, key, operation: key.startsWith('call:') ? 'append' : 'replace', callId,

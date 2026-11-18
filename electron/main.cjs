@@ -4,6 +4,7 @@ const fs = require('fs');
 
 const APP_ICON = path.join(__dirname, '..', 'build', 'icon.ico');
 const APP_ICON_SOURCE = path.join(__dirname, '..', 'assets', 'branding', 'codenode-icon.png');
+const WINDOW_FRAME_COLOR = '#222222';
 
 function resolveAppIcon() {
   if (fs.existsSync(APP_ICON)) return APP_ICON;
@@ -134,9 +135,13 @@ function createWindow() {
     minWidth: 720,
     minHeight: 560,
     title: 'CodeNode',
+    ...(process.platform === 'win32' ? {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { height: 46, color: WINDOW_FRAME_COLOR, symbolColor: '#f2f2f2' },
+    } : {}),
     // 主界面一律不透明：窗口不开 transparent，保留 DWM 外阴影。
     // 三套主题（日间／夜间／无色玻璃）都只改页面内的配色变量，不碰窗口本身。
-    backgroundColor: '#14161a',
+    backgroundColor: WINDOW_FRAME_COLOR,
     icon: resolveAppIcon(),
     autoHideMenuBar: true,
     webPreferences: {

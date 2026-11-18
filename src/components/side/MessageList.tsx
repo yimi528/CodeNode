@@ -1,4 +1,5 @@
 import { memo, useEffect,useState } from 'react';
+import { Orb } from '@yogesharc/thinking-orbs';
 import type { SessionMsg } from '../../types';
 import FileChangesCard from './FileChangesCard';
 import { useProjectStore } from '../../store/projectStore';
@@ -7,7 +8,11 @@ import { useUiStore } from '../../store/uiStore';
 import { useTextReveal } from '../../hooks/useTextReveal';
 
 /** 对话正文与简洁文件变更；工具和推理记录保留在运行数据中。 */
-export function MessageView({ msg, isLatest = true }: { msg: SessionMsg; isLatest?: boolean }) {
+export function MessageView({ msg, isLatest = true, isStreaming = false }: {
+  msg: SessionMsg;
+  isLatest?: boolean;
+  isStreaming?: boolean;
+}) {
   const grounding = msg.grounding;
   const safeAbstention = grounding?.status === 'valid' && grounding.semantic?.status === 'abstained' && grounding.semantic.safeForDelivery === true;
   const semanticFailed = grounding?.semantic?.supported === false && !safeAbstention;
@@ -80,17 +85,21 @@ export function MessageView({ msg, isLatest = true }: { msg: SessionMsg; isLates
     );
   }
 
+  const thinking = msg.status === 'running' && !msg.content && !display.revealing;
+  const replyStatus = display.revealing || (msg.status === 'running' && !thinking) ? '输出中…' : thinking ? '思考中…' : '';
   return (
     <div className="cs-msg cs-msg-agent">
       <span className={`cs-msg-label ${msg.status === 'running' ? 'cs-running' : ''}`}>
-        CodeNode{display.revealing || msg.status === 'running' && msg.content ? ' · 输出中…' : msg.status === 'running' ? ' · 思考中…' : ''}
+        <strong className="cs-msg-agent-name">CodeNode</strong>
+        {isStreaming && thinking && <Orb state="reasoning" className="cs-thinking-orb" />}
+        {replyStatus && <span>{replyStatus}</span>}
       </span>
       {/* #25(b)：关键状态不能只靠颜色/图标表达 —— 读屏与键盘用户需要文本层的
           「已停止 / 已截断 / 失败」，这也让「点停止后界面像没反应」当场可见。 */}
       {msg.status === 'stopped' ? <div className="cs-msg-state" role="status">已停止（本轮回答可能不完整）</div> : null}
       {msg.status === 'truncated' ? <div className="cs-msg-state cs-msg-state-warn" role="status">已截断（触到模型长度上限，回复「继续」可接着写）</div> : null}
       {msg.status === 'failed' ? <div className="cs-msg-state cs-msg-state-error" role="status">本轮失败（详见下方错误说明）</div> : null}
-      <div className="cs-msg-text" data-revealing={display.revealing ? 'true' : 'false'}>{display.text || (msg.status === 'running' ? '…' : '')}{display.revealing && <span className="cs-typewriter-cursor" aria-hidden="true" />}</div>
+      <div className="cs-msg-text" data-revealing={display.revealing ? 'true' : 'false'}>{display.text}{display.revealing && <span className="cs-typewriter-cursor" aria-hidden="true" />}</div>
       <FileChangesCard message={msg} />
       {msg.backendEvents?.map((event, i) => {
         const c = event.content;

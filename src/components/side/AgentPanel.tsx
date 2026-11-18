@@ -418,6 +418,7 @@ export default function AgentPanel() {
   const messages = useSessionStore((s) => s.messages);
   const streaming = useSessionStore((s) => s.streaming);
   const active = useSessionStore((s) => (s.activeId ? s.sessions[s.activeId] : null));
+  const streamingMessage = streaming ? messages.map((message) => message.role).lastIndexOf('assistant') : -1;
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const followRef = useRef(true);
@@ -480,7 +481,12 @@ export default function AgentPanel() {
       >
 
         {messages.map((m, i) => (
-          <MessageViewMemo key={`${active?.id || 'session'}:${i}`} msg={m} isLatest={i === messages.length - 1} />
+          <MessageViewMemo
+            key={`${active?.id || 'session'}:${i}`}
+            msg={m}
+            isLatest={i === messages.length - 1}
+            isStreaming={i === streamingMessage}
+          />
         ))}
       </div>
 

@@ -19,6 +19,7 @@ const path = require('path');
 const agent = require("../../electron/agent.cjs");
 const sandbox = require("../../electron/sandbox.cjs");
 const toolkit = require("../../electron/tools/toolkit.cjs");
+const descriptorLib = require("../../electron/tools/descriptor.cjs");
 const approvalLib = require("../../electron/tools/approval.cjs");
 const { AgentToolResult } = require("../../electron/tools/result.cjs");
 const { AgentToolContext } = require("../../electron/tools/context.cjs");
@@ -129,12 +130,32 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   // ---- G. 声明层：确认类写工具都声明了确认且真的强制 ----
   const declRegistry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false });
-  const declared = ['save_project', 'workbench_edit', 'ui_control'].filter((name) => declRegistry.descriptorOf(name));
-  assert.ok(declared.length >= 3, '至少三个确认类写工具在注册表里（实际 ' + declared.join(',') + '）');
-  for (const name of declared) {
+  /**
+   * 工具面收敛：`save_project` / `ui_control` 已并入族工具，确认语义落在 `byKind` 上。
+   * 判据改成「按 kind 解出后**确实**声明了 requiresConfirmation」——合并前后强制力不变。
+   */
+  const declared = [];
+  for (const [name, args] of [
+    ['workbench_edit', {}],
+    ['workbench_edit', { kind: 'save_project' }],
+    ['workbench_edit', { kind: 'bulk_delete_nodes', nodeIds: ['x'] }],
+    ['get_workbench_model', { view: 'focus' }],
+    ['memory', { action: 'save', content: 'x' }],
+  ]) {
     const descriptor = declRegistry.descriptorOf(name);
-    assert.strictEqual(descriptor.requiresConfirmation, 'WRITE', name + ' 必须声明 requiresConfirmation=WRITE');
-    assert.strictEqual(descriptor.confirmationEnforced, true, name + ' 的确认必须真的强制（confirmationEnforced）');
+    if (!descriptor) continue;
+    const effective = descriptorLib.effectiveDescriptor(descriptor, args);
+    if (effective.requiresConfirmation) declared.push(name + (args.kind ? ':' + args.kind : ''));
+  }
+  assert.ok(declared.length >= 3, '至少三个确认类写工具在注册表里（实际 ' + declared.join(',') + '）');
+  for (const label of declared) {
+    const [name, kind] = label.split(':');
+    const args = kind ? { kind } : (name === 'get_workbench_model' ? { view: 'focus' } : (name === 'memory' ? { action: 'save' } : {}));
+    const effective = descriptorLib.effectiveDescriptor(declRegistry.descriptorOf(name), args);
+    // bulk_* 等破坏性 kind 声明的是 HIGH（比 WRITE 更严）；这里只要求「确实声明了且真的强制」
+    assert.ok(effective.requiresConfirmation === 'WRITE' || effective.requiresConfirmation === 'HIGH',
+      name + ' 必须声明 requiresConfirmation（WRITE 或 HIGH）');
+    assert.strictEqual(effective.confirmationEnforced, true, name + ' 的确认必须真的强制（confirmationEnforced）');
   }
   ok('G 确认类写工具声明并强制了确认（' + declared.join(' / ') + '）');
 

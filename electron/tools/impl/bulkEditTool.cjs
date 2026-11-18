@@ -1,16 +1,16 @@
 /**
- * bulk_edit：大批量数据修改（高危，需用户确认）。action：
- *   create_nodes(count,name,prompt,connect)  批量创建任务节点
- *   create_files(list[{path,content}])       批量创建/写入文件（越界拒绝）
- *   create_assets(list[{path}])              批量创建文件节点（资产语义在新版并入文件节点）
- *   delete_nodes(nodeIds)                    批量删除工作台节点
+ * bulk_edit —— **已并入 `workbench_edit`（kind=bulk_create_nodes / bulk_create_files /
+ * bulk_create_assets / bulk_delete_nodes）**，见 docs/tool-consolidation.zh-CN.md L1。
+ *
+ * 本模块只保留执行体与确认文案生成器，供 workbenchEditTool 的族分发复用；不再注册独立工具。
+ * 旧名 `bulk_edit` 由 toolkit.registerLegacyAliases 登记成别名，旧的 action 名会被翻译成对应 kind
+ * （安全语义仍是 HIGH 级确认，由 byKind 承接 —— 与合并前的内部 HIGH 确认一致）。
  */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const { AgentToolResult } = require('../result.cjs');
-const { ConfirmationLevel } = require('../context.cjs');
 const { resolveInRoot, summarizeContentForConfirm } = require('./shared.cjs');
 const { atomicWriteFile } = require('../../atomicFile.cjs');
 const { nodeToScalarRecords } = require('../../scalars/index.cjs');
@@ -111,51 +111,7 @@ function detailFor(action, args) {
   return sb.join('\n');
 }
 
-function register(registry) {
-  registry.register(
-    'bulk_edit',
-    '大批量数据修改（高危，需用户确认）。action：create_nodes(count,name,prompt,connect) 批量创建任务节点；' +
-      'create_files(list[{path,content}]) 批量创建/写入文件（越界拒绝）；create_assets(list[{path}]) 批量创建文件节点；' +
-      'delete_nodes(nodeIds) 批量删除工作台节点。执行前会请求用户确认并解释将做什么。',
-    {
-      type: 'object',
-      properties: {
-        action: { type: 'string', description: 'create_nodes/create_files/create_assets/delete_nodes' },
-        count: { type: 'integer', description: 'create_nodes 数量（最多 ' + MAX_BATCH + '）' },
-        name: { type: 'string', description: 'create_nodes 名称前缀' },
-        prompt: { type: 'string', description: 'create_nodes 职责说明' },
-        connect: { type: 'boolean', description: 'create_nodes 是否串联' },
-        list: { type: 'array', items: { type: 'object' }, description: 'create_files/create_assets 的条目列表' },
-        nodeIds: { type: 'array', items: { type: 'string' }, description: 'delete_nodes 目标节点 id' },
-      },
-      required: ['action'],
-    },
-    async (context, args) => {
-      const action = String(args.action || '').trim().toLowerCase();
-      if (!action) return AgentToolResult.error('缺少 action');
-      const what = describe(action, args);
-      const ok = await context.confirm(ConfirmationLevel.HIGH, what, detailFor(action, args));
-      if (!ok) return AgentToolResult.error('已取消批量操作');
-      try {
-        switch (action) {
-          case 'create_nodes':
-            return await createNodes(context, args);
-          case 'create_files':
-            return await createFiles(context, args);
-          case 'create_assets':
-            return await createAssets(context, args);
-          case 'delete_nodes':
-            return await deleteNodes(context, args);
-          default:
-            return AgentToolResult.error('未知 action: ' + action);
-        }
-      } catch (e) {
-        return AgentToolResult.error('批量操作失败：' + ((e && e.message) || e));
-      }
-    }
-  );
-  require('../builtInOutputSchemas.cjs').declareOutputContracts(registry, ["bulk_edit"]);
-}
+module.exports = { createNodes, createFiles, createAssets, deleteNodes, detailFor, describe, MAX_BATCH };
 
 async function createNodes(context, args) {
   const count = Math.max(1, Math.min(MAX_BATCH, intArg(args, 'count', 1)));
@@ -272,4 +228,4 @@ async function deleteNodes(context, args) {
   return AgentToolResult.ok('已批量删除 ' + deleted.length + ' 个节点' + note + (errors.length ? '，失败 ' + errors.length + ' 项' : ''), data);
 }
 
-module.exports = { register };
+module.exports = { createNodes, createFiles, createAssets, deleteNodes, detailFor, describe, MAX_BATCH };

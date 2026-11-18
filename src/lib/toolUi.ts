@@ -4,7 +4,9 @@ import { useUiStore } from '../store/uiStore';
 import { useToolStore, type ConfirmRequest, type AskRequest } from '../store/toolStore';
 
 /**
- * ui_control 动作执行（渲染进程侧接线）。
+ * 界面动作执行（渲染进程侧接线）。
+ * 工具面收敛后由 `get_workbench_model(view=focus/zoom/pan/…)` 触发（原 `ui_control.action`）；
+ * 动作名与参数形状保持不变，所以这里只按 action 分发。
  * 返回是否已执行（action 是否被支持）。
  */
 export function performUiAction(action: string, args: Record<string, unknown>): boolean {

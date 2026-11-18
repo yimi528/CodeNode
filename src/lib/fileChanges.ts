@@ -32,8 +32,16 @@ export function summarizeFileChanges(tools: ToolRecord[], observed: string[] = [
     if (tool.ok !== true) continue;
     const data = object(tool.data), args = argsOf(tool);
     if (tool.name === 'write_file' || tool.name === 'edit_file') add(data.path || args.path, object(data.review));
-    else if (tool.name === 'write_analysis_md') add(data.relativePath || args.relativePath);
-    else if (tool.name === 'bulk_edit' && data.action === 'create_files' && Array.isArray(data.written)) data.written.forEach(path => add(path));
+    // 工具面收敛（L1）：write_analysis_md / bulk_edit.create_files 已并入 workbench_edit 的 kind。
+    // 旧名保留，兼容历史 run 的回放（事件里记录的还是当时的工具名）。
+    else if (tool.name === 'write_analysis_md' || (tool.name === 'workbench_edit' && data.kind === 'write_analysis')) {
+      add(data.relativePath || args.relativePath);
+    } else if ((tool.name === 'bulk_edit' || tool.name === 'workbench_edit') && data.kind === 'bulk_create_files' && Array.isArray(data.written)) {
+      data.written.forEach(path => add(path));
+    } else if (tool.name === 'bulk_edit' && data.action === 'create_files' && Array.isArray(data.written)) {
+      // 历史事件（合并前的 run）里 bulk_edit 仍带 action 字段
+      data.written.forEach(path => add(path));
+    }
   }
   for (const path of observed) if (!unchanged.has(path.replace(/\\/g, '/').replace(/^\.\//, ''))) add(path);
   return [...files.values()];

@@ -263,8 +263,9 @@ console.log('\n== C. 动作级准入（只问「分类能改变结果」的动�
   const regSrc = fs.readFileSync(path.join(__dirname, "../../electron/tools/registry.cjs"), 'utf8');
   check('[G] ipc 用确定性路由决定要不要分类', /taskRouter\.routeTask\(/.test(ipcSrc) && /ambiguous: taskRoute\.ambiguous/.test(ipcSrc));
   check('[G] ipc 用纯函数决定要不要咨询 guardian', /intentLib\.shouldConsultGuardian\(/.test(ipcSrc));
+  // 工具面收敛：effect 现在优先取 kind 级声明（descriptor.sideEffect），缺省才回落到按名分类
   check('[G] registry 把「静态层会怎么走」如实交给复核方',
-    /effect: sideEffectsLib\.classify\(name\)/.test(regSrc) && /wouldConfirm: staticRequires && ruleAllows !== true/.test(regSrc));
+    /effect: descriptor\.sideEffect \|\| sideEffectsLib\.classify\(name, args\)/.test(regSrc) && /wouldConfirm: staticRequires && ruleAllows !== true/.test(regSrc));
   check('[G] 审批服务提供纯查询 preview（不弹窗、不签发）', /preview\(req = \{\}\)/.test(fs.readFileSync(path.join(__dirname, "../../electron/tools/approval.cjs"), 'utf8')));
 
   console.log('\n' + (failures === 0 ? 'INTENT COST GATE TEST: PASS（确定性路由 + 分类门 + 动作准入 + 安全不变量）' : 'INTENT COST GATE TEST: FAIL —— ' + failures + ' 项断言未通过'));

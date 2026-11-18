@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useProjectStore } from '../../store/projectStore';
+import { useProjectStore, type SelectedFile } from '../../store/projectStore';
 import { useUiStore } from '../../store/uiStore';
 
 function fmtSize(n: number): string {
@@ -22,9 +22,18 @@ function fmtTime(ms?: number): string | null {
 export default function PreviewPanel({ onBack, embedded = false }: { onBack: () => void; embedded?: boolean }) {
   const selected = useProjectStore((s) => s.selected);
   const dirty = useProjectStore((s) => s.dirty);
-  const setToast = useUiStore((s) => s.setToast);
-
   const root = useProjectStore(s => s.root);
+  return <FilePreview root={root} selected={selected} dirty={dirty} onBack={onBack} embedded={embedded} />;
+}
+
+export function FilePreview({ root, selected, dirty = false, onBack, embedded = false }: {
+  root: string | null;
+  selected: SelectedFile | null;
+  dirty?: boolean;
+  onBack?: () => void;
+  embedded?: boolean;
+}) {
+  const setToast = useUiStore((s) => s.setToast);
   const isProject = !!selected?.relPath.toLowerCase().endsWith('.cnode');
   const [summary, setSummary] = useState<{nodes:number;edges:number;canvases:number;error?:string}|null>(null);
   useEffect(() => {

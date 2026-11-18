@@ -2,7 +2,8 @@
 const { createHash } = require('node:crypto');
 const { captureInputs } = require('./codeVerification.cjs');
 const PREFIX = '【系统提示】无进展检测：';
-const WAIT_TOOLS = new Set(['ask_user', 'delegate_task', 'delegate_tasks', 'cancel_subagent_task', 'ui_control']);
+// get_workbench_model 的视口动作（原 ui_control）也是「在等界面/等用户看见」，算等待工具
+const WAIT_TOOLS = new Set(['ask_user', 'delegate_task', 'delegate_tasks', 'cancel_subagent_task', 'get_workbench_model']);
 const ACTIVE = new Set(['running', 'pending', 'queued', 'waiting', 'working', 'in_progress', 'cancelling']);
 const digest = value => createHash('sha256').update(value).digest('hex');
 

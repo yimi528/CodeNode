@@ -54,7 +54,11 @@ app.whenReady().then(async () => {
     const alternateRoot = path.join(root, 'alternate-project');
     fs.mkdirSync(alternateRoot, {recursive:true});
     const alternateFile = path.join(alternateRoot, 'alternate.cnode');
-    fs.writeFileSync(alternateFile, cnode.encodeCnode({graph:{nodes:[],edges:[]},canvases:{sessions:[{id:'alternate-session',label:'另一项目聊天',status:'active',createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}}],messages:[]}}));
+    fs.writeFileSync(alternateFile, cnode.encodeCnode({graph:{nodes:[],edges:[]},canvases:{sessions:[
+      {id:'alternate-session',label:'另一项目聊天',status:'active',createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}},
+      {id:'alternate-second',label:'另一项目第二条对话',status:'completed',createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]},messages:[{role:'user',content:'独立的对话记录'}]},
+      {id:'alternate-archived',label:'已归档对话',archived:true,createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}},
+    ],messages:[]}}));
     await win.webContents.executeJavaScript('localStorage.setItem("codenode.recentProjects", '+JSON.stringify(JSON.stringify([{root:alternateRoot,file:alternateFile,name:'alternate-project',openedAt:Date.now()}]))+')');
     await win.webContents.executeJavaScript('document.querySelectorAll(".gate-actions .gate-btn")[1].click()');
     await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".app") && !!window.__codenodeProject.getState().root'), '新建后进入工作台');
@@ -612,18 +616,41 @@ app.whenReady().then(async () => {
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().navigationWidth'), 216);
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".workspace-tabs button")).some(button=>button.textContent==="预览")'), false);
       fs.writeFileSync(path.join(root,'readme.txt'),'文件内容直接打开');
-      await win.webContents.executeJavaScript('window.__codenodeProject.getState().refresh()');
+      fs.writeFileSync(path.join(alternateRoot,'alternate-only.txt'),'另一工作区的文件');
+      const beforePreview = await win.webContents.executeJavaScript('({root:window.__codenodeProject.getState().root,file:window.__codenodeProject.getState().projectFile,id:window.__codenodeSession.getState().activeId})');
       await win.webContents.executeJavaScript(`document.querySelector('.activity-bar button[aria-label="文件"]').click()`);
       await waitFor(async () => await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".files-explorer .pm-file")).some(row=>row.title==="readme.txt")'), '文件列表');
       await win.webContents.executeJavaScript(`document.querySelector('.files-explorer .pm-file[title="readme.txt"]').click()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .dock-code-editor")?.value==="文件内容直接打开"'), '点击文件直接显示内容');
-      assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().sideTab'), 'project');
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")?.textContent==="文件内容直接打开"'), '点击文件直接预览内容');
+      assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().sideTab'), 'preview');
       assert.equal(await win.webContents.executeJavaScript('document.querySelector(".activity-bar button[aria-current=page]").getAttribute("aria-label")'), '文件');
+      assert.ok(await win.webContents.executeJavaScript('document.querySelector(".app-project-navigation").hidden && document.querySelector(".conversation-right").hidden && !document.querySelector(".files-document textarea")'));
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".files-workspace-picker select").value'), '');
+      await win.webContents.executeJavaScript(`(() => {const select=document.querySelector(".files-workspace-picker select");select.value=[...select.options].find(option=>option.title===${JSON.stringify(alternateRoot)}).value;select.dispatchEvent(new Event("change",{bubbles:true}));})()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(\'.files-explorer .pm-file[title="alternate-only.txt"]\')'), '查看其他工作区的文件列表');
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")'), null);
+      await win.webContents.executeJavaScript(`document.querySelector('.files-explorer .pm-file[title="alternate-only.txt"]').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")?.textContent==="另一工作区的文件"'), '预览所选工作区的文件');
+      assert.deepEqual(await win.webContents.executeJavaScript('({root:window.__codenodeProject.getState().root,file:window.__codenodeProject.getState().projectFile,id:window.__codenodeSession.getState().activeId})'), beforePreview);
+      const customRoot = fs.mkdtempSync(path.join(root, 'browse-'));
+      fs.writeFileSync(path.join(customRoot, 'picked.txt'), '来自手动选择的目录');
+      const previewDialog = dialog.showOpenDialog;
+      try {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [customRoot] });
+        await win.webContents.executeJavaScript('document.querySelector(".files-workspace-picker button").click()');
+        await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(\'.files-explorer .pm-file[title="picked.txt"]\')'), '打开手动选择的工作区目录');
+        await win.webContents.executeJavaScript('document.querySelector(\'.files-explorer .pm-file[title="picked.txt"]\').click()');
+        await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")?.textContent==="来自手动选择的目录"'), '预览手动选择的目录');
+      } finally {
+        dialog.showOpenDialog = previewDialog;
+      }
       win.showInactive(); await sleep(100);
       fs.mkdirSync(path.join(__dirname,"../../out"),{recursive:true});
       fs.writeFileSync(path.join(__dirname,"../../out/unified-file-view.png"),(await win.webContents.capturePage()).toPNG());
       win.hide();
 
+      await win.webContents.executeJavaScript(`(async () => {await window.__codenodeProject.getState().openFile("readme.txt");window.__codenodeUi.getState().openDock("editor")})()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .dock-code-editor")?.value==="文件内容直接打开"'), '显式编辑入口');
       await win.webContents.executeJavaScript(`(() => {const editor=document.querySelector('.files-document .dock-code-editor');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(editor,'修改后的文件内容');editor.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await sleep(80);
       await win.webContents.executeJavaScript(`(() => {const editor=document.querySelector('.files-document .dock-code-editor');editor.focus();editor.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:true,bubbles:true}));})()`);
@@ -650,12 +677,15 @@ app.whenReady().then(async () => {
       await sleep(80);
       const beforeProjectOrder = await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)');
       await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[1].click()');
-      await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().root === '+JSON.stringify(alternateRoot)+' && window.__codenodeProject.getState().projectFile === '+JSON.stringify(alternateFile)+' && !!window.__codenodeSession.getState().sessions["alternate-session"]'), '展开其他项目');
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelectorAll(".project-group")[1].querySelectorAll(".project-session-row").length===2'), '展开其他项目的已保存对话');
+      assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), root);
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'expanding another project must not reorder projects');
+      await win.webContents.executeJavaScript('document.querySelector(\'.project-session-row button[title="另一项目第二条对话"]\').click()');
+      await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().projectFile === '+JSON.stringify(alternateFile)+' && window.__codenodeSession.getState().activeId==="alternate-second" && window.__codenodeSession.getState().messages.some(message=>message.content==="独立的对话记录")'), '直接进入其他项目的指定对话');
       await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[1].click()');
       await sleep(100);
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
-      await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[0].click()');
+      await win.webContents.executeJavaScript('Array.from(document.querySelector(".project-group .project-row-menu").querySelectorAll("button")).find(button=>button.textContent==="打开项目").click()');
       await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().root === '+JSON.stringify(root)+' && window.__codenodeProject.getState().projectFile === '+JSON.stringify(projectFile)), '返回原项目');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
       await win.webContents.executeJavaScript('(() => { const button=document.querySelector(".project-group-name"); if (button.getAttribute("aria-expanded") === "true") button.click(); })()');
@@ -775,7 +805,7 @@ app.whenReady().then(async () => {
       await sleep(250);
       assert.equal(await win.webContents.executeJavaScript('localStorage.getItem("codenode.theme")'), 'light');
       const material = await win.webContents.executeJavaScript(`(() => { const panel=getComputedStyle(document.querySelector('.pp-composer')); return {background:panel.backgroundColor,blur:panel.backdropFilter}; })()`);
-      assert.ok(material.background.startsWith('rgba(') && material.blur.includes('blur'), '主题应使用透明玻璃材质');
+      assert.deepEqual(material, { background: 'rgb(78, 78, 78)', blur: 'none' }, '对话输入区应使用不透明纯灰背景');
       const dayCapture = await Promise.race([win.webContents.capturePage(),sleep(5000).then(()=>{throw new Error('capture timeout');})]);
       fs.writeFileSync(path.join(__dirname,"../../out/workbench-glass-light.png"),dayCapture.toPNG());
       win.setSize(500,740); await sleep(200);

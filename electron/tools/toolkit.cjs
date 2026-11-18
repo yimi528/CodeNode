@@ -21,6 +21,20 @@ const ROLE_TOOLS = Object.freeze(
   Object.fromEntries(roles.ROLE_NAMES.map((name) => [name, roles.roleTools(name) || []])),
 );
 
+/**
+ * 内置工具（工具面收敛后的清单，顺序即下发顺序）。
+ *
+ * 合并关系见 docs/tool-consolidation.zh-CN.md：
+ *   L1 吸收：bulk_edit / write_analysis_md / save_project → workbench_edit（kind=…）
+ *            query_scalars → retrieve_context（mode=scalar / keys / prefix）
+ *            ui_control → get_workbench_model（view=…）+ workbench_edit（create）
+ *   L2 同构族：find_definition/references/callers/callees → symbol_nav
+ *              find_files/list_directory → list_files
+ *              project_info/analyze_project/code_review → project_overview
+ *              remember/recall → memory
+ *              fetch_url/web_search/dify_call → web
+ *   旧名以**别名**保留（registerLegacyAliases），调用侧零改动、不占上下文。
+ */
 const BUILTINS = [
   require('./impl/getWorkbenchModelTool.cjs'),
   require('./impl/workbenchEditTool.cjs'),
@@ -28,22 +42,14 @@ const BUILTINS = [
   require('./impl/readFileTool.cjs'),
   require('./impl/writeFileTool.cjs'),
   require('./impl/editFileTool.cjs'),
-  require('./impl/findFilesTool.cjs'),
+  require('./impl/listFilesTool.cjs'),
   require('./impl/searchFilesTool.cjs'),
   require('./impl/symbolNavigationTool.cjs'),
-  require('./impl/listDirectoryTool.cjs'),
   require('./impl/executeShellTool.cjs'),
-  require('./impl/codeReviewTool.cjs'),
+  require('./impl/projectOverviewTool.cjs'),
   require('./impl/askUserTool.cjs'),
-  require('./impl/fetchUrlTool.cjs'),
-  require('./impl/saveProjectTool.cjs'),
-  require('./impl/bulkEditTool.cjs'),
-  require('./impl/analyzeProjectTool.cjs'),
-  require('./impl/uiControlTool.cjs'),
-  require('./impl/writeAnalysisMdTool.cjs'),
-  require('./impl/projectInfoTool.cjs'),
+  require('./impl/webTool.cjs'),
   require('./impl/retrieveContextTool.cjs'),
-  require('./impl/queryScalarsTool.cjs'),
   require('./impl/memoryTool.cjs'),
   // 任务清单（对照 Codex 的 update_plan）：模型自己写下「分几步、现在在哪一步」。
   // 它不是工作区写操作（mutatesWorkspace=false），但也不是只读缓存项 —— 见 impl/updatePlanTool.cjs。
@@ -52,9 +58,6 @@ const BUILTINS = [
   require('./impl/readSkillTool.cjs'),
   // 看图（对照 Codex 的 view_image）：把项目内的图片附到对话里，让模型真的看到画面
   require('./impl/viewImageTool.cjs'),
-  // 联网搜索（对照 Codex/Claude Code 的 web_search）：后端由配置指定，**不配就不注册**
-  require('./impl/webSearchTool.cjs'),
-  require('./impl/difyCallTool.cjs'),
   // 工作树隔离（对照 Codex/Claude Code）：create/list/remove，只在 .codenode/worktrees/ 下动手
   require('./impl/worktreeTool.cjs'),
 ];
@@ -62,11 +65,71 @@ const BUILTINS = [
 // （见 registerDiscoverTool）。理由：`agent.tool_profile=off` 时请求体必须与没有这个功能**逐字节一致**，
 // 而进 BUILTINS 会让它无条件多出一个工具 schema（约 60 tokens/轮）。
 
+/**
+ * 旧工具名 →（族工具 + kind / 默认参数）。**别名不是工具**：不进 `listTools()`、不进 schema。
+ *
+ * 为什么必须有：`roles.cjs` 的角色白名单、`profiles.cjs` 的 PROFILE_TOOLS、几十个用例、
+ * 以及模型历史消息里调过的旧名都还在用这些名字。别名让它们继续可用，而上下文只付新工具的 schema。
+ */
+const LEGACY_ALIASES = Object.freeze([
+  // ---- L1：吸收进 workbench_edit ----
+  // bulk_edit 用 action 承载四个后果不同的动作 → 按 action 决定 kind（安全语义也不同：都是 HIGH）
+  {
+    name: 'bulk_edit', family: 'workbench_edit', kind: 'bulk_create_nodes',
+    kindFromArgs: {
+      create_nodes: 'bulk_create_nodes',
+      create_files: 'bulk_create_files',
+      create_assets: 'bulk_create_assets',
+      delete_nodes: 'bulk_delete_nodes',
+    },
+    note: '批量动作按原 action 分流到对应 kind',
+  },
+  { name: 'write_analysis_md', family: 'workbench_edit', kind: 'write_analysis' },
+  { name: 'save_project', family: 'workbench_edit', kind: 'save_project' },
+  // ---- L1：吸收进 retrieve_context ----
+  { name: 'query_scalars', family: 'retrieve_context', kind: '', defaults: { mode: 'scalar' } },
+  // ---- L1：吸收进 get_workbench_model（视口动作）----
+  // ui_control 的 action 就是 view 的取值：把 action 搬进 view
+  { name: 'ui_control', family: 'get_workbench_model', kind: '', actionToView: true },
+  // ---- L2：同构族 ----
+  { name: 'find_definition', family: 'symbol_nav', kind: 'definition' },
+  { name: 'find_references', family: 'symbol_nav', kind: 'references' },
+  { name: 'get_callers', family: 'symbol_nav', kind: 'callers' },
+  { name: 'get_callees', family: 'symbol_nav', kind: 'callees' },
+  { name: 'find_files', family: 'list_files', kind: 'glob' },
+  { name: 'list_directory', family: 'list_files', kind: 'dir' },
+  { name: 'project_info', family: 'project_overview', kind: 'info' },
+  { name: 'analyze_project', family: 'project_overview', kind: 'structure' },
+  { name: 'code_review', family: 'project_overview', kind: 'review' },
+  { name: 'remember', family: 'memory', kind: '', defaults: { action: 'save' } },
+  { name: 'recall', family: 'memory', kind: '', defaults: { action: 'search' } },
+  { name: 'fetch_url', family: 'web', kind: 'fetch' },
+  { name: 'web_search', family: 'web', kind: 'search' },
+  { name: 'dify_call', family: 'web', kind: 'dify' },
+]);
+
+/** 把旧名别名装进注册表（buildDefaultRegistry 末尾调用，所有入口共用） */
+function registerLegacyAliases(registry) {
+  for (const alias of LEGACY_ALIASES) {
+    registry.registerAlias(alias.name, {
+      family: alias.family,
+      kind: alias.kind || '',
+      defaults: alias.defaults || null,
+      kindFromArgs: alias.kindFromArgs || null,
+      actionToView: alias.actionToView === true,
+      note: alias.note || '',
+    });
+  }
+  return registry;
+}
+
 function buildDefaultRegistry() {
   const registry = new AgentToolRegistry();
   for (const mod of BUILTINS) {
     mod.register(registry);
   }
+  // 旧名别名（工具面收敛）：不进 schema，只在 execute 时翻译成「族 + kind」
+  registerLegacyAliases(registry);
   return declareSemantics(registry);
 }
 
@@ -89,6 +152,10 @@ function declareSemantics(registry) {
       timeoutMs: descriptor.timeoutMs,
       cachePolicy: descriptor.cachePolicy,
       concurrencyPolicy: descriptor.concurrencyPolicy,
+      // 族工具的 kind 级安全语义必须一起带过去：漏掉它 = 合并后所有 kind 退回族级判定
+      // （memory 的 search 会被当成写、get_workbench_model 的 full 会被当成非只读）。
+      byKind: descriptor.byKind,
+      kindField: descriptor.kindField,
     });
   }
   return registry;
@@ -113,25 +180,44 @@ function filterByConfig(registry, config) {
   }
   const allowed = cfg.toolsAllowed || null; // null 或空 = 全部允许
   const deny = cfg.toolsDeny || [];
+  /**
+   * 白/黑名单里可能写着**旧工具名**（用户 `.codenode/agent.properties` 的 `tools.allowed`
+   * 是显式配置，合并前写的 `find_files` 不该突然失效）。别名不是注册工具，
+   * 直接比对会把这些名字当「不存在的工具」丢掉 → 这里先把名单沿别名展开成族名。
+   */
+  const expandAliases = (list) => {
+    const out = new Set();
+    for (const raw of Array.isArray(list) ? list : []) {
+      const name = String(raw || '').trim();
+      if (!name) continue;
+      out.add(name);
+      const alias = registry.aliases && registry.aliases.get(name);
+      if (alias) out.add(alias.family);
+    }
+    return out;
+  };
+  const allowedSet = allowed && allowed.length > 0 ? expandAliases(allowed) : null;
+  const denySet = expandAliases(deny);
   for (const spec of registry.listTools()) {
+    /**
+     * `retrieve_context` 现在是**检索 + 标量库**唯一的入口（收编了 query_scalars）。
+     * 所以 `ragEnabled=false` 只裁掉文件检索能力，工具本身必须留着 —— 否则画布节点的精确属性
+     * （prompt/goal/members）就没人能读了。关闭体现在 `mode=file/vector` 分支上（那两条需要索引）。
+     */
     if (spec.name === 'retrieve_context' && cfg.ragEnabled === false) {
+      registry.declareContract('retrieve_context', { ragDisabled: true });
+      continue;
+    }
+    /**
+     * 联网：`web` 是**族**（fetch/search/dify）。fetch 是不依赖任何后端的公网抓取，按原来的口径它
+     * 一直可用；search/dify 在开关关闭时由 kind 分支返回明确失败。所以族本身保持注册
+     * （`tools.deny` / `tools.allowed` 仍按族名生效，旧名会被别名展开）。
+     */
+    if (denySet.has(spec.name)) {
       registry.unregister(spec.name);
       continue;
     }
-    // 联网搜索同样是「关掉的能力不占上下文」：未启用就不注册（不留下一个永远报错的工具）
-    if (spec.name === 'web_search' && cfg.webSearchEnabled !== true) {
-      registry.unregister(spec.name);
-      continue;
-    }
-    if (spec.name === 'dify_call' && cfg.difyEnabled !== true) {
-      registry.unregister(spec.name);
-      continue;
-    }
-    if (deny.includes(spec.name)) {
-      registry.unregister(spec.name);
-      continue;
-    }
-    if (allowed && allowed.length > 0 && !allowed.includes(spec.name)) {
+    if (allowedSet && !allowedSet.has(spec.name)) {
       registry.unregister(spec.name);
     }
   }

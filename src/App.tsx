@@ -1,6 +1,6 @@
 import GoalOverview from './components/GoalOverview';
 import { useEffect, useLayoutEffect } from 'react';
-import { themeTokens, themeColorScheme } from './lib/theme';
+import { themeTokens } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
 import Toolbar from './components/Toolbar';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
@@ -9,6 +9,7 @@ import PluginWorkspace from './components/PluginWorkspace';
 import TaskWorkspace from './components/TaskWorkspace';
 import Canvas from './components/Canvas';
 import ProjectGate from './components/ProjectGate';
+import welcomeLogo from '../assets/branding/welcome-logo.png';
 import SidePanel from './components/side/SidePanel';
 import './components/side/nodeInspectorDock.css';
 import ProjectNavigation from './components/ProjectNavigation';
@@ -75,12 +76,13 @@ export default function App() {
   const appPage = useUiStore(s => s.appPage);
   const sideOpen = useUiStore((s) => s.sideOpen);
   const sideTab = useUiStore(s => s.sideTab);
+  const filePreview = sideTab === 'preview';
   const workbenchView=useUiStore(s=>s.preferences.workbenchView);
   const overview=workbenchView==='overview'&&!['project','preview'].includes(sideTab);
   const theme = useUiStore((s) => s.theme);
   useLayoutEffect(() => {
     const root = document.documentElement;
-    root.dataset.theme = theme; root.style.colorScheme = themeColorScheme(theme);
+    root.dataset.theme = theme;
     for (const [name,value] of Object.entries(themeTokens(theme))) root.style.setProperty(name,value);
   }, [theme]);
   const dockOpen = useUiStore((s) => s.dockOpen);
@@ -127,10 +129,11 @@ export default function App() {
     if (!workspace) return;
     let wasCompact: boolean | null = null;
     const adapt = () => {
+      const ui = useUiStore.getState();
+      if (ui.sideTab === 'preview') return;
       const compact = workspace.getBoundingClientRect().width <= 660;
       if (compact === wasCompact) return;
       wasCompact = compact;
-      const ui = useUiStore.getState();
       if (compact && ui.conversationOpen && !useSessionStore.getState().streaming && !ui.modelManagerOpen && !document.activeElement?.closest('.conversation-right, .hermes-picker-layer')) {
         useUiStore.setState({ conversationOpen: false, conversationAutoHidden: true });
       } else if (!compact && ui.conversationAutoHidden) {
@@ -143,6 +146,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useUiStore.getState().sideTab === 'preview') return;
       if(useUiStore.getState().preferences.workbenchView==='overview')return;
       if (useUiStore.getState().settingsOpen || useUiStore.getState().modelManagerOpen) return;
       const mod = e.ctrlKey || e.metaKey;
@@ -193,7 +197,7 @@ export default function App() {
         if (document.activeElement?.closest('.dock-code-editor')) return;
         e.preventDefault();
         const state = useProjectStore.getState();
-        if (['project','preview'].includes(useUiStore.getState().sideTab) && state.selected && !/\.cnode$/i.test(state.selected.relPath)) { if (state.dirty) void state.saveSelected(); }
+        if (useUiStore.getState().sideTab === 'project' && state.selected && !/\.cnode$/i.test(state.selected.relPath)) { if (state.dirty) void state.saveSelected(); }
         else void saveProject();
         return;
       }
@@ -272,7 +276,7 @@ export default function App() {
     return (
       <div className="gate gate-boot">
         <div className="gate-card">
-          <div className="gate-logo">CN</div>
+          <img className="gate-logo" src={welcomeLogo} alt="" />
           <h1>CodeNode</h1>
           <p className="gate-sub">正在恢复上次工程…</p>
         </div>
@@ -287,21 +291,21 @@ export default function App() {
     <div className={`app ui-clean glass-theme theme-${theme}`}>
       <div className="app-shell"><ActivityBar/><div className="app-shell-main">
       <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Toolbar /></div>
-      <div className={`app-body side-left${dockOpen && appPage==='workbench' ? ' has-dock' : ''}`}>
+      <div className={`app-body side-left${dockOpen && appPage==='workbench' && !filePreview ? ' has-dock' : ''}`}>
         {appPage==='plugins'&&<PluginWorkspace/>}
         <TaskWorkspace hidden={appPage!=='tasks'}/>
         <div className="app-workbench-layer" data-inactive={appPage!=='workbench'} aria-hidden={appPage!=='workbench'} inert={appPage!=='workbench'}>
-        <div className="app-project-navigation"><ProjectNavigation /></div>
+        <div className="app-project-navigation" hidden={filePreview} inert={filePreview}><ProjectNavigation /></div>
         <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
 <div className="workspace-overview-layer" hidden={!overview}><GoalOverview/></div>
 <div className="workspace-content" hidden={overview} inert={overview}>
-            {(sideTab === 'project' || sideTab === 'preview') && <FileWorkspace />}
+            {(sideTab === 'project' || filePreview) && <FileWorkspace editing={sideTab === 'project'} />}
             {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
             <div className="workspace-canvas" aria-hidden={sideTab === 'project' || sideTab === 'preview'}><Canvas /></div>
-            <ConversationPanel />
+            <ConversationPanel suspended={filePreview} />
           </div>
         </main>
-        <div className="app-workbench-overlays" hidden={appPage!=='workbench'}><AddMenu />
+        <div className="app-workbench-overlays" hidden={appPage!=='workbench' || filePreview}><AddMenu />
         <WorkbenchDock /></div></div>
       </div>
       <div hidden={appPage!=='workbench'} className="app-workbench-status"><StatusBar /></div>

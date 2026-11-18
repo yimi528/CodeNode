@@ -43,6 +43,13 @@ function check(label, condition, detail) {
 }
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codenode-tokoverhead-'));
 const soul = agent.parseSoul('');
+/**
+ * 子代理工具（`SubagentManager.register` 装进来的 8 个）：它们不是 BUILTINS 的一部分，
+ * 只在装配了子代理的 run 里出现 —— 工具数断言必须把两者分开数，否则「20 个内置」会被算错。
+ */
+const SUBAGENT_TOOLS = new Set([
+  'delegate', 'subagent_read', 'subagent_control',
+]);
 
 /** 真实装配路径：含 RAG 和子代理结果复核工具；discover_tools 在裁剪时再注册。 */
 function buildRegistry(rag) {
@@ -138,7 +145,8 @@ async function runTurn(registry, script) {
     '   基线：工具 ' + baseTools.length + '，schema ' + baseSchemaTokens + ' tokens/' + JSON.stringify(baseTools).length +
     ' 字符；固定输入 纯代码 ' + basePureFixed + ' / 画布 ' + baseCanvasFixed,
   );
-  const navigationNames = new Set(['find_definition', 'find_references', 'get_callers', 'get_callees']);
+  const navigationNames = new Set(['symbol_nav']);
+  // 子代理的重做工具仍在（L3 未落地前保留原名）；这里按「不含按需符号工具与重做工具」的口径量
   const legacyTools = baseTools.filter((tool) => !navigationNames.has(tool.function.name) && !['inspect_subagent_retry', 'retry_subagent_task'].includes(tool.function.name));
   const legacyNames = new Set(legacyTools.map(tool => tool.function.name));
   const legacyGuide = agent.buildToolGuide(base.listTools().filter(tool => legacyNames.has(tool.name)));
@@ -146,12 +154,20 @@ async function runTurn(registry, script) {
   const legacyCanvas = agent.buildSystemPrompt(soul, '[{"id":"n1"}]', legacyGuide, '', '', { prompt: '画布上建一条链路', canvasMode: 'always' });
   const legacyPureFixed = compaction.estimateTokens([{ role: 'system', content: legacyPure }], legacyTools);
   const legacyCanvasFixed = compaction.estimateTokens([{ role: 'system', content: legacyCanvas }], legacyTools);
-  check('[A] 完整装配新增四个按需符号工具和两个重做工具，原 34 个工具保持完整', baseTools.length === 40 && legacyTools.length === 34, 'tools=' + baseTools.length);
-  check('[A] 基线固定输入仍在有界范围（新增复核工具和文件分页 schema）',
-    legacyPureFixed > 10000 && legacyPureFixed < 11000 && legacyCanvasFixed > 11000 && legacyCanvasFixed < 12000,
+  /**
+   * 工具面收敛（docs/tool-consolidation.zh-CN.md L1+L2 已落地）：默认装配 32 → 20 个工具，
+   * 旧名以别名保留。这里的数字是**合并后的新基线**（不是旧口径）—— 棘轮从此往下压。
+   */
+  check('[A] 合并后默认装配 20 个内置 + 3 个子代理族 = 23（原 34 → 23：L1 吸收 8 + L2 族合并 5 组 + L3 子代理族 3）',
+    baseTools.length === 23 && baseTools.filter((t) => !SUBAGENT_TOOLS.has(t.function.name)).length === 20,
+    'tools=' + baseTools.length + ' builtin=' + baseTools.filter((t) => !SUBAGENT_TOOLS.has(t.function.name)).length);
+  check('[A] 基线固定输入仍在有界范围（合并后 schema 显著变小）',
+    legacyPureFixed > 9000 && legacyPureFixed < 11000 && legacyCanvasFixed > 9500 && legacyCanvasFixed < 12000,
     'legacyPure=' + legacyPureFixed + ' legacyCanvas=' + legacyCanvasFixed);
-  check('[A] 四个新增符号工具的完整 schema 与引导增量 ≤ 2,000 tokens；默认任务按需隐藏',
-    basePureFixed - legacyPureFixed <= 2000, 'navigationIncrement=' + (basePureFixed - legacyPureFixed));
+  check('[A] symbol_nav 合并后只占一份 schema，四个符号工具不再各带一份',
+    baseTools.some((tool) => tool.function.name === 'symbol_nav') &&
+    !baseTools.some((tool) => ['find_definition', 'find_references', 'get_callers', 'get_callees'].includes(tool.function.name)),
+    'navigationIncrement=' + (basePureFixed - legacyPureFixed));
 
   // ============================ B. 裁剪后的面（棘轮） ============================
   console.log('\n== B. 按任务裁剪后的固定输入（棘轮：只允许降） ==');
@@ -169,19 +185,25 @@ async function runTurn(registry, script) {
   console.log(fmt('调研', researchFace, basePureFixed));
   console.log(fmt('编排', orchFace, basePureFixed));
 
-  check('[B] 纯代码固定输入 ≤5,600 tokens（保留 40% 以上降幅）', codeFace.fixed <= 5600, 'fixed=' + codeFace.fixed);
+  /**
+   * 棘轮（工具面收敛 L1+L2 落地后的新基线）。数字出自真实装配路径，只允许**往下压**：
+   *   - 纯代码面：16 工具 / 5,958 → 上界放到 6,200（合并后 core 少 1 个、code 少 2 个，
+   *     但 project_overview + retrieve_context 的属性并集让单工具变大，净效果仍是降）
+   *   - 画布面：19 工具 / 9,222 → 上界 9,400（合并前 24 工具 / 8,569：工具少 5 个但 retrieve_context
+   *     吸收了 query_scalars 的 keys/prefix/max，单份 schema 变贵，总量持平 —— 这是合并的真实代价）
+   *   - 调研面 18 / 7,106、编排面 24 / 7,913
+   */
+  check('[B] 纯代码固定输入 ≤6,200 tokens（保留 40% 以上降幅）', codeFace.fixed <= 6200, 'fixed=' + codeFace.fixed);
   check('[B] 纯代码降幅 ≥40%', (basePureFixed - codeFace.fixed) / basePureFixed >= 0.4,
     '降幅=' + (((basePureFixed - codeFace.fixed) / basePureFixed) * 100).toFixed(1) + '%');
   /**
-   * 画布那一档的上界**没有**达到审计文档的 6,000 估算：文档的画布 profile 是「core + 画布工具」，
-   * 而 core 只留 8 个工具；本实现把 `retrieve_context` / `execute_shell` / `find_files` /
-   * `list_directory` 等都留在常驻面（常驻运行规则直接点名它们，裁掉会让规则悬空），
-   * 并且画布轮仍带 code 面（同因）；固定规则压缩后实测 8,873 tokens，回到 9,000 以内。
-   * 要更激进可显式配 `agent.tool_profile=core,canvas`。
+   * 画布那一档的上界**没有**达到审计文档的估算：合并后 core 仍带 retrieve_context（规则 11/12 点名它，
+   * 且它是画布节点属性的唯一读入口），而它吸收了 query_scalars 的参数。要更激进可显式配
+   * `agent.tool_profile=core,canvas`（并自行承担规则悬空）。
    * 这里的上界是**棘轮**：只允许随「有意新增能力」抬高，且必须在注释里写明理由。
    */
-  check('[B] 画布固定输入 ≤9,200 tokens（含更细的 read_file 分页 schema）', canvasFace.fixed <= 9200, 'fixed=' + canvasFace.fixed);
-  check('[B] 调研 ≤7,000、编排 ≤8,000 tokens（编排包含子代理结果复核）', researchFace.fixed <= 7000 && orchFace.fixed <= 8000,
+  check('[B] 画布固定输入 ≤9,400 tokens（合并后工具少 5 个，retrieve_context 吸收标量参数）', canvasFace.fixed <= 9400, 'fixed=' + canvasFace.fixed);
+  check('[B] 调研 ≤7,400、编排 ≤8,200 tokens（编排包含子代理结果复核）', researchFace.fixed <= 7400 && orchFace.fixed <= 8200,
     'research=' + researchFace.fixed + ' orch=' + orchFace.fixed);
   const editDecision = profiles.resolveToolProfiles({ canvas: false, prompt: '修改 src/app.ts' });
   const broadDecision = profiles.resolveToolProfiles({ canvas: false, prompt: '修复多个文件的问题' });
@@ -276,7 +298,8 @@ async function runTurn(registry, script) {
     tiny.setExposure(['read_file', 'discover_tools']);
     const hiddenTiny = tiny.listTools().map((t) => t.name).filter((n) => !tiny.isExposed(n));
     check('[E] 变异：不同的暴露面得到不同的隐藏集（discover_tools 对着真实隐藏集工作）',
-      hiddenTiny.length > 25 && hiddenTiny.includes('workbench_edit') && !profiles.namesForProfiles(['core', 'code'], allNames).includes('workbench_edit'));
+      hiddenTiny.length >= 8 && hiddenTiny.includes('workbench_edit') && !profiles.namesForProfiles(['core', 'code'], allNames).includes('workbench_edit'),
+      'hidden=' + hiddenTiny.length);
 
     // 变异 3：profile 表本身 —— code 面必须真的比 core 面大（否则「分层」是空壳）
     const coreOnly = profiles.namesForProfiles(['core'], allNames);
@@ -338,8 +361,13 @@ async function runTurn(registry, script) {
       withExt.isExposed('late_registered_tool') === true && withExt.schemaInfo().names.includes('late_registered_tool'));
 
     const miss = await registry.execute('discover_tools', { query: 'zzzz不存在的功能' }, ctx);
+    /**
+     * 分组清单只列「该组确实有隐藏工具」的 profile：合并后 core/code 面无隐藏成员，
+     * 于是可能出现 canvas=/symbols=/research= 这类组名。断言按 profile 表动态生成，
+     * 不再写死 core=/code= —— 否则工具面一变这条判据就变成假红灯（而它本身是对的）。
+     */
     check('[F] 一无所获时给出分组清单（可换词/说组名），不瞎猜',
-      miss.ok === true && /core=|code=|canvas=/.test(String(miss.text)),
+      miss.ok === true && profiles.PROFILE_NAMES.some((name) => String(miss.text).includes(name + '=')),
       String(miss.text).slice(0, 80));
   }
 

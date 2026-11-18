@@ -93,7 +93,8 @@ function applyLoaded(
     workspace?: { viewport?: { x: number; y: number; zoom: number } };
     manifest?: { documentId?: string; createdAt?: string; name?: string };
     checkpoints?: unknown[];
-  }
+  },
+  sessionId?: string,
 ): void {
   useProjectStore.getState().setDoc(data?.manifest || {});
   useCheckpointStore.getState().setProjectRoot(_root, (data?.checkpoints || []) as Checkpoint[]);
@@ -124,7 +125,8 @@ function applyLoaded(
         root: { nodes: (sd.root?.nodes as never[]) || [], edges: (sd.root?.edges as never[]) || [] } as Graph,
       } as SessionDoc,
     }));
-    ss.restoreSessions(list, messages || [], undefined, memoryConversationId, memoryTaskEpoch);
+    const selected = sessionId ? list.find(session => session.id === sessionId) : undefined;
+    ss.restoreSessions(list, selected ? [] : messages || [], sessionId, selected?.memoryConversationId || memoryConversationId, memoryTaskEpoch);
   } else {
     // 旧版单画布：把加载到的图作为首个会话（忽略其中的组节点与组图）
     const doc: SessionDoc = {
@@ -209,7 +211,6 @@ export async function openProject(): Promise<void> {
   if (!res.ok || !res.root) return;
   localStorage.setItem(LAST_ROOT_KEY, res.root);
   localStorage.removeItem(LAST_FILE_KEY);
-  rememberRecentProject({ root: res.root });
   await useProjectStore.getState().loadRoot(res.root);
   useCheckpointStore.getState().setProjectRoot(res.root);
   const lr = await api.loadProject(res.root);
@@ -221,6 +222,7 @@ export async function openProject(): Promise<void> {
     const warn = lr.data.warnings?.length ? '（' + lr.data.warnings.join('；') + '）' : '';
     useUiStore.getState().setToast('已打开项目：' + nameOf(lr.filePath) + warn);
   } else {
+    rememberRecentProject({ root: res.root });
     useGraphStore.getState().clear();
     const { raw, greeting } = await fetchSoul(res.root);
     useSessionStore.getState().initProject(greeting || raw, raw);
@@ -332,7 +334,7 @@ export async function restoreLastProject(): Promise<void> {
 /**
  * 打开一条「最近打开」记录：优先加载 .cnode 文件，只有目录时按目录打开。
  */
-export async function openRecentProject(entry: { root: string; file?: string; name?: string }): Promise<void> {
+export async function openRecentProject(entry: { root: string; file?: string; name?: string }, sessionId?: string): Promise<void> {
   const api = window.codenode;
   if (!api) {
     useUiStore.getState().setToast('需要 Electron 环境');
@@ -340,6 +342,13 @@ export async function openRecentProject(entry: { root: string; file?: string; na
   }
   const target = entry.file || entry.root;
   if (!target) return;
+
+  const requested = sessionId ? await api.loadProject(target) : undefined;
+  const savedSessions = requested?.data?.canvases?.sessions as SessionPayload[] | undefined;
+  if (sessionId && (!requested?.ok || !Array.isArray(savedSessions) ||
+    !savedSessions.some(session => session?.id === sessionId && !session.archived))) {
+    throw Error('找不到这条对话，请重新展开项目。');
+  }
 
   const root = entry.file ? dirOf(entry.file) : entry.root;
   await useProjectStore.getState().loadRoot(root);
@@ -349,14 +358,15 @@ export async function openRecentProject(entry: { root: string; file?: string; na
     return;
   }
 
-  if (entry.file) {
-    const lr = await api.loadProject(entry.file);
+  if (entry.file || requested) {
+    const lr = requested || await api.loadProject(target);
     if (lr.ok && lr.data) {
-      useProjectStore.getState().setProjectFile(lr.filePath || entry.file);
+      const loadedFile = lr.filePath || target;
+      useProjectStore.getState().setProjectFile(loadedFile);
       useCheckpointStore.getState().setProjectRoot(root);
-      applyLoaded(root, lr.data);
-      rememberRecentProject({ root, file: lr.filePath || entry.file });
-      useUiStore.getState().setToast('已打开最近工程：' + nameOf(lr.filePath || entry.file));
+      applyLoaded(root, lr.data, sessionId);
+      rememberRecentProject({ root, file: loadedFile });
+      useUiStore.getState().setToast('已打开最近工程：' + nameOf(loadedFile));
       return;
     }
     useUiStore.getState().setToast('该工程文件已不可用，已按目录打开：' + (lr.error || ''));

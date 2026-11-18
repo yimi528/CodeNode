@@ -23,16 +23,32 @@ const { normalizeOutputSchema } = require('./outputSchema.cjs');
 
 /** 只读工具：可安全重复执行、结果可缓存、可在只读上下文里执行 */
 const READ_ONLY_TOOLS = new Set([
-  'scan_project', 'analyze_project', 'project_info', 'read_file',
-  'find_files', 'search_files', 'list_directory', 'code_review', 'ask_user',
+  'scan_project', 'project_overview', 'read_file',
+  'list_files', 'search_files', 'symbol_nav', 'ask_user',
   'retrieve_context', 'read_skill', 'view_image',
-  'find_definition', 'find_references', 'get_callers', 'get_callees',
   // 语义上只读，但**故意不进缓存白名单**：画布/标量是权威读源，变更后必须立刻读到最新状态
-  'get_workbench_model', 'query_scalars', 'poll_job', 'recall', 'get_subagent_task',
+  'poll_job', 'get_subagent_task',
   'inspect_subagent_retry',
   // 取消子任务（第 6 项）：只 abort 一个子代理，不改工作区；与 get_subagent_task 同类
   'cancel_subagent_task',
+  // 下面这批判只影响**旧接口合成契约**（`register()` 用），真实族工具的语义由 byKind 决定：
+  // 保留它们是为了「旧名注册的工具仍拿到合并前的契约」，别据此推断族工具的语义。
+  'get_workbench_model', 'recall', 'query_scalars', 'find_definition', 'find_references',
+  'get_callers', 'get_callees', 'list_directory', 'find_files', 'project_info', 'analyze_project', 'code_review',
 ]);
+/**
+ * 族工具（一个名字承载多个 kind）**没有**单一 readOnly 语义：真实判定在各自的 `byKind`。
+ * 这个名单只是把「哪些名字是族」显式记下来，供审计/用例核对「族工具不该出现在按名定性的清单里」。
+ * 注意与 READ_ONLY_TOOLS 尾部的历史条目并存：那里的条目只服务旧接口合成契约。
+ */
+const FAMILY_TOOLS = new Set(['memory', 'web', 'get_workbench_model', 'workbench_edit',
+  'symbol_nav', 'list_files', 'project_overview',
+  'delegate', 'subagent_read', 'subagent_control']);
+/**
+ * `retrieve_context` **不在此列**：它虽然用 `mode` 承载多种检索来源，但**安全语义只有一种**
+ * （只读 / workspace.read / 免审批），不像 memory 那样读写混在一个名字里。
+ * 把它算作族工具会逼着它声明 byKind，而它根本不需要 kind 级安全门。
+ */
 
 /**
  * 只读结果缓存白名单（缓存保活 = 只有这些工具执行后缓存继续有效，其余一律清空）。
@@ -47,8 +63,8 @@ const READ_ONLY_TOOLS = new Set([
  * 情况变了之后该做的事。它是唯一被排除的交互型工具，其余只读工具照旧缓存。
  */
 const CACHEABLE_TOOLS = new Set([
-  'scan_project', 'analyze_project', 'project_info', 'read_file',
-  'find_files', 'search_files', 'list_directory', 'code_review',
+  'scan_project', 'project_overview', 'read_file',
+  'list_files', 'search_files',
   // 技能正文也是「同一 run 内不会变」的只读内容 → 同参重复读走缓存（不刷新别的缓存）
   'read_skill',
   'view_image',
@@ -56,8 +72,8 @@ const CACHEABLE_TOOLS = new Set([
 
 /** 会改变画布模型 / 文件 / 工程状态的工具（语义清单，供文档与并行冲突判定引用） */
 const MUTATION_TOOLS = new Set([
-  'workbench_edit', 'bulk_edit', 'write_file', 'edit_file',
-  'write_analysis_md', 'save_project', 'ui_control', 'remember',
+  'workbench_edit', 'write_file', 'edit_file',
+  'memory',
   'delegate_task', 'delegate_tasks', 'review_subagent_result',
   'retry_subagent_task',
 ]);
@@ -70,58 +86,60 @@ const CONDITIONAL_MUTATORS = new Set(['scan_project']);
 
 /** 结果里的 [data] 不再附加进上下文（数据已落到本地标量库，避免把画布大字段发到云端） */
 const SCALAR_BACKED_TOOLS = new Set([
-  'get_workbench_model', 'workbench_edit', 'bulk_edit', 'write_analysis_md', 'query_scalars',
+  'get_workbench_model', 'workbench_edit',
 ]);
 
 /**
  * 同参数重复执行效果相同的写工具（可安全重试）：
- * 按内容写入/整体保存是幂等的；而 workbench_edit（新建节点拿新 id）、remember（追加记忆）不是。
+ * 按内容写入/整体保存是幂等的；而 workbench_edit（新建节点拿新 id）、memory（追加记忆）不是。
  */
-const IDEMPOTENT_WRITES = new Set(['write_file', 'edit_file', 'save_project']);
+const IDEMPOTENT_WRITES = new Set(['write_file', 'edit_file']);
 
 /** 能力声明（S3 只用于「网络被策略切断时拒绝」，完整能力裁决在 S7） */
 const CAPABILITY_BY_TOOL = Object.freeze({
   read_file: 'workspace.read',
-  find_files: 'workspace.read',
+  list_files: 'workspace.read',
   search_files: 'workspace.read',
-  find_definition: 'workspace.read',
-  find_references: 'workspace.read',
-  get_callers: 'workspace.read',
-  get_callees: 'workspace.read',
-  list_directory: 'workspace.read',
-  analyze_project: 'workspace.read',
-  project_info: 'workspace.read',
-  code_review: 'workspace.read',
+  symbol_nav: 'workspace.read',
+  project_overview: 'workspace.read',
   get_workbench_model: 'workspace.read',
-  query_scalars: 'workspace.read',
   retrieve_context: 'workspace.read',
   read_skill: 'workspace.read',
   view_image: 'workspace.read',
   // scan_project 默认只读，但带 applyToWorkbench 参数时会写画布 → 能力上按写处理（fail-closed）
   scan_project: 'workspace.write',
-  recall: 'workspace.read',
   get_subagent_task: 'workspace.read',
   cancel_subagent_task: 'subagent.delegate',
   poll_job: 'shell.execute',
   write_file: 'workspace.write',
   edit_file: 'workspace.write',
-  bulk_edit: 'workspace.write',
-  write_analysis_md: 'workspace.write',
   workbench_edit: 'workspace.write',
-  remember: 'workspace.write',
-  save_project: 'project.save',
+  /**
+   * 族工具的能力**不是常量**：memory 的 search 要 workspace.read、save 要 workspace.write；
+   * web 的三种都是 network.request；get_workbench_model 读画布是 read、视口动作是 ui.interact。
+   * 这里给的是**族级最保守值**（供没有 byKind 的降级路径用），真实裁决在 effectiveDescriptor。
+   */
+  memory: 'workspace.write',
+  web: 'network.request',
   execute_shell: 'shell.execute',
-  fetch_url: 'network.request',
-  web_search: 'network.request',
-  dify_call: 'network.request',
   worktree: 'workspace.write',
-  ui_control: 'ui.interact',
   ask_user: 'ui.interact',
   delegate_task: 'subagent.delegate',
   delegate_tasks: 'subagent.delegate',
   inspect_subagent_retry: 'subagent.inspect',
   retry_subagent_task: 'subagent.delegate',
   review_subagent_result: 'subagent.delegate',
+  // ---- 以下只服务**旧接口合成契约**（register() 按名单反推）：合并前的名字必须仍映射到
+  //      原来的能力，否则旧名注册的工具会拿到错误的能力门（例如 fetch_url 丢了 network.request）。
+  fetch_url: 'network.request',
+  web_search: 'network.request',
+  dify_call: 'network.request',
+  save_project: 'project.save',
+  ui_control: 'ui.interact',
+  remember: 'workspace.write',
+  recall: 'workspace.read',
+  bulk_edit: 'workspace.write',
+  write_analysis_md: 'workspace.write',
 });
 
 /** 自管超时的工具（内部已有秒级超时 / 合法长任务）：timeoutMs = 0 表示注册表不加超时 */
@@ -133,11 +151,11 @@ const SELF_TIMED_TOOLS = Object.freeze({
   retry_subagent_task: 0,
   retrieve_context: 0,
   scan_project: 0,
-  analyze_project: 0,
-  fetch_url: 0,
-  web_search: 0,
-  dify_call: 0,
-  bulk_edit: 0,
+  project_overview: 0,
+  list_files: 0,
+  symbol_nav: 0,
+  web: 0,
+  workbench_edit: 0,
 });
 
 /** 注册表兜底超时（毫秒）；工具显式声明的 timeoutMs 优先，0 = 不加限制 */
@@ -149,6 +167,127 @@ const CAPABILITIES = Object.freeze([
 ]);
 
 const CONFIRMATION_LEVELS = Object.freeze(['LOW', 'WRITE', 'HIGH']);
+
+/**
+ * 族工具（instrumental consolidation）的 `kind` 级契约。
+ *
+ * 为什么需要：合并把「一个工具名 = 一种安全语义」变成「一个工具名 = N 种」。
+ * `remember`(写) 与 `recall`(读) 并成 `memory` 后，descriptor 只能有一个 `readOnly` ——
+ * 只读角色会因此拿到写能力（或反之丢失写权限）。所以安全语义必须下沉到 `kind`：
+ *   `execute()` 在拿到 args 之后用 `byKind[args.kind]` 覆盖 descriptor 的判定字段。
+ *
+ * 纪律（fail-closed）：
+ *   1. 声明了 `byKind` 的族，**未登记的 kind 一律按最保守取值**（读类族按「会写」处理、
+ *      需要能力的族按「需要写」处理、要求审批的族按「HIGH」处理）；
+ *   2. 只有显式登记为只读的 kind 才算只读 —— 不做「默认沿用族级 readOnly」的推断；
+ *   3. `byKind` 只覆盖**判定字段**（readOnly/mutatesWorkspace/requiredCapability/
+ *      requiresConfirmation/cachePolicy/sideEffects），不覆盖 inputSchema（schema 必须保持
+ *      一份，否则等于没合并）。
+ */
+
+/** 缓存策略归一：接受 `'run'` 或 `{mode:'run'}`；未声明时只读默认 run、写默认 none */
+function cachesMode(value, readOnly) {
+  const raw = typeof value === 'string' ? value : (value && value.mode);
+  if (['none', 'run', 'ttl'].includes(raw)) return raw;
+  return readOnly ? 'run' : 'none';
+}
+
+/** 单个 kind 的契约形状（未给的字段继承族级 descriptor） */
+function normalizeKindContract(kind, patch) {
+  const p = patch && typeof patch === 'object' ? patch : {};
+  return Object.freeze({
+    readOnly: p.readOnly === true,
+    // 只读 kind 默认不改工作区；写 kind 默认改
+    mutatesWorkspace: p.mutatesWorkspace === undefined ? p.readOnly !== true : p.mutatesWorkspace === true,
+    requiredCapability: CAPABILITIES.includes(p.requiredCapability) ? p.requiredCapability : 'workspace.write',
+    requiresConfirmation: CONFIRMATION_LEVELS.includes(p.requiresConfirmation)
+      ? p.requiresConfirmation
+      : p.requiresConfirmation === true ? 'WRITE' : false,
+    // cachePolicy 既接受 `'run'` 这种字符串，也接受 `{mode:'run'}` —— 两种写法都别静默忽略
+    cachePolicy: cachesMode(p.cachePolicy, p.readOnly === true),
+    /** 副作用类别（sideEffects.cjs 的分类口径）：read / write / unknown */
+    effect: ['read', 'write', 'unknown'].includes(p.effect) ? p.effect : (p.readOnly === true ? 'read' : 'unknown'),
+    /** 该 kind 的副作用是否幂等（同参重复执行安全）。写 kind 默认 false（保守） */
+    idempotent: p.idempotent === true,
+  });
+}
+
+/**
+ * 声明一个族工具的 kind 表。键 = kind 名；值 = 该 kind 的安全语义。
+ * 返回值是冻结对象，适合直接塞进 descriptor.byKind。
+ * @param {Record<string, any>} table
+ * @returns {Readonly<Record<string, any>>}
+ */
+function normalizeByKind(table) {
+  if (!table || typeof table !== 'object') return null;
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const [kind, patch] of Object.entries(table)) {
+    const name = String(kind || '').trim();
+    if (!name) continue;
+    out[name] = normalizeKindContract(name, patch);
+  }
+  return Object.freeze(out);
+}
+
+/**
+ * 按 `kind` 解出**这次调用**真正的安全语义。
+ *
+ * @param {any} descriptor 族工具的 descriptor（可能没有 byKind）
+ * @param {any} args 本次调用参数
+ * @returns {any} 用于执行门判定的 descriptor 视图
+ */
+function effectiveDescriptor(descriptor, args) {
+  const d = descriptor || {};
+  const table = d.byKind;
+  if (!table) return d;
+  // 判别字段默认是 `kind`；个别族用别的字段名（get_workbench_model 用 view，
+  // 因为它同时要保留「读画布」的语义），由 descriptor.kindField 指定。
+  const field = String(d.kindField || 'kind');
+  /**
+   * 缺省 kind：族工具的**文档化默认动作**（如 memory 不带 action 就是检索）。
+   * 没有它就等于「不带 kind 的合法调用被当成未登记 kind → fail-closed 要求审批」，
+   * 与执行体的实际默认行为不一致（实测：memory{query} 被要求审批）。
+   */
+  const raw = String((args && args[field]) || d.defaultKind || '').trim().toLowerCase();
+  const known = Object.prototype.hasOwnProperty.call(table, raw) ? table[raw] : null;
+  if (known) {
+    return {
+      ...d,
+      readOnly: known.readOnly,
+      // 只读 kind 之所以不写，是因为它连时间戳/审计都不落 —— 与族级声明无关
+      mutatesWorkspace: known.mutatesWorkspace,
+      requiredCapability: known.requiredCapability,
+      requiresConfirmation: known.requiresConfirmation,
+      /**
+       * **必须同步强制位**：注册表门 3 的判据是 `confirmationEnforced === true`，
+       * 而它是由族级 `declareContract` 算出来的。kind 级声明如果要审批却不同步这一位，
+       * 结果就是「声明了审批但从不真的问」—— 合并最危险的 fail-open
+       * （实测：get_workbench_model(view=focus) 继承族级 false，视口动作直接跳过审批）。
+       */
+      confirmationEnforced: known.requiresConfirmation ? true : d.confirmationEnforced === true,
+      cachePolicy: { ...(d.cachePolicy || {}), mode: known.cachePolicy },
+      idempotent: known.idempotent ? true : d.idempotent,
+      sideEffect: known.effect,
+      kind: raw,
+      kindRegistered: true,
+    };
+  }
+  // fail-closed：未登记的 kind 按最保守取值，绝不放行只读/免审批路径
+  return {
+    ...d,
+    readOnly: false,
+    mutatesWorkspace: true,
+    requiredCapability: 'workspace.write',
+    requiresConfirmation: d.requiresConfirmation === 'HIGH' ? 'HIGH' : 'WRITE',
+    confirmationEnforced: true,
+    cachePolicy: { ...(d.cachePolicy || {}), mode: 'none' },
+    idempotent: false,
+    sideEffect: 'unknown',
+    kind: raw,
+    kindRegistered: false,
+  };
+}
 
 function toPositiveInt(value) {
   // 注意：null / undefined / '' 必须返回 null（= 未声明），不能落到 Number(null)=0 ——
@@ -214,6 +353,16 @@ function normalizeDescriptor(input) {
     },
     // null = 由 ROLE_TOOLS 决定（toolkit.filterByRole 负责），显式给了就按显式来
     roleAllowlist: Array.isArray(d.roleAllowlist) ? d.roleAllowlist.slice() : null,
+    /**
+     * 族工具（合并后一个名字承载多个动作）的 `kind` 级安全语义；null = 普通单义工具。
+     * 执行时由 `effectiveDescriptor(descriptor, args)` 解出这次调用真正的 readOnly/审批/能力。
+     * @type {Readonly<Record<string, any>>|null}
+     */
+    byKind: normalizeByKind(d.byKind),
+    /** 族工具的判别字段名（默认 'kind'；get_workbench_model 用 'view'，memory 用 'action'） */
+    kindField: d.byKind && typeof d.kindField === 'string' && d.kindField.trim() ? d.kindField.trim() : (d.byKind ? 'kind' : null),
+    /** 不传判别字段时的默认 kind（必须与执行体的默认分支一致） */
+    defaultKind: d.byKind && typeof d.defaultKind === 'string' && d.defaultKind.trim() ? d.defaultKind.trim() : null,
     source: d.explicit === true ? 'explicit' : 'legacy',
   };
 }
@@ -266,6 +415,7 @@ function describeDescriptor(descriptor) {
 
 module.exports = {
   READ_ONLY_TOOLS,
+  FAMILY_TOOLS,
   CONDITIONAL_MUTATORS,
   CACHEABLE_TOOLS,
   MUTATION_TOOLS,
@@ -279,4 +429,7 @@ module.exports = {
   normalizeDescriptor,
   descriptorForLegacy,
   describeDescriptor,
+  // 族工具（工具面收敛）：kind 级安全语义 —— 见 docs/tool-consolidation.zh-CN.md §5 规则 1
+  normalizeByKind,
+  effectiveDescriptor,
 };

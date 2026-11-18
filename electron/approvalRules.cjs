@@ -102,7 +102,12 @@ function matchRule(rules, req) {
   for (const rule of list) {
     if (!rule) continue;
     if (rule.capability && String(rule.capability) !== String(r.capability || '')) continue;
-    if (rule.tool && String(rule.tool) !== String(r.tool || '')) continue;
+    /**
+     * 工具面收敛（docs/tool-consolidation.zh-CN.md §5 规则 2）：规则文件里可能写着**旧工具名**。
+     * 调用走旧名别名时，注册表会把「原本请求的名字」放在 `aliasedTool` 里 —— 规则命中他即可。
+     * 否则一条已存的 `{tool:'ui_control'}` 免打扰规则会**静默失效**，用户会突然被多问一次。
+     */
+    if (rule.tool && String(rule.tool) !== String(r.tool || '') && String(rule.tool) !== String(r.aliasedTool || '')) continue;
     if (rule.level && String(rule.level).toUpperCase() !== String(r.level || '').toUpperCase()) continue;
     return rule;
   }

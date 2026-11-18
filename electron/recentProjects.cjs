@@ -15,8 +15,9 @@ const normalizeEntry = input => {
   return { root, ...(file ? { file } : {}), name: String(input && input.name || nameOf(file || root)).slice(0, 160), openedAt: Number(input && input.openedAt) || Date.now() };
 };
 const same = (a, b) => {
-  const key = value => normalizePath(value).toLowerCase();
-  return key(a.file) && key(b.file) ? key(a.file) === key(b.file) : key(a.root) === key(b.root);
+  const key = value => normalizePath(value).replace(/\\/g, '/').toLowerCase();
+  if (a.file || b.file) return !!a.file && !!b.file && key(a.file) === key(b.file);
+  return key(a.root) === key(b.root);
 };
 function read(userDataDir) {
   const file = fileOf(userDataDir);

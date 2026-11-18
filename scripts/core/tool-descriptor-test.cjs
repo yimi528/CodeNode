@@ -105,19 +105,39 @@ const REGISTRY_KEYS = [
     const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: true });
     const specs = registry.listTools();
     const descriptors = registry.listDescriptors();
-    check('B1 每个注册工具都有契约，且字段齐全', specs.length === descriptors.length && descriptors.length >= 24 &&
+    check('B1 每个注册工具都有契约，且字段齐全', specs.length === descriptors.length && descriptors.length >= 20 &&
       descriptors.every((d) => REGISTRY_KEYS.every((k) => d[k] !== undefined)), JSON.stringify({ specs: specs.length, descriptors: descriptors.length }));
     check('B2 契约顺序与工具顺序一致（UI 可对照）', descriptors.every((d, i) => d.name === specs[i].name));
     check('B3 describeAll() 与 listDescriptors() 一一对应', registry.describeAll().length === descriptors.length &&
       registry.describeAll().every((s, i) => s.name === descriptors[i].name));
+    /**
+     * 工具面收敛（docs/tool-consolidation.zh-CN.md）：`query_scalars` 并进 `retrieve_context`，
+     * `get_workbench_model` 收编了 ui_control 的视口动作（族级 readOnly=false，由 byKind 决定）。
+     * 所以这里判据改成「按 kind 解出后的语义」——直接查族级 descriptor 会误判。
+     */
     check('B4 只读工具确实都在 READ_ONLY_TOOLS 里（含 retrieve_context / get_workbench_model / poll_job）',
-      ['read_file', 'retrieve_context', 'get_workbench_model', 'poll_job', 'query_scalars'].every((n) => registry.descriptorOf(n).readOnly === true),
-      JSON.stringify(['read_file', 'retrieve_context', 'get_workbench_model', 'poll_job', 'query_scalars'].map((n) => registry.descriptorOf(n).readOnly)));
+      ['read_file', 'retrieve_context', 'poll_job'].every((n) => registry.descriptorOf(n).readOnly === true) &&
+      descriptorLib.effectiveDescriptor(registry.descriptorOf('get_workbench_model'), { view: 'full' }).readOnly === true,
+      JSON.stringify({
+        read_file: registry.descriptorOf('read_file').readOnly,
+        retrieve_context: registry.descriptorOf('retrieve_context').readOnly,
+        poll_job: registry.descriptorOf('poll_job').readOnly,
+        get_workbench_model_full: descriptorLib.effectiveDescriptor(registry.descriptorOf('get_workbench_model'), { view: 'full' }).readOnly,
+      }));
     check('B5 写工具都不是只读（fail-closed：未声明即 write）',
-      ['write_file', 'edit_file', 'bulk_edit', 'workbench_edit', 'save_project', 'execute_shell', 'ui_control'].every((n) => registry.descriptorOf(n).readOnly === false));
-    check('B6 save_project 是显式契约（唯一行为有变化：执行前需用户确认）',
-      registry.descriptorOf('save_project').source === 'explicit' && registry.descriptorOf('save_project').requiresConfirmation === 'WRITE' &&
-      registry.descriptorOf('save_project').confirmationEnforced === true);
+      ['write_file', 'edit_file', 'workbench_edit', 'execute_shell'].every((n) => registry.descriptorOf(n).readOnly === false) &&
+      // 收编后：bulk_edit / save_project / ui_control 是 workbench_edit / get_workbench_model 的 kind
+      descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).readOnly === false &&
+      descriptorLib.effectiveDescriptor(registry.descriptorOf('get_workbench_model'), { view: 'focus' }).readOnly === false,
+      JSON.stringify({
+        write_file: registry.descriptorOf('write_file').readOnly,
+        workbench_edit: registry.descriptorOf('workbench_edit').readOnly,
+        save_project_kind: descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).readOnly,
+      }));
+    check('B6 save_project 在族里仍声明 requiresConfirmation=WRITE（合并前后一致）',
+      descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).requiresConfirmation === 'WRITE' &&
+      descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).requiredCapability === 'project.save',
+      JSON.stringify(descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).requiresConfirmation));
     check('B7 execute_shell / poll_job 自管超时（timeoutMs=0），避免注册表和工具各设一层超时',
       registry.descriptorOf('execute_shell').timeoutMs === 0 && registry.descriptorOf('poll_job').timeoutMs === 0,
       JSON.stringify({ shell: registry.descriptorOf('execute_shell').timeoutMs, poll: registry.descriptorOf('poll_job').timeoutMs }));
@@ -235,17 +255,18 @@ const REGISTRY_KEYS = [
       confirm: async (level, what) => { confirmCalls.push({ level, what }); return false; },
       saveProject: async () => { saved += 1; return path.join(root, 'workflow.cnode'); },
     });
-    const denied = await registry.execute('save_project', {}, deniedContext);
+    const denied = await registry.execute('workbench_edit', { kind: 'save_project' }, deniedContext);
     check('F3 用户不批准 → 工具不执行（APPROVAL_DENIED，副作用计数为 0）',
       denied.ok === false && denied.data.code === 'APPROVAL_DENIED' && saved === 0, JSON.stringify({ ok: denied.ok, code: denied.data.code, saved }));
-    check('F4 确认请求带上了 WRITE 级别与工具名', confirmCalls.length === 1 && confirmCalls[0].level === 'WRITE' && confirmCalls[0].what === 'save_project',
+    // 收编后审批请求的 what 是族工具名（workbench_edit），kind 从参数看
+    check('F4 确认请求带上了 WRITE 级别与工具名', confirmCalls.length === 1 && confirmCalls[0].level === 'WRITE' && confirmCalls[0].what === 'workbench_edit',
       JSON.stringify(confirmCalls));
 
     const approvedContext = makeContext({
       confirm: async () => true,
       saveProject: async () => { saved += 1; return path.join(root, 'workflow.cnode'); },
     });
-    const approved = await registry.execute('save_project', {}, approvedContext);
+    const approved = await registry.execute('workbench_edit', { kind: 'save_project' }, approvedContext);
     check('F5 用户批准 → 正常执行', approved.ok === true && saved === 1 && approved.data.filePath.endsWith('workflow.cnode'), JSON.stringify({ ok: approved.ok, saved }));
 
     // 旧 register() 的写工具不会被注册表级确认拦下：用一个「内部不自我确认」的旧接口写工具验证——

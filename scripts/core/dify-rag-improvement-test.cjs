@@ -7,7 +7,9 @@ const path = require('node:path');
 const http = require('node:http');
 const { fileChangeReview } = require("../../electron/tools/fileChangeReview.cjs");
 const ragSettings = require("../../electron/ragSettings.cjs");
-const { register } = require("../../electron/tools/impl/difyCallTool.cjs");
+const descriptorLib = require("../../electron/tools/descriptor.cjs");
+// 工具面收敛：dify_call 已并入 web(kind=dify)，模块只导出执行体 execute
+const { execute: difyExecute } = require("../../electron/tools/impl/difyCallTool.cjs");
 const toolkit = require("../../electron/tools/toolkit.cjs");
 const cnode = require("../../electron/cnode.cjs");
 const { GraphModel } = require("../../electron/tools/GraphModel.cjs");
@@ -33,12 +35,17 @@ async function main() {
   assert.equal(edited.data.review.changes[0].kind, 'added');
   assert.equal(edited.data.review.changes[0].nodeId, 'task-a');
 
-  const unconfigured = toolkit.buildDefaultRegistryWithConfig({ difyEnabled: false });
-  assert.equal(unconfigured.contains('dify_call'), false);
-  const configured = toolkit.buildDefaultRegistryWithConfig({ difyEnabled: true });
-  const contract = configured.descriptorOf('dify_call');
+  /**
+   * 工具面收敛（L2）：`dify_call` 并入族工具 `web`（kind=dify）。
+   * 判据从「配置关了就不注册」改成「按 kind 解出的契约」——族里 fetch 一直在，
+   * 但 dify 这个 kind 的 HIGH 审批与 network.request 能力必须逐字不变。
+   */
+  const contract = descriptorLib.effectiveDescriptor(toolkit.buildDefaultRegistryWithConfig({ difyEnabled: true }).descriptorOf('web'), { kind: 'dify' });
   assert.equal(contract.requiredCapability, 'network.request');
   assert.equal(contract.requiresConfirmation, 'HIGH');
+  const aliasTarget = toolkit.buildDefaultRegistryWithConfig({ difyEnabled: false }).listAliases().find((a) => a.name === 'dify_call');
+  assert.equal(aliasTarget.family, 'web');
+  assert.equal(aliasTarget.kind, 'dify');
 
   const calls = [];
   const server = http.createServer(async (req, res) => {
@@ -71,8 +78,7 @@ async function main() {
     assert.equal((text.match(/rag.embed_provider=/g) || []).length, 1);
 
     fs.appendFileSync(path.join(root, '.codenode', 'agent.properties'), `dify.enabled=true\ndify.base=${base}/v1\ndify.api_key=test-secret\ndify.kind=workflow\n`);
-    /** @type {any} */ let handler;
-    register({ register(name, _description, _schema, fn) { if (name === 'dify_call') handler = fn; }, declareContract() { return true; } });
+    /** @type {any} */ let handler = difyExecute;
     assert.ok(handler);
     const audit = [];
     const result = await handler({ projectRoot: () => root, signal: () => null, audit: (entry) => audit.push(entry) }, { inputs: { subject: 'demo' } });

@@ -40,39 +40,41 @@ const PROFILE_TOOLS = Object.freeze({
   /** 常驻核心面：读、写、找、跑命令、看进程、取项目知识、技能正文、写计划、求助、记忆写入 */
   core: Object.freeze([
     'read_file', 'write_file', 'edit_file',
-    'find_files', 'search_files', 'list_directory',
+    'list_files', 'search_files',
     'execute_shell', 'poll_job',
     'read_skill',
-    'update_plan', 'ask_user', 'remember',
+    'update_plan', 'ask_user', 'memory',
     'discover_tools',
   ]),
-  /** 代码面：项目级只读分析 + 看图（规则 17/18 点名的 scan_project / analyze_project 在这里） */
+  /**
+   * 代码面：项目级只读分析 + 看图（规则 17/18 点名的 project_overview 在这里）。
+   * `scan_project` 仍是独立工具（它不是纯只读：applyToWorkbench 会写画布，见 §L2 的排除理由）。
+   */
   code: Object.freeze([
-    'scan_project', 'project_info', 'analyze_project', 'code_review', 'view_image',
+    'scan_project', 'project_overview', 'view_image',
   ]),
-  /** 符号导航按需加载；日常代码任务不额外携带四份工具 schema。 */
+  /** 符号导航按需加载；日常代码任务不额外携带这份 schema。 */
   symbols: Object.freeze([
-    'find_definition', 'find_references', 'get_callers', 'get_callees',
+    'symbol_nav',
   ]),
-  /** 画布面：工作台模型的读写与界面动作（含标量库大字段免回灌的那几个） */
+  /** 画布面：工作台模型的读写与视口动作（含标量库大字段免回灌的那几个） */
   canvas: Object.freeze([
-    'get_workbench_model', 'workbench_edit', 'bulk_edit', 'query_scalars',
-    'write_analysis_md', 'ui_control', 'save_project',
+    'get_workbench_model', 'workbench_edit', 'retrieve_context',
   ]),
-  /** 调研面：出网 + 记忆检索 */
+  /** 调研面：出网 + 记忆检索 + 标量/向量检索 */
   research: Object.freeze([
-    'fetch_url', 'web_search', 'dify_call', 'recall', 'retrieve_context', 'view_image',
+    'web', 'memory', 'retrieve_context', 'view_image',
   ]),
-  /** 编排面：子代理与工作树隔离（单价最贵的一组，实测 delegate_task 557 tokens + worktree 201） */
+  /** 编排面：子代理与工作树隔离（单价最贵的一组） */
   orchestration: Object.freeze([
-    'delegate_task', 'delegate_tasks', 'get_subagent_task', 'cancel_subagent_task',
+    'delegate', 'delegate_tasks', 'get_subagent_task', 'cancel_subagent_task',
     'inspect_subagent_retry', 'retry_subagent_task',
     'merge_subagent_results', 'review_subagent_result', 'worktree',
   ]),
   /** 单文件小改：目标文件读写、必要的定位/验证与按需取回；不常驻 RAG/编排/全项目分析。 */
   edit: Object.freeze([
     'read_file', 'write_file', 'edit_file',
-    'find_files', 'search_files', 'list_directory',
+    'list_files', 'search_files',
     'execute_shell', 'poll_job', 'read_skill', 'discover_tools',
   ]),
 });

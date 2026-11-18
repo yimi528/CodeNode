@@ -14,7 +14,7 @@ export const THEME_LABELS: Record<Theme, string> = {
 
 /** 设置入口的补充说明。 */
 export const THEME_HINTS: Record<Theme, string> = {
-  light: '明亮配色',
+  light: '浅灰面板',
   dark: '低眩光石墨灰磨砂',
   bright: '纯无色玻璃质感 · 界面不透明',
 };
@@ -29,14 +29,6 @@ export function isTheme(value: unknown): value is Theme {
 
 export function normalizeTheme(value: unknown): Theme {
   return isTheme(value) ? value : DEFAULT_THEME;
-}
-
-/**
- * 页面 color-scheme：玻璃主题是亮色玻璃，原生控件（滚动条、下拉、输入光标）
- * 必须按亮色渲染，否则在亮玻璃上会出现黑底控件。
- */
-export function themeColorScheme(theme: Theme): 'light' | 'dark' {
-  return theme === 'dark' ? 'dark' : 'light';
 }
 
 /** 主题色值集中在 config/ui.themes.json；几何与交互不随主题变化。 */

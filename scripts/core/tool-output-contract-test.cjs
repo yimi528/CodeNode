@@ -166,9 +166,10 @@ async function runScript(registry, guardedContext, calls) {
     assert.equal(fs.existsSync(withRun.data.file), true);
   });
   await test('real save_project success data satisfies the output contract', async () => {
+    // 工具面收敛：save_project 已并入 workbench_edit(kind=save_project)
     const registry = new AgentToolRegistry();
-    require("../../electron/tools/impl/saveProjectTool.cjs").register(registry);
-    const result = await registry.execute('save_project', {}, new AgentToolContext({ projectRoot: root, confirm: async () => true, saveProject: async () => path.join(root, 'saved.cnode') }));
+    require("../../electron/tools/impl/workbenchEditTool.cjs").register(registry);
+    const result = await registry.execute('workbench_edit', { kind: 'save_project' }, new AgentToolContext({ projectRoot: root, confirm: async () => true, saveProject: async () => path.join(root, 'saved.cnode') }));
     assert.equal(result.ok, true);
     assert.equal(result.data.filePath, path.join(root, 'saved.cnode'));
   });

@@ -106,6 +106,8 @@ class ApprovalService {
     const ruleHit = approvalRules.matchRule(this.rules, {
       capability: r.capability || null,
       tool: r.what || null,
+      // 旧名别名调用：规则文件里可能写的是合并前的名字，这里一并带上供 matchRule 命中
+      aliasedTool: r.aliasedTool || null,
       level: r.level || 'WRITE',
     });
     let approved = false;
@@ -209,6 +211,7 @@ class ApprovalService {
     const ruleHit = approvalRules.matchRule(this.rules, {
       capability: r.capability || null,
       tool: r.tool || null,
+      aliasedTool: r.aliasedTool || null,
       level: r.level || 'WRITE',
     });
     return {

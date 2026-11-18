@@ -1,6 +1,9 @@
 /**
- * write_analysis_md：把项目分析结果写成 Markdown 分析节点（file 节点 + 磁盘文件）。
- * content 缺省时自动从当前画布生成项目架构 markdown。返回节点 id。
+ * write_analysis_md —— **已并入 `workbench_edit`（kind=write_analysis）**，见 docs/tool-consolidation.zh-CN.md L1。
+ *
+ * 本模块只保留执行体（`execute`），供 workbenchEditTool 的族分发复用；不再注册独立工具。
+ * 旧名由 toolkit.registerLegacyAliases 登记成别名，调用时翻译成 workbench_edit + kind=write_analysis，
+ * 安全语义（workspace.write / requiresConfirmation=WRITE）由 byKind 承接。
  */
 'use strict';
 
@@ -37,77 +40,60 @@ function generateArchitecture(model) {
   return lines.join('\n');
 }
 
-function register(registry) {
-  registry.register(
-    'write_analysis_md',
-    '把项目分析结果写成 Markdown 分析节点（file 节点 + 磁盘 analysis/ 目录文件）。content 缺省时自动从画布生成项目架构；' +
-      'name 为节点名称（默认「项目分析」）；relativePath 为文件路径（默认 analysis/<时间戳>.md）。返回节点 id。',
-    {
-      type: 'object',
-      properties: {
-        content: { type: 'string', description: '分析内容（markdown），缺省自动生成项目架构' },
-        name: { type: 'string', description: '节点名称，默认「项目分析」' },
-        relativePath: { type: 'string', description: '文件相对路径，默认 analysis/<时间戳>.md' },
-        regenerate: { type: 'boolean', description: '缺省 content 时是否重新从画布生成架构，默认 true' },
-      },
-      required: [],
-    },
-    async (context, args) => {
-      const name = stringArg(args, 'name', '项目分析');
-      let content = stringArg(args, 'content', '');
-      if (!content) {
-        const regenerate = args.regenerate !== false;
-        if (regenerate) {
-          const model = context.model();
-          if (!model) return AgentToolResult.error('当前没有可用的工作台模型');
-          content = generateArchitecture(model);
-        }
-      }
-      if (!content.trim()) return AgentToolResult.error('没有可写入的分析内容（content 为空且无法自动生成架构）');
-      const relativePath = stringArg(args, 'relativePath', 'analysis/' + Date.now() + '.md');
-
-      const what = '写入分析文档 ' + relativePath + '（' + content.length + ' 字符）并创建文件节点';
-      // #10：带上内容摘要 —— 只给字符数时用户看不出写的是什么
-      const ok = await context.confirm(ConfirmationLevel.WRITE, what, '将分析内容写入 ' + relativePath + '，并在画布创建引用该文件的节点。\n' + summarizeContentForConfirm(content));
-      if (!ok) return AgentToolResult.error('已取消写入');
-
-      const root = path.resolve(context.projectRoot());
-      const target = resolveInRoot(root, relativePath);
-      if (!target) return AgentToolResult.error('路径越过项目边界');
-      try {
-        if (path.dirname(target)) fs.mkdirSync(path.dirname(target), { recursive: true });
-        // #23：与 write_file / edit_file 统一走原子替换（临时文件 + fsync + rename）
-        atomicWriteFile(target, content, 'utf-8');
-      } catch (e) {
-        return AgentToolResult.error('写入失败：' + ((e && e.message) || e));
-      }
-
-      let nodeId = '';
-      await context.mutateWorkbench((model) => {
-        const node = model.addNode('file', {
-          label: name,
-          status: 'pending',
-          filePath: relativePath,
-          prompt: '分析文档：' + relativePath,
-          accent: '#f97316',
-        }, 120, 120);
-        nodeId = node.id;
-      });
-      if (!nodeId) return AgentToolResult.error('没有创建分析节点（工作台不可用）');
+/** 执行体（族分发调用）；参数与合并前的 write_analysis_md 完全一致 */
+async function execute(context, args) {
+  const name = stringArg(args, 'name', '项目分析');
+  let content = stringArg(args, 'content', '');
+  if (!content) {
+    const regenerate = args.regenerate !== false;
+    if (regenerate) {
       const model = context.model();
-      const node = model ? model.byId(nodeId) : null;
-      const stored = node ? context.storeScalars(nodeToScalarRecords(node)) : 0;
-      context.audit('write_analysis_md name=' + name + ' path=' + relativePath + ' chars=' + content.length);
-      return AgentToolResult.ok('已写入分析节点 ' + name + '（' + content.length + ' 字符）→ ' + nodeId + (stored > 0 ? '（属性已入本地标量库）' : ''), {
-        nodeId,
-        name,
-        relativePath,
-        chars: content.length,
-        preview: content.length > 400 ? content.slice(0, 400) + '…' : content,
-      });
+      if (!model) return AgentToolResult.error('当前没有可用的工作台模型');
+      content = generateArchitecture(model);
     }
-  );
-  require('../builtInOutputSchemas.cjs').declareOutputContracts(registry, ["write_analysis_md"]);
+  }
+  if (!content.trim()) return AgentToolResult.error('没有可写入的分析内容（content 为空且无法自动生成架构）');
+  const relativePath = stringArg(args, 'relativePath', 'analysis/' + Date.now() + '.md');
+
+  const what = '写入分析文档 ' + relativePath + '（' + content.length + ' 字符）并创建文件节点';
+  // #10：带上内容摘要 —— 只给字符数时用户看不出写的是什么
+  const ok = await context.confirm(ConfirmationLevel.WRITE, what, '将分析内容写入 ' + relativePath + '，并在画布创建引用该文件的节点。\n' + summarizeContentForConfirm(content));
+  if (!ok) return AgentToolResult.error('已取消写入');
+
+  const root = path.resolve(context.projectRoot());
+  const target = resolveInRoot(root, relativePath);
+  if (!target) return AgentToolResult.error('路径越过项目边界');
+  try {
+    if (path.dirname(target)) fs.mkdirSync(path.dirname(target), { recursive: true });
+    // #23：与 write_file / edit_file 统一走原子替换（临时文件 + fsync + rename）
+    atomicWriteFile(target, content, 'utf-8');
+  } catch (e) {
+    return AgentToolResult.error('写入失败：' + ((e && e.message) || e));
+  }
+
+  let nodeId = '';
+  await context.mutateWorkbench((model) => {
+    const node = model.addNode('file', {
+      label: name,
+      status: 'pending',
+      filePath: relativePath,
+      prompt: '分析文档：' + relativePath,
+      accent: '#f97316',
+    }, 120, 120);
+    nodeId = node.id;
+  });
+  if (!nodeId) return AgentToolResult.error('没有创建分析节点（工作台不可用）');
+  const model = context.model();
+  const node = model ? model.byId(nodeId) : null;
+  const stored = node ? context.storeScalars(nodeToScalarRecords(node)) : 0;
+  context.audit('write_analysis_md name=' + name + ' path=' + relativePath + ' chars=' + content.length);
+  return AgentToolResult.ok('已写入分析节点 ' + name + '（' + content.length + ' 字符）→ ' + nodeId + (stored > 0 ? '（属性已入本地标量库）' : ''), {
+    nodeId,
+    name,
+    relativePath,
+    chars: content.length,
+    preview: content.length > 400 ? content.slice(0, 400) + '…' : content,
+  });
 }
 
-module.exports = { register };
+module.exports = { execute, generateArchitecture };

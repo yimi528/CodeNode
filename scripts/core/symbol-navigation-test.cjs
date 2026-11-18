@@ -9,6 +9,7 @@ const { LocalRagIndex, getProjectIndex, invalidateProjectIndex, clearIndexCache 
 const { queryNavigation } = require(path.join(moduleRoot, 'electron/rag/symbolNavigation.cjs'));
 const { AgentToolContext } = require(path.join(moduleRoot, 'electron/tools/context.cjs'));
 const toolkit = require(path.join(moduleRoot, 'electron/tools/toolkit.cjs'));
+const descriptorLib = require(path.join(moduleRoot, 'electron/tools/descriptor.cjs'));
 const { classify } = require(path.join(moduleRoot, 'electron/sideEffects.cjs'));
 
 async function main() {
@@ -76,39 +77,42 @@ async function main() {
 
     const registry = toolkit.buildDefaultRegistryWithConfig({ toolProfile: 'off' });
     const context = new AgentToolContext({ projectRoot: root, ragConfig: config, readOnly: true, capabilities: ['workspace.read'] });
-    for (const name of ['find_definition', 'find_references', 'get_callers', 'get_callees']) {
-      const descriptor = registry.descriptorOf(name);
+    // 工具面收敛 L2：四个符号工具合并成 `symbol_nav`（kind 决定查哪种关系）
+    for (const kind of ['definition', 'references', 'callers', 'callees']) {
+      const descriptor = descriptorLib.effectiveDescriptor(registry.descriptorOf('symbol_nav'), { kind });
       assert.equal(descriptor.readOnly, true); assert.equal(descriptor.mutatesWorkspace, false);
-      assert.equal(descriptor.cachePolicy.mode, 'none'); assert.equal(classify(name), 'read');
-      const result = await registry.execute(name, { symbol: 'go', path: 'a.ts' }, context);
+      assert.equal(descriptor.cachePolicy.mode, 'none'); assert.equal(classify('symbol_nav', { kind }), 'read');
+      const result = await registry.execute('symbol_nav', { kind, symbol: 'go', path: 'a.ts' }, context);
       assert.equal(result.ok, true, result.text); assert.equal(result.data.approximate, true);
       assert.ok(result.data.limitations.includes('read_file')); assert.equal(result.data.index.parseErrorFiles, 1);
-      assert.ok(registry.toOpenAiTools().some((tool) => tool.function.name === name));
+      assert.ok(registry.toOpenAiTools().some((tool) => tool.function.name === 'symbol_nav'));
       for (const role of ['explorer', 'builder', 'verifier', 'reviewer']) {
-        assert.ok(toolkit.buildDefaultRegistryWithConfig({ role, toolProfile: 'off' }).contains(name), role + ' has navigation');
+        assert.ok(toolkit.buildDefaultRegistryWithConfig({ role, toolProfile: 'off' }).contains('symbol_nav'), role + ' has navigation');
       }
     }
+    // 旧名仍是别名（模型历史消息 / 用例里的旧名照旧可用）
+    assert.equal((await registry.execute('find_definition', { symbol: 'go', path: 'a.ts' }, context)).ok, true);
     assert.equal((await registry.execute('find_definition', { symbol: 'go', path: '../outside' }, context)).ok, false);
     assert.equal((await registry.execute('find_definition', { symbol: 'go', line: 2 }, context)).ok, false);
     assert.equal((await registry.execute('find_definition', { symbol: 'go', maxResults: 101 }, context)).ok, false);
     assert.equal((await registry.execute('find_definition', { symbol: 'missing' }, context)).data.count, 0);
     const denied = toolkit.buildDefaultRegistryWithConfig({ toolsDeny: ['find_definition'] });
-    assert.equal(denied.contains('find_definition'), false);
+    assert.equal(denied.contains('symbol_nav'), false);
     const disabled = toolkit.buildDefaultRegistryWithConfig({ ragEnabled: false });
-    assert.equal(disabled.contains('get_callers'), true);
-    assert.equal(disabled.contains('query_scalars'), true);
+    assert.equal(disabled.contains('symbol_nav'), true);
+    assert.equal(disabled.contains('retrieve_context'), true);
     const noRag = new AgentToolContext({ projectRoot: root, ragConfig: { ...config, enabled: false } });
-    assert.equal((await disabled.execute('find_definition', { symbol: 'go' }, noRag)).ok, true);
+    assert.equal((await disabled.execute('symbol_nav', { kind: 'definition', symbol: 'go' }, noRag)).ok, true);
     const profiles = toolkit.profiles;
     const normal = profiles.resolveToolProfiles({ prompt: '修复功能' });
-    assert.ok(!profiles.namesForProfiles(normal.profiles, registry.listTools().map((tool) => tool.name)).includes('get_callers'));
+    assert.ok(!profiles.namesForProfiles(normal.profiles, registry.listTools().map((tool) => tool.name)).includes('symbol_nav'));
     const navigation = profiles.resolveToolProfiles({ prompt: '查符号 go 的调用链' });
-    assert.ok(profiles.namesForProfiles(navigation.profiles, registry.listTools().map((tool) => tool.name)).includes('get_callers'));
+    assert.ok(profiles.namesForProfiles(navigation.profiles, registry.listTools().map((tool) => tool.name)).includes('symbol_nav'));
     toolkit.registerDiscoverTool(registry);
     registry.setExposure(profiles.namesForProfiles(normal.profiles, registry.listTools().map((tool) => tool.name)));
-    assert.equal(registry.isExposed('find_definition'), false);
-    const discovered = await registry.execute('discover_tools', { query: 'find_definition' }, context);
-    assert.equal(discovered.ok, true, discovered.text); assert.equal(registry.isExposed('find_definition'), true);
+    assert.equal(registry.isExposed('symbol_nav'), false);
+    const discovered = await registry.execute('discover_tools', { query: 'symbol' }, context);
+    assert.equal(discovered.ok, true, discovered.text); assert.equal(registry.isExposed('symbol_nav'), true);
     const controller = new AbortController(); controller.abort();
     const cancelled = new AgentToolContext({ projectRoot: root, ragConfig: config, signal: controller.signal });
     assert.equal((await registry.execute('find_definition', { symbol: 'go' }, cancelled)).ok, false);

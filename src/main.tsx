@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
+import welcomeLogo from '../assets/branding/welcome-logo.png';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useGraphStore } from './store/graphStore';
@@ -39,6 +40,12 @@ w.__codenodeVectorActive = getActiveVectorNode;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
+    <div className="window-titlebar" aria-hidden="true">
+      <div className="window-titlebar-brand">
+        <img src={welcomeLogo} alt="" />
+        <span>CodeNode</span>
+      </div>
+    </div>
     <ErrorBoundary>
       <ReactFlowProvider>
         <App />

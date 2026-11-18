@@ -218,9 +218,10 @@ const WRITE_TOOLS = ['write_file', 'edit_file', 'workbench_edit', 'save_project'
   {
     const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false, toolsAllowed: [] });
     new SubagentManager({ agent: { runAgentChat: async () => ({}) }, toolkit, cfg: { tools: {} }, registry }).register(registry);
-    const desc = String(registry.descriptorOf('delegate_task').description || '');
+    // 工具面收敛 L3：派活入口是族工具 `delegate`（旧名 delegate_task 是它的别名）
+    const desc = String(registry.descriptorOf('delegate').description || '');
     const missing = roles.ROLE_NAMES.filter((name) => !desc.includes(name) || !desc.includes(roles.roleLabel(name)));
-    check('E1 delegate_task 描述里每个角色都带身份名（主代理据此派活）', missing.length === 0, missing.join(','));
+    check('E1 delegate 描述里每个角色都带身份名（主代理据此派活）', missing.length === 0, missing.join(','));
     check('E2 描述里带「工作类型」而不仅是角色名（能对上工作与角色）',
       /回答「在哪里/.test(desc) && /跑测试/.test(desc) && /审查/.test(desc), desc.slice(0, 160));
   }

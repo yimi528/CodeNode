@@ -1,3 +1,7 @@
+.glass-theme.ui-clean .workspace-canvas .canvas-wrap {
+  background: var(--workbench-canvas);
+}
+
 .canvas-wrap.canvas-raster-mode::after { display: none; }
 .canvas-raster-mode .workflow-canvas-layer {
   position: absolute;
