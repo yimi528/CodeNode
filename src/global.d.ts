@@ -79,6 +79,7 @@ interface ToolRecordDto {
 }
 
 interface ToolRequestDto {
+  rememberActions?: string[];
   id: string;
   type: 'confirm' | 'ask' | 'ui' | 'cancel' | 'editor_read';
   path?: string;

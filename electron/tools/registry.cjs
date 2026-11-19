@@ -504,7 +504,8 @@ class AgentToolRegistry {
           const preview = approvalForPreview.preview({
             capability: descriptor.requiredCapability || null,
             tool: name,
-            level: descriptor.requiresConfirmation || 'WRITE',
+            actionIds: call.ids,
+            level: destructiveCanvas ? 'HIGH' : descriptor.requiresConfirmation || 'WRITE',
           });
           ruleAllows = preview.ruleAllows === true;
         }
@@ -603,6 +604,8 @@ class AgentToolRegistry {
         capability: descriptor.requiredCapability || null,
         level: destructiveCanvas ? 'HIGH' : descriptor.requiresConfirmation,
         what: name,
+        actionIds: call.ids,
+        forcePrompt: intentTighten,
         detail: (descriptor.description || '') + intentNote,
         scope,
         toolCallId,

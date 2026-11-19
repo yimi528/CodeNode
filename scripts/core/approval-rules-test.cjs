@@ -13,6 +13,7 @@
  */
 'use strict';
 
+const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -66,6 +67,54 @@ sandbox.setDefaultPolicy(policy);
     check('[B] tool 不同 → 不命中', rules.matchRule(list, { capability: 'workspace.write', tool: 'bulk_edit', level: 'WRITE' }) === null);
     check('[B] 规则只写了 tool（没写 capability/level）→ 命中该工具的任意级别', rules.matchRule(list, { capability: 'workspace.write', tool: 'edit_file', level: 'HIGH' }).id === 'r2');
     check('[B] 工具名形态判定：shell 命令文本不是可记忆的 tool', rules.isRememberableTool('write_file') === true && rules.isRememberableTool('在项目目录执行命令：npm install') === false);
+  }
+
+  {
+    const tool = 'workbench_edit';
+    const request = { tool, capability:'workspace.write', level:'WRITE' };
+    const move = 'workbench_edit.move';
+    const rename = 'workbench_edit.rename';
+    const remove = 'workbench_edit.delete';
+    const preview = actionIds => service.preview({ ...request, actionIds }).ruleAllows;
+    const service = new ApprovalService({ loadRules: () => rules.readRules(root).rules, confirm: async () => false });
+    assert.equal(rules.addRule(root, { ...request, actionIds:[move, move] }).ok, true);
+    assert.equal(rules.addRule(root, { ...request, actionIds:[move] }).duplicate, true);
+    assert.equal(preview([move]), true);
+    assert.equal(preview([move, rename]), false);
+    assert.equal(rules.addRule(root, { ...request, actionIds:[move, rename] }).ok, true);
+    assert.equal(preview([rename, move, move]), true);
+    assert.equal(preview([move, remove]), false);
+    assert.equal(preview([]), false);
+    assert.equal(preview(['workbench_edit.unknown']), false);
+    assert.equal(service.preview({ ...request, actionIds:[move], level:'HIGH' }).ruleAllows, false);
+    assert.equal(service.preview({ ...request, actionIds:[move], capability:'project.save' }).ruleAllows, false);
+    assert.equal(await service.request({ ...request, what:tool, actionIds:[move, remove] }), null);
+    assert.equal(await service.request({ ...request, what:tool, actionIds:[move], forcePrompt:true }), null);
+    const persisted = rules.readRules(root).rules;
+    assert.deepEqual(persisted.map(r => r.action), [move, rename]);
+    assert.equal(persisted.some(r => r.tool || r.capability), false, 'v1 readers must not interpret narrower grants as wildcard grants');
+    assert.equal(rules.matchRule(persisted, { ...request, tool:move, actionIds:[move] }), null, 'extension name collision');
+
+    const legacy = [{id:'legacy-canvas', tool:'workbench_edit', level:'WRITE'}];
+    assert.equal(rules.matchRule(legacy, { ...request, actionIds:[move, rename] })?.id, 'legacy-canvas');
+    assert.equal(rules.matchRule(legacy, { tool:'save_project', actionIds:['workbench_edit.save_project'], level:'WRITE' }), null);
+    const file = rules.rulesFile(root);
+    fs.writeFileSync(file, JSON.stringify({version:1, rules:legacy}));
+    assert.equal(preview([move, rename]), true);
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 1, 'reading alone does not rewrite v1');
+    assert.equal(rules.addRule(root, {tool:'ui_control', capability:'ui.interact', level:'WRITE',
+      actionIds:['get_workbench_model.focus']}).ok, true);
+    const upgraded = rules.readRules(root);
+    assert.equal(upgraded.version, 2);
+    assert.deepEqual(upgraded.rules[0], legacy[0]);
+    assert.equal(preview([move, rename]), true, 'original grant survives saving an action rule');
+
+    // An unreadable or future-format rule file must survive a persistence attempt.
+    fs.writeFileSync(file, '{"version":99,"rules":[]}');
+    assert.equal(rules.addRule(root, { ...request, actionIds:[move] }).ok, false);
+    assert.equal(fs.readFileSync(file,'utf8'), '{"version":99,"rules":[]}');
+    rules.writeRules(root, []);
+    check('[B] 动作范围、批次全覆盖、去重、权限级别、强制复核和旧执行器边界', true);
   }
 
   // ==================== C. 执行链路（命中免打扰 / 未命中照问）====================

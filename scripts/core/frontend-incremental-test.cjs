@@ -659,6 +659,13 @@ async function testAccessibilityMarkup() {
   check('D3c 弹窗有可访问名（aria-labelledby 指向标题）', /aria-labelledby="[^"]+"/.test(dialogHtml) && /Agent 请求确认/.test(dialogHtml));
   check('D3d 弹窗有可访问描述（aria-describedby）', /aria-describedby="[^"]+"/.test(dialogHtml) && /写入 \.env/.test(dialogHtml));
   check('D3e 初始焦点可定位（tabIndex=-1 容器 + 首个可聚焦按钮）', /tabindex="-1"/.test(dialogHtml) && /<button/.test(dialogHtml));
+  check('D3 项目持久授权仅在有动作范围时显示', !dialogHtml.includes('本项目始终允许'));
+  toolStoreMod.useToolStore.setState({ current: { id: 'req-2', type: 'confirm', what: 'ui_control', detail: '', level: 'WRITE',
+    rememberActions: ['get_workbench_model.focus'] } });
+  prepareForRender();
+  const scopedDialog = renderReact(React.createElement(ToolDialogMod.default));
+  check('D3 持久授权展示实际动作', scopedDialog.includes('本项目始终允许') && scopedDialog.includes('get_workbench_model.focus'));
+
   const focusablesFn = ToolDialogMod.focusables;
   const fakeItems = [{ focus: () => {} }, { focus: () => {} }];
   const fakeNode = {

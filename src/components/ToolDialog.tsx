@@ -89,20 +89,22 @@ export default function ToolDialog() {
           <div className={`tool-dialog-level lv-${(current.level || 'write').toLowerCase()}`}>
             级别：{current.level === 'HIGH' ? '高风险（需确认）' : current.level === 'WRITE' ? '写入/修改（默认放行）' : '低风险'}
           </div>
+          {current.rememberActions?.length ? <div id={dialogId + '-actions'} className="tool-dialog-detail">授权动作：{current.rememberActions.join('、')}</div> : null}
           <div className="tool-dialog-actions">
             <button className="tool-dialog-btn cancel" onClick={cancel}>
               取消
             </button>
-            <button
+            {!!current.rememberActions?.length && <button
               className="tool-dialog-btn always"
-              title="把这个工具的允许写进本项目 .codenode/approvals.json，以后同类调用不再询问（命令类审批不记忆）"
+              aria-describedby={dialogId + '-actions'}
+              title="记住本项目中所列动作在当前能力和审批级别下的授权"
               onClick={() => {
                 respond(current.id, { ok: true, always: 'project' });
                 reset();
               }}
             >
               本项目始终允许
-            </button>
+            </button>}
             <button
               className="tool-dialog-btn allow"
               onClick={() => {
