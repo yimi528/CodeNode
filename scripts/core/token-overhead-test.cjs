@@ -362,6 +362,42 @@ async function runTurn(registry, script) {
     check('[G] 未裁剪的请求体里仍然有全部工具（负向）', offBody.tools.length === baseTools.length);
     check('[G] 单轮输入 token 下降 ≥35%', (offTokens - codeTokens) / offTokens >= 0.35,
       ((offTokens - codeTokens) / offTokens * 100).toFixed(1) + '%');
+
+    fs.writeFileSync(path.join(root, 'analysis-probe.ts'), 'export function answer() { return 42; }\n');
+    const analysisSeen = await runTurn(codeReg, [
+      { toolCalls: [{ name: 'discover_tools', args: { query: 'analyze_project' }, id: 'discover-analysis' }] },
+      { toolCalls: [{ name: 'analyze_project', args: { limitFiles: 10 }, id: 'run-analysis' }] },
+      { content: '分析完成' },
+    ]);
+    const firstTools = analysisSeen[0].body.tools;
+    const secondTools = analysisSeen[1].body.tools;
+    const toolNames = tools => tools.map(tool => tool.function.name);
+    check('[G] 首轮保留项目概况和扫描；下一轮只新增逐文件分析',
+      firstTools.length + 1 === secondTools.length &&
+      ['project_info', 'scan_project', 'discover_tools'].every(name => toolNames(firstTools).includes(name)) &&
+      !toolNames(firstTools).includes('analyze_project') &&
+      toolNames(firstTools).every(name => toolNames(secondTools).includes(name)) &&
+      toolNames(secondTools).includes('analyze_project'),
+      JSON.stringify({ before: firstTools.length, after: secondTools.length,
+        schemaTokensBefore: compaction.estimateTokens([], firstTools),
+        schemaTokensAfter: compaction.estimateTokens([], secondTools) }));
+    check('[G] 取回后可以真实执行分析并返回样本源码摘要',
+      analysisSeen[2].body.messages.some(message => message.role === 'tool' &&
+        message.tool_call_id === 'run-analysis' && String(message.content).includes('已分析') &&
+        String(message.content).includes('analysis-probe.ts')));
+    const repeat = await codeReg.execute('discover_tools', { query: 'analyze_project' }, new AgentToolContext({ projectRoot: root }));
+    check('[G] 再按完整工具名搜索，保持既有暴露面', repeat.ok === true &&
+      repeat.data.enabled.length === 0 && codeReg.schemaInfo().count === secondTools.length);
+
+    const explicit = profiles.resolveToolProfiles({ mode: 'core,code,project-analysis' });
+    check('[G] 显式 project-analysis 和 off 全量模式都包含分析工具',
+      profiles.namesForProfiles(explicit.profiles, allNames).includes('analyze_project') &&
+      toolNames(offBody.tools).includes('analyze_project'));
+    const denied = toolkit.buildDefaultRegistryWithConfig({ toolsDeny: ['analyze_project'], discoverTools: true });
+    denied.setExposure(profiles.namesForProfiles(['core', 'code'], denied.listTools().map(tool => tool.name)));
+    await denied.execute('discover_tools', { query: 'analyze_project' }, new AgentToolContext({ projectRoot: root }));
+    check('[G] 工具黑名单优先于按需发现',
+      !denied.isExposed('analyze_project') && !denied.contains('analyze_project'));
   }
 
   // ============================ H. A4 记忆预算 ============================

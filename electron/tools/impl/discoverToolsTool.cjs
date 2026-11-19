@@ -92,21 +92,27 @@ function register(registry) {
         return AgentToolResult.ok(text, { enabled: [], hidden: [], matched: 0 }, { modelContent: text });
       }
 
-      const terms_ = terms(query);
-      // ① profile 名精确命中 → 整组启用（比逐词打分更符合「我要一类能力」的说法）
-      const profileHits = profiles.PROFILE_NAMES.filter((p) => query.toLowerCase().includes(p));
-      const scored = hidden
-        .map((name) => ({ name, score: scoreTool(registry, name, terms_) }))
-        .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-
-      const picks = [];
-      for (const name of hidden) {
-        if (profileHits.some((p) => profiles.PROFILE_TOOLS[p].includes(name)) && !picks.includes(name)) picks.push(name);
+      const lowered = query.toLowerCase();
+      const exact = all.includes(query) ? query : all.find(name => name.toLowerCase() === lowered);
+      if (exact && exposed.has(exact)) {
+        const text = '工具 ' + exact + ' 已在当前工具面，可以直接调用。';
+        return AgentToolResult.ok(text, { enabled: [], hidden, matched: 0 }, { modelContent: text });
       }
-      for (const item of scored) {
-        if (picks.length >= MAX_ENABLE) break;
-        if (!picks.includes(item.name)) picks.push(item.name);
+      const picks = exact ? [exact] : [];
+      if (!exact) {
+        const terms_ = terms(query);
+        const profileHits = profiles.PROFILE_NAMES.filter(p => lowered.includes(p));
+        for (const name of hidden) {
+          if (profileHits.some(p => profiles.PROFILE_TOOLS[p].includes(name))) picks.push(name);
+        }
+        const scored = hidden
+          .map(name => ({ name, score: scoreTool(registry, name, terms_) }))
+          .filter(item => item.score > 0)
+          .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+        for (const item of scored) {
+          if (picks.length >= MAX_ENABLE) break;
+          if (!picks.includes(item.name)) picks.push(item.name);
+        }
       }
 
       if (!picks.length) {

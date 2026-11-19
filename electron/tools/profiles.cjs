@@ -27,11 +27,8 @@
  * 纪律：
  *   1. core 是普通任务的基础面；自动 edit 面也保留文件读写、定位、验证和 `discover_tools`。
  *      `discover_tools` 必须在每个自动面里，否则「取回被裁掉的工具」这条退路本身也会被裁掉。
- *   2. **规则点名的工具必须留在暴露面里**：`agent.cjs` 的常驻运行规则（4/5/17/18）直接点名
- *      scan_project / analyze_project / retrieve_context / read_file 等；把规则点名的工具裁掉，
- *      模型会照着规则去调一个不存在的工具 —— 那是真实故障模式，不只是浪费。
- *      这条纪律的代价可量化：画布轮因此仍带 code 面（≈760 tokens），画布降幅 27% 而不是 48%。
- *      要更激进可以显式配 `agent.tool_profile=core,canvas`（并自行承担规则悬空）。
+ *   2. 运行规则直接要求的工具必须可见，或由提示词按暴露面门控。
+ *      逐文件项目分析由 discover_tools 按需取回。
  *   3. 一个工具只出现在**它最小充分**的 profile 里，重叠项（retrieve_context / view_image）
  *      显式列出，不靠隐式继承 —— 名单读起来就是一个工具为什么被暴露。
  *   4. 名单外的工具名一律忽略（注册表里没有的能力不该让判定变复杂），见 resolveToolProfiles。
@@ -46,9 +43,13 @@ const PROFILE_TOOLS = Object.freeze({
     'update_plan', 'ask_user', 'remember',
     'discover_tools',
   ]),
-  /** 代码面：项目级只读分析 + 看图（规则 17/18 点名的 scan_project / analyze_project 在这里） */
+  /** 代码面：项目扫描、概况、审查与看图。 */
   code: Object.freeze([
-    'scan_project', 'project_info', 'analyze_project', 'code_review', 'view_image',
+    'scan_project', 'project_info', 'code_review', 'view_image',
+  ]),
+  /** 逐文件结构摘要。可显式选择该 profile，也可通过 discover_tools 取回。 */
+  'project-analysis': Object.freeze([
+    'analyze_project',
   ]),
   /** 符号导航按需加载；日常代码任务不额外携带四份工具 schema。 */
   symbols: Object.freeze([
@@ -152,7 +153,7 @@ function resolveToolProfiles(input) {
   }
 
   // auto：明确单文件编辑已在上面分流；其它任务以 core + code 为基线，额外面只在命中时叠加。
-  // 不做「画布替代代码面」这种省法：见 PROFILE_TOOLS 纪律 2（规则悬空 = 真实故障模式）。
+  // 画布能力叠加在代码面上。
   const profiles = ['core', 'code'];
   const reasons = [];
   if (i.canvas === true) {
