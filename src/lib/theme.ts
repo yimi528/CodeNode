@@ -14,7 +14,7 @@ export const THEME_LABELS: Record<Theme, string> = {
 
 /** 设置入口的补充说明。 */
 export const THEME_HINTS: Record<Theme, string> = {
-  light: '明亮配色',
+  light: '浅灰面板',
   dark: '低眩光石墨灰磨砂',
   bright: '纯无色玻璃质感 · 界面不透明',
 };

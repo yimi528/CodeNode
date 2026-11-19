@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
+import welcomeLogo from '../assets/branding/welcome-logo.png';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useGraphStore } from './store/graphStore';
@@ -11,7 +12,6 @@ import { useProjectStore } from './store/projectStore';
 import { useReplayStore } from './store/replayStore';
 import { getActiveVectorNode, getVectorStore, useVectorStore } from './vector/vectorStore';
 import '@xyflow/react/dist/style.css';
-import './design-system.css';
 import './styles.css';
 import './trellis.css';
 import './workflow-canvas.css';
@@ -40,6 +40,12 @@ w.__codenodeVectorActive = getActiveVectorNode;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
+    <div className="window-titlebar" aria-hidden="true">
+      <div className="window-titlebar-brand">
+        <img src={welcomeLogo} alt="" />
+        <span>CodeNode</span>
+      </div>
+    </div>
     <ErrorBoundary>
       <ReactFlowProvider>
         <App />

@@ -351,7 +351,8 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zustand": "^5.0.15",
-    "@typescript/typescript6": "^6.0.2"
+    "@typescript/typescript6": "^6.0.2",
+    "@yogesharc/thinking-orbs": "0.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",

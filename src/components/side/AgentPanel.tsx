@@ -131,11 +131,11 @@ function UsageMeter() {
  * 控件收成一行：模型 / 推理强度 / 发送（停止）；上下文与成本移到面板头部。
  */
 function PromptComposer() {
+  const pendingDraft = useSessionStore(s => s.newConversationPending);
   const [text, setText] = useState('');
   const selectedNode = useGraphStore(s => s.nodes.find(n => n.id === s.selectedId && ['task','stage','tool'].includes(n.type || '')));
   const inputText = selectedNode ? String(selectedNode.data.prompt || '') : text;
   const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
-  const pendingDraft = useSessionStore(s => s.newConversationPending);
   const projectRoot = useProjectStore(s => s.root);
   const activeSessionId = useSessionStore(s=>s.activeId);
   const conversationId=useSessionStore(s=>s.memoryConversationId);
@@ -272,6 +272,7 @@ function PromptComposer() {
   return (
     <>
       {!selectedNode && <ConversationTaskLink />}
+      {pendingDraft && !selectedNode && <div className="composer-project-context">新对话 · {projectNameOf(projectRoot || '当前项目')}</div>}
       {pendingDraft && !selectedNode && <div className="composer-project-context">新对话 · {projectNameOf(projectRoot || '当前项目')}</div>}
     <div
       className={`pp-composer${dragOver ? ' is-dragover' : ''}`}
@@ -417,6 +418,7 @@ function PromptComposer() {
 export default function AgentPanel() {
   const messages = useSessionStore((s) => s.messages);
   const streaming = useSessionStore((s) => s.streaming);
+  const streamingMessage = streaming ? messages.map((message) => message.role).lastIndexOf('assistant') : -1;
   const active = useSessionStore((s) => (s.activeId ? s.sessions[s.activeId] : null));
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -480,7 +482,7 @@ export default function AgentPanel() {
       >
 
         {messages.map((m, i) => (
-          <MessageViewMemo key={`${active?.id || 'session'}:${i}`} msg={m} isLatest={i === messages.length - 1} />
+          <MessageViewMemo key={`${active?.id || 'session'}:${i}`} msg={m} isLatest={i === messages.length - 1} isStreaming={i === streamingMessage} />
         ))}
       </div>
 

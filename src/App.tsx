@@ -2,8 +2,9 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { themeTokens, themeColorScheme } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
-import ActivityBar from './components/ActivityBar';
 import ProjectGate from './components/ProjectGate';
+import welcomeLogo from '../assets/branding/welcome-logo.png';
+import ActivityBar from './components/ActivityBar';
 import SidePanel from './components/side/SidePanel';
 import './components/side/nodeInspectorDock.css';
 import ProjectNavigation from './components/ProjectNavigation';
@@ -165,7 +166,7 @@ export default function App() {
       const key = e.key.toLowerCase();
       if (mod && key === 'p') {
         e.preventDefault();
-        useUiStore.getState().setSideTab(useUiStore.getState().sideTab === 'preview' ? 'preview' : 'project');
+        useUiStore.getState().setSideTab('project');
         window.setTimeout(() => document.querySelector<HTMLInputElement>('.files-workspace .pm-search input')?.focus(), 0);
         return;
       }
@@ -294,7 +295,7 @@ export default function App() {
     return (
       <div className="gate gate-boot">
         <div className="gate-card">
-          <div className="gate-logo">CN</div>
+          <img className="gate-logo" src={welcomeLogo} alt="" />
           <h1>CodeNode</h1>
           <p className="gate-sub">正在恢复上次工程…</p>
         </div>
@@ -308,33 +309,33 @@ export default function App() {
   return (
     <div className={`app ui-clean glass-theme theme-${theme}`}>
       <div className="app-shell"><ActivityBar/><div className="app-shell-main">
-      <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Suspense fallback={<div className="toolbar toolbar-loading" aria-hidden="true" />}>{appPage === 'workbench' ? <Toolbar /> : null}</Suspense></div>
+      <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Suspense fallback={null}><Toolbar /></Suspense></div>
       <div className={`app-body side-left${dockOpen && appPage==='workbench' && !filePreview ? ' has-dock' : ''}`}>
         <Suspense fallback={null}>
-          {loadedPages.plugins ? <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'}><PluginWorkspace /></div> : null}
-          {loadedPages.tasks ? <TaskWorkspace hidden={appPage !== 'tasks'} /> : null}
+          {loadedPages.plugins && <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'} className="app-plugin-layer"><PluginWorkspace /></div>}
+          {loadedPages.tasks && <TaskWorkspace hidden={appPage!=='tasks'}/>}
         </Suspense>
         <div className="app-workbench-layer" data-inactive={appPage!=='workbench'} aria-hidden={appPage!=='workbench'} inert={appPage!=='workbench'}>
         <div className="app-project-navigation" hidden={filePreview} inert={filePreview}><ProjectNavigation /></div>
         <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
 <div className="workspace-overview-layer" hidden={!overview}><Suspense fallback={null}><GoalOverview /></Suspense></div>
 <div className="workspace-content" hidden={overview} inert={overview}>
-            <Suspense fallback={null}>{(sideTab === 'project' || sideTab === 'preview') ? <FileWorkspace editing={sideTab === 'project'} /> : null}</Suspense>
+            {(sideTab === 'project' || filePreview) && <Suspense fallback={null}><FileWorkspace editing={sideTab === 'project'} /></Suspense>}
             {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
-            <div className="workspace-canvas" hidden={filePreview} inert={filePreview} aria-hidden={sideTab === 'project' || sideTab === 'preview'}><Suspense fallback={<CanvasLoading />}><Canvas /></Suspense></div>
+            <div className="workspace-canvas" aria-hidden={sideTab === 'project' || sideTab === 'preview'}><Suspense fallback={<CanvasLoading />}><Canvas /></Suspense></div>
             <ConversationPanel suspended={filePreview} />
           </div>
         </main>
-        <div className="app-workbench-overlays" hidden={appPage !== 'workbench' || filePreview}><AddMenu />
-        <Suspense fallback={null}>{dockOpen && appPage === 'workbench' ? <WorkbenchDock /> : null}</Suspense></div></div>
+        <div className="app-workbench-overlays" hidden={appPage!=='workbench' || filePreview}><AddMenu />
+        <Suspense fallback={null}>{dockOpen && <WorkbenchDock />}</Suspense></div></div>
       </div>
       <div hidden={appPage!=='workbench'} className="app-workbench-status"><StatusBar /></div>
       </div></div>
       <ToolDialog />
       <GoalAutoAdvanceManager />
       <Suspense fallback={(settingsOpen || modelManagerOpen) ? <DialogLoading /> : null}>
-        {settingsOpen ? <GlobalSettings /> : null}
-        {modelManagerOpen ? <ModelManager /> : null}
+        {settingsOpen && <GlobalSettings />}
+        {modelManagerOpen && <ModelManager />}
       </Suspense>
     </div>
   );

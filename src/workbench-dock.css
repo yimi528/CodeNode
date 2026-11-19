@@ -1,0 +1,305 @@
+/* ---------- Bottom workbench ---------- */
+.workbench-dock {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--dock-h, clamp(240px, 43vh, 430px));
+  min-height: 220px;
+  z-index: 950;
+  background: rgba(12, 17, 24, 0.98);
+  border-top: 1px solid rgba(137, 181, 255, 0.25);
+  box-shadow: 0 -16px 36px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+
+.dock-tabs {
+  height: 42px;
+  gap: 3px;
+  padding: 0 13px;
+  background: rgba(20, 27, 37, 0.94);
+  border-bottom-color: rgba(166, 187, 211, 0.13);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dock-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.dock-tabs button {
+  min-height: 29px;
+  color: #8494a8;
+  white-space: nowrap;
+}
+
+.dock-tabs button.active {
+  color: #dceaff;
+  background: rgba(120, 167, 255, 0.16);
+  box-shadow: inset 0 -2px #77a6ff;
+}
+
+.dock-content {
+  min-height: 0;
+}
+
+.dock-file-head,
+.dock-terminal-head,
+.dock-run-toolbar {
+  min-height: 46px;
+  padding: 8px 15px;
+  border-bottom-color: rgba(166, 187, 211, 0.12);
+}
+
+.dock-file-path {
+  color: #cfe0f7;
+}
+
+.dock-file-meta {
+  color: #8192a7;
+}
+
+.dock-search input,
+.dock-terminal-input,
+.dock-code-wrap,
+.dock-diff-code {
+  background: #0d131b;
+}
+
+.dock-search input {
+  border-color: rgba(166, 187, 211, 0.16);
+  border-radius: 7px;
+}
+
+.dock-problems,
+.dock-command-history,
+.dock-editor-tabs {
+  background: #111821;
+  border-bottom-color: rgba(166, 187, 211, 0.1);
+}
+
+.dock-editor-tabs button.active {
+  background: rgba(120, 167, 255, 0.14);
+}
+
+.dock-line-numbers {
+  background: #111821;
+  border-right-color: rgba(166, 187, 211, 0.1);
+}
+
+.dock-primary {
+  background: linear-gradient(180deg, #5f91ff, #4d7ff1);
+  border-color: transparent;
+}
+
+.dock-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #75a3ff, #5c8cff);
+}
+
+/* ---------- Small screens / narrow canvas ---------- */
+@media (max-width: 1100px) {
+  .toolbar {
+    padding-inline: 10px;
+  }
+
+  .toolbar-group {
+    padding-inline: 5px;
+  }
+
+  .sp-tab {
+    padding-inline: 4px;
+  }
+}
+
+@media (max-width: 780px) {
+  .toolbar {
+    height: 52px;
+    gap: 4px;
+  }
+
+  .toolbar-group {
+    border-left: 0;
+  }
+
+  .toolbar-ops button:nth-child(n + 6) {
+    display: none;
+  }
+
+  .app-body {
+    --dock-h: clamp(210px, 42vh, 330px);
+  }
+
+  .side-badge {
+    top: 10px;
+    left: 10px;
+  }
+
+  .pb-spacer {
+    display: none;
+  }
+
+  .pb-usage {
+    margin-left: auto;
+  }
+
+  .dock-file-head,
+  .dock-run-toolbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .dock-file-head .dock-file-meta {
+    margin-left: 0;
+  }
+
+  .dock-search {
+    order: 4;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .dock-search input {
+    flex: 1;
+    width: auto;
+  }
+
+  .dock-extension-cards {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+}
+
+
+/* 窄窗口：侧栏改为左侧浮层（不再挤压画布），默认由 App 收起，可随时点开 */
+@media (max-width: 860px) {
+  .app-body.has-dock > .side-panel {
+    margin-bottom: 0;
+  }
+
+  .side-panel {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    bottom: 10px;
+    z-index: 140;
+    max-width: calc(100% - 20px);
+    border: 1px solid rgba(166, 187, 211, 0.2);
+    border-radius: 14px;
+    box-shadow: 14px 12px 36px rgba(0, 0, 0, 0.44);
+  }
+
+  .app-body.has-dock > .side-panel {
+    bottom: calc(var(--dock-h) + 10px);
+  }
+
+  /* 浮层模式下把宽度把手放到右边，避免贴住窗口左缘时不好抓 */
+  .side-panel .pm-resize {
+    left: auto;
+    right: -4px;
+    width: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .toolbar,
+  .side-panel,
+  .pp-composer,
+  .workbench-dock {
+    background: #111720;
+    backdrop-filter: none;
+  }
+}
+/* Final responsive polish: keep the high-value controls in view at common window sizes. */
+@media (min-width: 781px) and (max-width: 1280px) {
+  .toolbar {
+    gap: 3px;
+    padding-inline: 8px;
+  }
+
+  .app-brand {
+    gap: 5px;
+    font-size: 14px;
+  }
+
+  .app-brand-sub {
+    padding-inline: 5px;
+  }
+
+  .toolbar-group {
+    gap: 0;
+    padding-inline: 3px;
+  }
+
+  .toolbar-group button {
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 780px) {
+  .toolbar {
+    overflow-x: hidden;
+  }
+
+  /* 文件操作 + 侧栏开关是窄屏的主路径，低频工作流操作仍可从快捷键/面板使用。 */
+  .toolbar-ops,
+  .toolbar-spacer {
+    display: none;
+  }
+
+  .toolbar-group:last-of-type button:nth-child(n + 3) {
+    display: none;
+  }
+
+  .toolbar-vector {
+    display: none;
+  }
+}
+
+/* 运行指标条（成本 / 隔离状态 / 最新告警）：与既有 dock 视觉一致的低亮度次要信息 */
+.dock-metrics{display:flex;flex-wrap:wrap;gap:10px;padding:6px 10px;border-top:1px solid rgba(255,255,255,.06);color:var(--text-dim,#8b8f98);font-size:11px}
+.dock-metrics span{white-space:nowrap}
+.dock-metrics-alert{color:#e0a45e}
+.dock-recovery-meta{color:var(--text-dim,#8b8f98);font-size:11px;margin-bottom:4px}
+.dock-recovery-meta strong{color:inherit}
+/* #21：需要人工复核时，把「复核什么」摆出来（未知副作用的工具名 / 待办），并给两个出口 */
+.dock-recovery-warning{color:#fde68a;font-size:11px;margin-bottom:6px}
+.dock-recovery-review{margin:6px 0;padding:7px;border:1px solid rgba(224,164,94,.45);background:rgba(224,164,94,.08);font-size:11px;color:#e8d3a8;display:flex;flex-direction:column;gap:4px}
+/* §4.2 Run 级文件回滚：沿用 dock-recovery 的视觉语言（11px / 暗色 / 等宽路径） */
+.dock-rollback-items{display:flex;flex-direction:column;gap:2px;margin:6px 0;max-height:180px;overflow:auto}
+.dock-rollback-item{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--text-dim,#8b8f98)}
+.dock-rollback-path{font:11px/1.45 Consolas,monospace;color:#cfd3dc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto}
+.dock-rollback-act{flex:0 0 auto;color:#9aa1ad}
+.dock-rollback-item[data-action="restore"] .dock-rollback-act{color:#8ab4f8}
+.dock-rollback-item[data-action="delete"] .dock-rollback-act{color:#e0a45e}
+.dock-rollback-item[data-action="skip"] .dock-rollback-act{color:#8b8f98}
+.dock-subagents-panel > strong{color:var(--text)}
+.dock-subagent-task{flex-wrap:wrap}
+.dock-subagent-task .dock-rollback-path{color:var(--text);min-width:0}
+.dock-rollback-item.dock-subagent-task .dock-rollback-act{color:var(--text-dim)}
+.dock-attempt-history{flex:1 0 100%;color:var(--text)}
+.dock-attempt-history summary{cursor:pointer;color:var(--text-dim)}
+.dock-attempt-history p{margin:4px 0;white-space:normal;overflow-wrap:anywhere}
+.dock-rollback-why{flex:0 0 auto;color:#e0a45e;font-size:10px}
+.dock-rollback-force{display:flex;align-items:center;gap:6px;margin:6px 0;font-size:11px;color:#e8d3a8;cursor:pointer}
+.dock-rollback-force input{accent-color:#e0a45e}
+.dock-recovery-review strong{color:#fca5a5}
+.dock-recovery-actions{display:flex;gap:6px;flex-wrap:wrap}
+.dock-time-travel-picker{display:inline-flex;align-items:center;gap:5px;color:var(--text-dim,#8b8f98);font-size:11px}
+.dock-time-travel-picker select{min-width:112px}
+
+/* #21：Agent 面板里的续跑复核条（与 RunsPanel 同一份计划，两条入口都能看到复核依据） */
+.ap-resume-review{margin:0 10px 8px;padding:8px 10px;border:1px solid rgba(224,164,94,.45);background:rgba(224,164,94,.08);color:#e8d3a8;font-size:11px;display:flex;flex-direction:column;gap:4px}
+.ap-resume-review-reason{color:#fde68a}
+.ap-resume-review-warning{color:#fca5a5}
+.ap-resume-review-unknown strong{color:#fca5a5}
+.ap-resume-review-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}

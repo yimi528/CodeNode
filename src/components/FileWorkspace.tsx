@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { buildTree, useProjectStore, type FileNode, type SelectedFile } from '../store/projectStore';
-import { useUiStore } from '../store/uiStore';
 import { projectNameOf, readRecentProjects, recentPathKey } from '../lib/recentProjects';
 import EditorPanel from './EditorPanel';
 import ProjectPanel, { ProjectFileTree } from './side/ProjectPanel';
 import PreviewPanel, { FilePreview } from './side/PreviewPanel';
-import './FileWorkspace.css';
 
-function WorkspaceFiles({ root, workspaceLabel, canEdit }: { root: string; workspaceLabel: ReactNode; canEdit: boolean }) {
+function WorkspaceFiles({ root, workspaceLabel }: { root: string; workspaceLabel: ReactNode }) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(!!root);
   const [error, setError] = useState<string | null>(null);
@@ -63,16 +61,6 @@ function WorkspaceFiles({ root, workspaceLabel, canEdit }: { root: string; works
     return () => { active = false; };
   }, [root, selectedPath, refresh]);
 
-  const editCurrentFile = async () => {
-    const project = useProjectStore.getState();
-    if (!canEdit || !selected || recentPathKey(project.root) !== recentPathKey(root)) return;
-    if (project.selected?.relPath !== selected.relPath) await project.openFile(selected.relPath);
-    const current = useProjectStore.getState();
-    if (current.root === project.root && current.projectFile === project.projectFile && current.selected?.relPath === selected.relPath) {
-      useUiStore.getState().openDock('editor');
-    }
-  };
-
   return <>
     <div className="files-explorer">
       <header><strong>文件</strong></header>
@@ -86,7 +74,7 @@ function WorkspaceFiles({ root, workspaceLabel, canEdit }: { root: string; works
     <div className="files-document">
       {previewError || previewLoading ? <div className="pm-preview-empty" role={previewError ? 'alert' : 'status'}>
         {previewError || '正在读取文件…'}
-      </div> : <FilePreview key={refresh} root={root} selected={selected} onEdit={canEdit && selected && !/\.cnode$/i.test(selected.relPath) ? () => void editCurrentFile() : undefined} embedded />}
+      </div> : <FilePreview key={refresh} root={root} selected={selected} embedded />}
     </div>
   </>;
 }
@@ -128,7 +116,7 @@ export default function FileWorkspace({ editing }: { editing: boolean }) {
   const workspaceNames = Array.from(choices.values(), projectNameOf);
   const selectedWorkspace = recentPathKey(browseRoot || '');
   return <section className="files-workspace" aria-label={editing ? '项目文件编辑' : '项目文件'}><div className="files-layout">
-    {editing ? <WorkspaceEditor /> : <WorkspaceFiles root={root} key={root} canEdit={!!projectRoot && recentPathKey(root) === recentPathKey(projectRoot)} workspaceLabel={
+    {editing ? <WorkspaceEditor /> : <WorkspaceFiles root={root} key={root} workspaceLabel={
       <div className="files-workspace-picker">
         <select aria-label="选择工作区" value={choices.has(selectedWorkspace) ? selectedWorkspace : ''} onChange={event => {
           setChooseError('');

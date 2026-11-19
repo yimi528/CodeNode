@@ -126,6 +126,8 @@ function isInternalUrl(url) {
 /** @type {Set<string>} 渲染层不使用的权限一律不在集合里（默认全量拒绝） */
 const ALLOWED_PERMISSIONS = new Set([]);
 
+const WINDOW_FRAME_COLOR = '#222222';
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -135,9 +137,13 @@ function createWindow() {
     minWidth: 720,
     minHeight: 560,
     title: 'CodeNode',
+    ...(process.platform === 'win32' ? {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { height: 46, color: WINDOW_FRAME_COLOR, symbolColor: '#f2f2f2' },
+    } : {}),
     // 主界面一律不透明：窗口不开 transparent，保留 DWM 外阴影。
     // 三套主题（日间／夜间／无色玻璃）都只改页面内的配色变量，不碰窗口本身。
-    backgroundColor: '#14161a',
+    backgroundColor: WINDOW_FRAME_COLOR,
     icon: resolveAppIcon(),
     autoHideMenuBar: true,
     webPreferences: {

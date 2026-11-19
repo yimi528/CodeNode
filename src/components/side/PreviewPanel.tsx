@@ -26,12 +26,11 @@ export default function PreviewPanel({ onBack, embedded = false }: { onBack: () 
   return <FilePreview root={root} selected={selected} dirty={dirty} onBack={onBack} embedded={embedded} />;
 }
 
-export function FilePreview({ root, selected, dirty = false, onBack, onEdit, embedded = false }: {
+export function FilePreview({ root, selected, dirty = false, onBack, embedded = false }: {
   root: string | null;
   selected: SelectedFile | null;
   dirty?: boolean;
   onBack?: () => void;
-  onEdit?: () => void;
   embedded?: boolean;
 }) {
   const setToast = useUiStore((s) => s.setToast);
@@ -83,7 +82,6 @@ export function FilePreview({ root, selected, dirty = false, onBack, onEdit, emb
         </div>
         {selected.relPath !== name && <div className="sp-path-sub">{selected.relPath}</div>}
         <div className="fp-actions">
-          {onEdit && <button type="button" onClick={onEdit}>编辑文件</button>}
           <button onClick={() => void copyPath()} title="复制相对路径">
             复制路径
           </button>

@@ -143,7 +143,7 @@ app.whenReady().then(async () => {
       await js(`window.__codenodeUi.getState().setTheme(${JSON.stringify(theme)})`);
       await sleep(200);
       assert.equal(await js('window.__codenodeUi.getState().theme'), theme);
-      assert.equal(windowBg(), '#14161A', theme + ' 主题下窗口底色必须始终不透明，实际 ' + JSON.stringify(win.getBackgroundColor()));
+      assert.equal(windowBg(), '#222222', theme + ' 主题下窗口底色必须始终不透明，实际 ' + JSON.stringify(win.getBackgroundColor()));
     }
 
     // ---- 5. 像素级不透明：三套主题都不允许把背后的棋盘格透出来 ----

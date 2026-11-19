@@ -124,7 +124,7 @@ app.whenReady().then(async () => {
         await waitFor(async () => await js(`document.querySelector('.files-document .fp-content')?.textContent === ${JSON.stringify(content)}`), content);
       };
       await openPreview('preview-current.txt', '当前目录文件');
-      await js(`[...document.querySelectorAll('.files-document button')].find(button => button.textContent === '编辑文件').click()`);
+      await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'p',ctrlKey:true,bubbles:true,cancelable:true}))`);
       await waitFor(async () => await js(`document.querySelector('.files-document .dock-code-editor')?.value === '保留未保存草稿'`), '显式编辑保留草稿');
       await js(`document.querySelector('.sidebar-links button[aria-label="文件"], .activity-bar button[aria-label="文件"]').click()`);
       await waitFor(async () => await js(`!!${selector}`), '返回只读文件页');
@@ -744,7 +744,9 @@ app.whenReady().then(async () => {
       await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")?.textContent==="文件内容直接打开"'), '点击文件进入只读预览');
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().sideTab'), 'preview');
       assert.equal(await win.webContents.executeJavaScript('document.querySelector(".activity-bar button[aria-current=page]").getAttribute("aria-label")'), '文件');
-      await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.files-document .fp-actions button')).find(button=>button.textContent==='编辑文件').click()`);
+      await win.webContents.executeJavaScript(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'p',ctrlKey:true,bubbles:true,cancelable:true}))`);
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".workspace-project .pm-file[title=\"readme.txt\"]")'), '编辑器项目树');
+      await win.webContents.executeJavaScript(`document.querySelector('.workspace-project .pm-file[title="readme.txt"]').click()`);
       await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .dock-code-editor")?.value==="文件内容直接打开"'), '显式编辑入口');
       win.showInactive(); await sleep(100);
       fs.mkdirSync(path.join(__dirname,"../../out"),{recursive:true});

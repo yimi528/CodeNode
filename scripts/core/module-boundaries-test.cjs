@@ -24,20 +24,20 @@ assert.ok(lines('electron/agentGrounding.cjs') <= 190, 'agent grounding module l
 assert.ok(lines('electron/agentCompression.cjs') <= 400, 'agent compression module lost its focused boundary');
 assert.ok(lines('electron/ipc/agent.cjs') <= 1880, 'electron/ipc/agent.cjs grew beyond the current migration ceiling');
 assert.ok(lines('electron/ipc/backend.cjs') <= 80, 'backend IPC module lost its focused boundary');
-assert.ok(lines('src/styles.css') <= 3910, 'src/styles.css grew beyond the current migration ceiling');
-assert.ok(lines('src/components/ProjectGate.css') <= 620, 'ProjectGate styles lost their component boundary');
-assert.match(read('src/components/ProjectGate.tsx'), /import '\.\/ProjectGate\.css'/, 'ProjectGate must own its styles');
-assert.doesNotMatch(read('src/styles.css'), /启动门禁页/, 'global styles must not absorb ProjectGate styles again');
-for (const component of ['ErrorBoundary', 'RunReplayPanel']) {
-  assert.match(read(`src/components/${component}.tsx`), new RegExp(`import '\\.\\/${component}\\.css'`), `${component} must own its styles`);
-  assert.ok(lines(`src/components/${component}.css`) <= 120, `${component} styles lost their focused boundary`);
+const desktopStyles = read('src/styles.css');
+assert.ok(lines('src/styles.css') <= 20, 'desktop stylesheet must remain an ordered entry point');
+/** @type {Array<[string, number]>} */
+const stylesheetSections = [
+  ['base', 1100], ['inspector', 260], ['workbench-frame', 520], ['workbench-dock', 330], ['workbench', 1300],
+  ['components/ProjectGate', 620], ['components/ErrorBoundary', 120], ['components/RunReplayPanel', 120],
+  ['components/ToolDialog', 240], ['components/ModelManager', 240], ['components/side/SidePanel', 1050],
+];
+for (const [file, limit] of stylesheetSections) {
+  assert.ok(desktopStyles.includes("@import './" + file + ".css';"), file + ' must be loaded by the desktop stylesheet');
+  assert.ok(lines('src/' + file + '.css') <= limit, file + ' styles exceeded their module boundary');
 }
-assert.doesNotMatch(read('src/styles.css'), /渲染崩溃兜底页|运行回放（S8）/, 'global styles must not absorb extracted component styles again');
-for (const component of ['ToolDialog', 'ModelManager']) {
-  assert.match(read(`src/components/${component}.tsx`), new RegExp(`import '\\.\\/${component}\\.css'`), `${component} must own its styles`);
-  assert.ok(lines(`src/components/${component}.css`) <= 240, `${component} styles lost their focused boundary`);
-}
-assert.doesNotMatch(read('src/styles.css'), /Agent 工具请求弹窗|模型管理对话框/, 'global styles must not absorb dialog styles again');
+assert.doesNotMatch(desktopStyles, /启动门禁页|渲染崩溃兜底页|运行回放（S8）|Agent 工具请求弹窗|模型管理对话框|左侧统一侧栏/,
+  'desktop entry point must not absorb component styles');
 
 const knownIssues = read('docs/known-issues.md');
 for (const id of ['WIN-SANDBOX', 'RELEASE-SIGNING', 'BACKEND-MATRIX', 'MODULE-SPLIT', 'MAC-PIXEL-QA']) {

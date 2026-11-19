@@ -1,109 +1,49 @@
 /* ==================== 启动门禁页（参考 svgVideoMaker 的 ProjectGate） ==================== */
 .gate {
   position: fixed;
-  inset: 0;
+  inset: var(--window-titlebar-height) 0 0;
   z-index: 900;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
   overflow: auto;
-  background:
-    radial-gradient(circle at 50% 26%, rgba(59, 130, 246, 0.16), transparent 56%),
-    var(--bg, #14161a);
-}
-
-.gate-card {
-  width: 620px;
-  max-width: 94vw;
-  padding: 38px 34px;
-  text-align: center;
-  background: var(--bg-panel, #1b1e25);
-  border: 1px solid var(--border, #2c313b);
-  border-radius: 18px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
-}
-
-/* 有最近打开记录时：左侧入口按钮 + 右侧最近列表 的双栏 */
-.gate-card.has-recent {
-  width: min(1080px, 94vw);
-  padding: 32px 30px;
-  display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(300px, 380px);
-  gap: 28px;
-  text-align: left;
-}
-
-.gate-main {
-  min-width: 0;
-}
-
-.gate-head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 20px;
-}
-
-.gate-head-text {
-  min-width: 0;
-}
-
-.gate-card.has-recent .gate-logo {
-  margin: 0;
-  flex: none;
-  width: 54px;
-  height: 54px;
-  border-radius: 14px;
-  font-size: 19px;
-}
-
-.gate-card.has-recent .gate-sub {
-  margin: 0;
-  max-width: none;
-  text-align: left;
 }
 
 /* ---- 最近打开（右栏） ---- */
 .gate-recent {
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  padding-left: 26px;
-  border-left: 1px solid rgba(166, 187, 211, 0.14);
 }
 
 .gate-recent-head {
   display: flex;
+  flex: none;
+  align-self: stretch;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding-bottom: 10px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid rgba(166, 187, 211, 0.12);
+  padding: 0 2px 16px;
+  border-bottom: 1px solid var(--gate-menu-line);
 }
 
 .gate-recent-title {
-  font-size: 12.5px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text, #d7dce4);
 }
 
 .gate-recent-clear {
   padding: 2px 8px;
-  font-size: 10.5px;
+  font-size: 13px;
   min-height: 0;
   border-radius: 7px;
   color: var(--text-dim, #8b93a3);
   background: transparent;
-  border-color: rgba(166, 187, 211, 0.22);
+  border: 0;
 }
 
 .gate-recent-list {
   list-style: none;
   margin: 0;
-  padding: 4px 0 0;
-  max-height: 380px;
+  padding: 0;
+  border-block: 1px solid var(--gate-menu-line);
   overflow-y: auto;
   scrollbar-width: thin;
 }
@@ -122,26 +62,12 @@
   gap: 2px;
   align-items: flex-start;
   text-align: left;
-  padding: 9px 30px 9px 11px;
-  margin-bottom: 6px;
-  border-radius: 10px;
-  border: 1px solid rgba(166, 187, 211, 0.14);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.gate-recent-item:hover:not(:disabled) {
-  background: rgba(120, 167, 255, 0.12);
-  border-color: rgba(120, 167, 255, 0.42);
-}
-
-.gate-recent-item.is-active {
-  border-color: rgba(120, 167, 255, 0.62);
-  background: rgba(120, 167, 255, 0.16);
+  padding: 12px 34px 12px 10px;
 }
 
 .gate-recent-name {
   width: 100%;
-  font-size: 12.5px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text, #d7dce4);
   overflow: hidden;
@@ -151,23 +77,22 @@
 
 .gate-recent-path {
   width: 100%;
-  font-size: 10.5px;
+  font-size: 12px;
   color: #7d8ea4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
   text-align: left;
 }
 
 .gate-recent-meta {
-  font-size: 10px;
+  font-size: 12px;
   color: #5f7086;
 }
 
 .gate-recent-del {
   position: absolute;
-  top: 8px;
+  top: 10px;
   right: 6px;
   width: 20px;
   height: 20px;
@@ -200,80 +125,42 @@
   color: #5f7086;
 }
 
-/* 窄屏：最近列表折到下方 */
-@media (max-width: 900px) {
-  .gate-card.has-recent {
-    grid-template-columns: 1fr;
-    width: min(620px, 94vw);
-  }
-
-  .gate-recent {
-    padding-left: 0;
-    padding-top: 18px;
-    border-left: 0;
-    border-top: 1px solid rgba(166, 187, 211, 0.14);
-  }
-
-  .gate-recent-list {
-    max-height: 240px;
-  }
-}
-
-.gate-logo {
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 16px;
-  background: linear-gradient(135deg, var(--accent, #3b82f6), #8b5cf6);
-  color: #fff;
-  font-weight: 800;
-  font-size: 22px;
-  letter-spacing: 0.5px;
-}
-
-.gate-card h1 {
-  margin: 0 0 8px;
-  font-size: 24px;
-  color: var(--text, #d7dce4);
-}
-
-.gate-sub {
-  margin: 0 auto 24px;
-  max-width: 470px;
-  color: var(--text-dim, #8b93a3);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
 .gate-actions {
   display: grid;
-  gap: 12px;
-  text-align: left;
+  border-block: 1px solid var(--gate-menu-line);
 }
 
 .gate-btn {
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  padding: 14px 18px;
+  min-height: 54px;
+  padding: 10px 0;
   text-align: left;
   cursor: pointer;
-  color: var(--text, #d7dce4);
-  background: var(--bg-panel-2, #20242c);
-  border: 1px solid var(--border, #2c313b);
-  border-radius: 12px;
-  transition: border-color 0.15s, background 0.15s, transform 0.15s;
 }
 
-.gate-btn:hover:not(:disabled) {
-  border-color: var(--accent, #3b82f6);
-  background: var(--bg-panel-3, #262c36);
-  transform: translateY(-1px);
+.gate-card :is(.gate-btn, .gate-recent-item) {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.gate-card :is(.gate-btn, .gate-recent-item):hover:not(:disabled),
+.gate-card .gate-recent-item.is-active {
+  background: var(--gate-control-hover);
+}
+
+.gate-card :is(.gate-btn, .gate-recent-item):active:not(:disabled) {
+  transform: none;
+}
+
+.gate-card :is(.gate-btn, .gate-recent-item):focus-visible {
+  outline: 2px solid var(--gate-accent);
+  outline-offset: -2px;
+}
+
+.gate-card .gate-btn + .gate-btn,
+.gate-recent-list li + li {
+  border-top: 1px solid var(--gate-menu-line);
 }
 
 .gate-btn:disabled {
@@ -287,21 +174,13 @@
 }
 
 .gate-btn-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 650;
 }
 
 .gate-btn-desc {
   font-size: 12px;
   color: var(--text-dim, #8b93a3);
-}
-
-.gate-hint {
-  margin-top: 20px;
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--text-dim, #8b93a3);
-  text-align: left;
 }
 
 .gate-card code {
@@ -322,199 +201,126 @@
   color: var(--danger, #ff7d94);
 }
 
-/* Refined start screen: one visual axis, one primary action, no nested empty panel. */
+/* 启动页主题与双栏布局 */
 .gate {
-  --gate-accent: #5856d6;
-  --gate-accent-hover: #4f4dc6;
-  --gate-page: #f2f2f7;
-  --gate-surface: #ffffff;
-  --gate-control: #f2f2f7;
-  --gate-control-hover: #e7e7ee;
-  --gate-text: #1c1c1e;
-  --gate-muted: #6e6e73;
-  --gate-line: #e5e5ea;
-  --gate-shadow: 0 28px 72px rgba(28, 28, 30, 0.1), 0 2px 8px rgba(28, 28, 30, 0.04);
+  --gate-panel-padding: clamp(24px, 4vw, 64px);
+  --gate-accent: var(--glass-accent, #ededed);
+  --gate-surface: var(--glass-surface, #363636);
+  --gate-control: var(--glass-control, #3e3e3e);
+  --gate-control-hover: var(--glass-selected, #484848);
+  --gate-text: var(--glass-text, #eeeeee);
+  --gate-muted: var(--glass-muted, #bdbdbd);
+  --gate-line: var(--glass-border, #505050);
+  --gate-menu-line: color-mix(in srgb, var(--gate-text) 18%, var(--gate-line));
+  background: var(--workbench-canvas);
+  color: var(--gate-text);
+  padding: clamp(10px, 1vw, 16px);
 }
 
-html[data-theme='dark'] .gate {
-  --gate-accent: #7d7aff;
-  --gate-accent-hover: #8b88ff;
-  --gate-page: #1c1c1e;
-  --gate-surface: #2c2c2e;
-  --gate-control: #3a3a3c;
-  --gate-control-hover: #48484a;
-  --gate-text: #f2f2f7;
-  --gate-muted: #aeaeb2;
-  --gate-line: #48484a;
-  --gate-shadow: 0 30px 80px rgba(0, 0, 0, 0.3);
-}
-
-html[data-theme='bright'] .gate {
-  --gate-page: #f5f5f7;
-  --gate-surface: #ffffff;
-  --gate-control: #f2f2f7;
-  --gate-control-hover: #e7e7ee;
-  --gate-text: #1c1c1e;
-  --gate-muted: #6e6e73;
-  --gate-line: #e5e5ea;
-}
-
-.gate {
-  padding: clamp(28px, 5vw, 64px);
-}
-
-.gate-card,
-.gate-card.has-recent {
+.gate-card {
   display: grid;
-  grid-template-columns: minmax(320px, 380px) minmax(420px, 1fr);
-  width: min(1120px, calc(100vw - 80px));
-  height: min(680px, calc(100vh - 80px));
-  min-height: 540px;
-  max-width: none;
-  padding: 0;
-  overflow: hidden;
-  text-align: left;
-  border-radius: 22px;
-  box-shadow: var(--gate-shadow);
+  grid-template-columns: minmax(0, 41fr) minmax(0, 59fr);
+  gap: clamp(10px, 1vw, 16px);
+  height: 100%;
+  min-height: 450px;
+}
+
+.gate-main,
+.gate-recent {
+  --gate-menu-width: calc((100% + 2 * var(--gate-panel-padding)) / 3);
+}
+
+.gate-main,
+.gate-recent,
+.gate-boot .gate-card {
+  min-width: 0;
+  padding: clamp(28px, 6vh, 58px) var(--gate-panel-padding);
+  border: 1px solid var(--gate-line);
+  border-radius: 16px;
+  background: var(--gate-surface);
 }
 
 .gate-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 52px 42px 40px;
+  overflow-y: auto;
 }
 
 .gate-head {
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 14px;
-  margin-bottom: 42px;
-  text-align: left;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px clamp(10px, 1.25vw, 18px);
+  margin-bottom: 12px;
 }
 
 .gate-head-text {
-  width: 100%;
+  container-type: inline-size;
 }
 
-.gate-logo,
-.gate-card.has-recent .gate-logo {
-  width: 56px;
-  height: 56px;
-  margin: 0;
-  border-radius: 15px;
-  font-size: 19px;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--gate-accent) 72%, #fff 28%), var(--gate-accent));
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--gate-accent) 22%, transparent);
+.gate-logo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  background: #f5f5f7;
 }
 
 .gate-card h1 {
   margin: 0;
-  font-size: 32px;
+  font-size: clamp(36px, 3.2vw, 52px);
   line-height: 1.15;
   letter-spacing: -0.025em;
 }
 
-.gate-sub,
-.gate-card.has-recent .gate-sub {
+.gate-head h1 {
+  font-size: clamp(20px, 17cqi, 68px);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.gate-sub {
   margin: 9px 0 0;
-  max-width: 290px;
-  text-align: left;
   font-size: 13px;
   line-height: 1.55;
 }
 
+.gate-head .gate-sub {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .gate-actions {
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-
-.gate-btn {
-  min-height: 48px;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  padding: 11px 16px;
-  border-radius: 11px;
-  text-align: center;
-  transition:
-    transform 140ms cubic-bezier(0.23, 1, 0.32, 1),
-    background-color 140ms ease,
-    border-color 140ms ease;
-}
-
-.gate-btn:hover:not(:disabled) {
-  transform: none;
-}
-
-.gate-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--gate-accent) 70%, transparent);
-  outline-offset: 2px;
-}
-
-.gate-btn:active:not(:disabled) {
-  transform: scale(0.985);
-}
-
-.gate-btn-title {
-  font-size: 13px;
-  font-weight: 650;
+  width: min(100%, max(180px, var(--gate-menu-width)));
 }
 
 .gate-btn-desc {
   display: none;
 }
 
-.gate-hint {
-  margin-top: auto;
-  padding-top: 28px;
-  text-align: left;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
 .gate-status {
   margin-top: 12px;
 }
 
+.gate-feedback {
+  overflow-wrap: anywhere;
+}
+
 .gate-recent {
-  min-width: 0;
-  margin: 0;
-  padding: 48px 42px 40px;
-  border-left: 1px solid var(--gate-line);
-  border-top: 0;
+  --gate-panel-padding: clamp(20px, 2vw, 32px);
+  min-height: 0;
+  align-items: flex-start;
+  gap: 32px;
+  padding-block: clamp(20px, 3vh, 32px);
   background: color-mix(in srgb, var(--gate-control) 58%, var(--gate-surface) 42%);
-  text-align: left;
 }
 
-.gate-recent-head {
-  padding: 0 2px 10px;
-  margin: 0;
-  border-bottom: 0;
-}
-
-.gate-recent-title {
-  font-size: 12px;
-  letter-spacing: 0.01em;
-}
-
-.gate-recent-clear {
-  border: 0;
-}
-
-.gate-recent-list {
-  max-height: calc(100% - 40px);
-  padding-top: 0;
+.gate-recent-list,
+.gate-recent-empty {
+  width: min(100%, max(256px, var(--gate-menu-width)));
 }
 
 .gate-recent-empty {
-  min-height: calc(100% - 44px);
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  justify-items: center;
   gap: 8px;
   text-align: center;
   color: var(--gate-muted);
@@ -532,57 +338,29 @@ html[data-theme='bright'] .gate {
   line-height: 1.55;
 }
 
-.gate-recent-list li + li {
-  border-top: 1px solid var(--gate-line);
+.gate-boot {
+  display: grid;
+  place-items: center;
 }
 
-.gate-recent-item {
-  margin: 0;
-  padding: 10px 34px 10px 10px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
+.gate-boot .gate-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: auto;
+  min-height: 0;
+  text-align: center;
 }
 
-.gate-recent-item:hover:not(:disabled) {
-  border-color: transparent;
-}
-
-.gate-recent-path {
-  direction: ltr;
-  text-align: left;
-}
-
-@media (max-width: 900px) {
-  .gate-card,
-  .gate-card.has-recent {
-    grid-template-columns: 1fr;
-    width: min(620px, calc(100vw - 48px));
+@media (max-width: 760px) {
+  .gate-card {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(220px, 1fr);
     height: auto;
-    min-height: 0;
+    min-height: 100%;
   }
 
-  .gate-main {
-    padding: 38px 32px 30px;
-  }
-
-  .gate-head {
-    margin-bottom: 30px;
-  }
-
-  .gate-hint {
-    margin-top: 20px;
-    padding-top: 0;
-  }
-
-  .gate-recent {
-    min-height: 220px;
-    padding: 28px 32px 30px;
-    border-left: 0;
-    border-top: 1px solid var(--gate-line);
-  }
-
-  .gate-recent-empty {
-    min-height: 150px;
+  .gate-recent-list {
+    max-height: 320px;
   }
 }

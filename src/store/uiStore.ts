@@ -11,7 +11,12 @@ export const SIDE_WIDTH_MIN = 260;
 export const SIDE_WIDTH_MAX = 520;
 export const SIDE_WIDTH_DEFAULT = 360;
 function savedTheme(): Theme {
-  try { return normalizeTheme(localStorage.getItem(THEME_STORAGE_KEY)); } catch { return DEFAULT_THEME; }
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    const theme = normalizeTheme(saved);
+    if (saved && theme !== saved) localStorage.setItem(THEME_STORAGE_KEY, theme);
+    return theme;
+  } catch { return DEFAULT_THEME; }
 }
 
 const initialPreferences = loadUiPreferences();
