@@ -38,6 +38,14 @@ export default function GoalOverview(){
  </section>;
 }
 export function WorkbenchViewSwitcher(){
- const {preferences,updatePreferences}=useUiStore();
- return <nav className="workbench-view-switch" aria-label="工作台视图"><button aria-current={preferences.workbenchView==='overview'?'page':undefined} aria-label="切换到总览" onClick={()=>updatePreferences({workbenchView:'overview'})}>总览</button><button aria-current={preferences.workbenchView==='conversation'?'page':undefined} aria-label="切换到对话" onClick={()=>updatePreferences({workbenchView:'conversation'})}>对话</button></nav>;
+ const {preferences,updatePreferences,sideTab,setSideTab}=useUiStore();
+ const filePreview = sideTab === 'preview';
+ const selectView = (workbenchView: typeof preferences.workbenchView) => {
+   if (filePreview) setSideTab('agent');
+   updatePreferences({workbenchView});
+ };
+ return <nav className="workbench-view-switch" aria-label="工作台视图">
+   <button aria-current={!filePreview && preferences.workbenchView==='overview'?'page':undefined} aria-label="切换到总览" onClick={()=>selectView('overview')}>总览</button>
+   <button aria-current={!filePreview && preferences.workbenchView==='conversation'?'page':undefined} aria-label="切换到对话" onClick={()=>selectView('conversation')}>对话</button>
+ </nav>;
 }

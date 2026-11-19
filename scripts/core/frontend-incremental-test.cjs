@@ -125,8 +125,12 @@ function stubZustand() {
   };
 }
 
+const getViewport = () => ({ x: 0, y: 0, zoom: 1 });
 const stubModules = {
-  '@xyflow/react': { useReactFlow: () => ({ getViewport: () => ({ x: 0, y: 0, zoom: 1 }), fitView: () => {} }) },
+  '@xyflow/react': {
+    useViewport: getViewport,
+    useReactFlow: () => ({ getViewport, fitView: () => {} }),
+  },
   zustand: stubZustand(),
   'zustand/react': stubZustand(),
   'react-dom/server': require(path.join(PROJECT, 'node_modules', 'react-dom', 'server')),
@@ -737,9 +741,18 @@ async function testSessionOwnershipRace() {
 
 }
 
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let watchdog;
+
 async function main() {
   installApi();
   loadConfig();
+  // 从用例开始计时，避免同步转译模块消耗异步挂起检测的时限。
+  watchdog = setTimeout(() => {
+    console.error('FRONTEND INCREMENTAL TEST: FAIL —— 用例超时未结束（有大挂起）');
+    process.exit(1);
+  }, 30000);
+
   await testInflightRegistry();
   await testSendGuardAndConcurrency();
   await testSessionOwnershipRace();
@@ -760,10 +773,6 @@ async function main() {
 // keep-alive + 看门狗：被变异破坏的实现可能留下永不 settle 的 Promise，
 // 没有这一段 node 会「事件循环空了就 exit 0」，让变异测试误判为「用例仍然绿」。
 const keepAlive = setInterval(() => {}, 1000);
-const watchdog = setTimeout(() => {
-  console.error('FRONTEND INCREMENTAL TEST: FAIL —— 用例超时未结束（有大挂起）');
-  process.exit(1);
-}, 30000);
 
 main()
   .catch((e) => {

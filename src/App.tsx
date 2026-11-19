@@ -88,6 +88,7 @@ export default function App() {
   }, [appPage]);
   const sideOpen = useUiStore((s) => s.sideOpen);
   const sideTab = useUiStore(s => s.sideTab);
+  const filePreview = appPage === 'workbench' && sideTab === 'preview';
   const workbenchView=useUiStore(s=>s.preferences.workbenchView);
   const overview=workbenchView==='overview'&&!['project','preview'].includes(sideTab);
   const theme = useUiStore((s) => s.theme);
@@ -137,7 +138,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!projectRoot) return;
+    if (!projectRoot || filePreview) return;
     const workspace = document.querySelector('.workspace-main');
     if (!workspace) return;
     let wasCompact: boolean | null = null;
@@ -154,13 +155,25 @@ export default function App() {
     };
     const observer = new ResizeObserver(adapt); observer.observe(workspace); adapt();
     return () => observer.disconnect();
-  }, [projectRoot]);
+  }, [projectRoot, filePreview]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if(useUiStore.getState().preferences.workbenchView==='overview')return;
+      if (useUiStore.getState().appPage !== 'workbench') return;
       if (useUiStore.getState().settingsOpen || useUiStore.getState().modelManagerOpen) return;
       const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 'p') {
+        e.preventDefault();
+        useUiStore.getState().setSideTab(useUiStore.getState().sideTab === 'preview' ? 'preview' : 'project');
+        window.setTimeout(() => document.querySelector<HTMLInputElement>('.files-workspace .pm-search input')?.focus(), 0);
+        return;
+      }
+      if (useUiStore.getState().sideTab === 'preview') {
+        if (mod && ['b', 'n', 'o', 's'].includes(key)) e.preventDefault();
+        return;
+      }
+      if (useUiStore.getState().preferences.workbenchView === 'overview' && useUiStore.getState().sideTab !== 'project') return;
 
       // 启动门禁页（还没有工程）：只保留与「取得工程」有关的快捷键。
       // 其余画布快捷键一律不生效——此时既没有工程可保存，也没有 ReactFlow 实例。
@@ -208,7 +221,7 @@ export default function App() {
         if (document.activeElement?.closest('.dock-code-editor')) return;
         e.preventDefault();
         const state = useProjectStore.getState();
-        if (['project','preview'].includes(useUiStore.getState().sideTab) && state.selected && !/\.cnode$/i.test(state.selected.relPath)) { if (state.dirty) void state.saveSelected(); }
+        if (useUiStore.getState().sideTab === 'project' && state.selected && !/\.cnode$/i.test(state.selected.relPath)) { if (state.dirty) void state.saveSelected(); }
         else void saveProject();
         return;
       }
@@ -220,12 +233,6 @@ export default function App() {
       if (mod && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         void openProject();
-        return;
-      }
-
-      if (mod && e.key.toLowerCase() === 'p') {
-        e.preventDefault(); useUiStore.getState().setAppPage('workbench'); useUiStore.getState().setSideTab('project');
-        window.setTimeout(() => document.querySelector<HTMLInputElement>('.files-workspace .pm-search input')?.focus(),0);
         return;
       }
 
@@ -302,23 +309,23 @@ export default function App() {
     <div className={`app ui-clean glass-theme theme-${theme}`}>
       <div className="app-shell"><ActivityBar/><div className="app-shell-main">
       <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Suspense fallback={<div className="toolbar toolbar-loading" aria-hidden="true" />}>{appPage === 'workbench' ? <Toolbar /> : null}</Suspense></div>
-      <div className={`app-body side-left${dockOpen && appPage==='workbench' ? ' has-dock' : ''}`}>
+      <div className={`app-body side-left${dockOpen && appPage==='workbench' && !filePreview ? ' has-dock' : ''}`}>
         <Suspense fallback={null}>
           {loadedPages.plugins ? <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'}><PluginWorkspace /></div> : null}
           {loadedPages.tasks ? <TaskWorkspace hidden={appPage !== 'tasks'} /> : null}
         </Suspense>
         <div className="app-workbench-layer" data-inactive={appPage!=='workbench'} aria-hidden={appPage!=='workbench'} inert={appPage!=='workbench'}>
-        <div className="app-project-navigation"><ProjectNavigation /></div>
+        <div className="app-project-navigation" hidden={filePreview} inert={filePreview}><ProjectNavigation /></div>
         <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
 <div className="workspace-overview-layer" hidden={!overview}><Suspense fallback={null}><GoalOverview /></Suspense></div>
 <div className="workspace-content" hidden={overview} inert={overview}>
-            <Suspense fallback={null}>{(sideTab === 'project' || sideTab === 'preview') ? <FileWorkspace /> : null}</Suspense>
+            <Suspense fallback={null}>{(sideTab === 'project' || sideTab === 'preview') ? <FileWorkspace editing={sideTab === 'project'} /> : null}</Suspense>
             {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
-            <div className="workspace-canvas" aria-hidden={sideTab === 'project' || sideTab === 'preview'}><Suspense fallback={<CanvasLoading />}><Canvas /></Suspense></div>
-            <ConversationPanel />
+            <div className="workspace-canvas" hidden={filePreview} inert={filePreview} aria-hidden={sideTab === 'project' || sideTab === 'preview'}><Suspense fallback={<CanvasLoading />}><Canvas /></Suspense></div>
+            <ConversationPanel suspended={filePreview} />
           </div>
         </main>
-        <div className="app-workbench-overlays" hidden={appPage!=='workbench'}><AddMenu />
+        <div className="app-workbench-overlays" hidden={appPage !== 'workbench' || filePreview}><AddMenu />
         <Suspense fallback={null}>{dockOpen && appPage === 'workbench' ? <WorkbenchDock /> : null}</Suspense></div></div>
       </div>
       <div hidden={appPage!=='workbench'} className="app-workbench-status"><StatusBar /></div>

@@ -180,7 +180,7 @@ interface CodenodeApi {
   trellisConnectPrepare: (root:string,input:{developer:string}) => Promise<{ok:boolean;value?:import('./lib/trellisCliTypes').TrellisConnectPlan;error?:string}>;
   trellisConnectRead: (root:string,id:string,source:string) => Promise<{ok:boolean;value?:{source:string;content:string;truncated:boolean};error?:string}>;
   trellisConnectApply: (root:string,id:string) => Promise<{ok:boolean;value?:import('./lib/trellisCliTypes').TrellisConnectPlan;error?:string}>;
-  createProject: () => Promise<{ ok: boolean; filePath?: string; root?: string; error?: string }>;
+  createProject: (currentFile?: string) => Promise<{ ok: boolean; filePath?: string; root?: string; error?: string }>;
   listProject: (root: string) => Promise<{ ok: boolean; files?: ProjectFileDto[]; error?: string }>;
   readProjectFile: (
     root: string,

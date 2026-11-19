@@ -73,6 +73,131 @@ app.whenReady().then(async () => {
 
     assert.ok(!agentView.crash, agentView.crash);
     assert.ok(agentView.panel?.width >= 260 && agentView.input?.height > 0, 'Agent panel and composer must be visible');
+    if (process.env.CODENODE_PROJECT_SWITCH_UI_TEST === '1') {
+      const js = code => win.webContents.executeJavaScript(code);
+      const sibling = path.join(root, 'sibling.cnode');
+      const readme = path.join(root, 'preview-current.txt');
+      const external = path.join(alternateRoot, 'preview-external.txt');
+      const manualRoot = fs.mkdtempSync(path.join(root, 'manual-'));
+      const manual = path.join(manualRoot, 'preview-manual.txt');
+      const session = (id, label, content) => ({
+        id, label, status: 'active', root: { nodes: [], edges: [] },
+        messages: [{ role: 'user', content, status: 'done' }],
+      });
+      const first = session('sibling-first', '同目录第一条对话', '第一条消息');
+      const second = session('sibling-second', '同目录第二条对话', '第二条独立消息');
+      const writeSibling = sessions => fs.writeFileSync(sibling, cnode.encodeCnode({
+        graph: { nodes: [], edges: [] }, canvases: { sessions, messages: first.messages },
+      }));
+      writeSibling([first, second]);
+      fs.writeFileSync(readme, '当前目录文件');
+      fs.writeFileSync(external, '最近项目目录文件');
+      fs.writeFileSync(manual, '手选目录文件');
+      const currentPath = JSON.stringify(projectFile);
+      const siblingPath = JSON.stringify(sibling);
+      const group = target => `[...document.querySelectorAll('.project-group')].find(group => group.dataset.projectPath === ${JSON.stringify(target)})`;
+      const selector = `document.querySelector('[aria-label="选择工作区"]')`;
+      const state = () => js(`(() => {
+        const p = window.__codenodeProject.getState();
+        const s = window.__codenodeSession.getState();
+        return { root:p.root, file:p.projectFile, selected:p.selected, draft:p.draft, dirty:p.dirty, id:s.activeId, messages:s.messages };
+      })()`);
+      await js(`(async () => {
+        const ui = window.__codenodeUi.getState();
+        ui.updatePreferences({autoSaveEnabled:false});
+        window.__codenodeUi.setState({navigationOpen:true, theme:'light'});
+        const entries = JSON.parse(localStorage.getItem('codenode.recentProjects'));
+        localStorage.setItem('codenode.recentProjects', JSON.stringify([...entries, {root:${JSON.stringify(root)}, file:${siblingPath}, name:'sibling', openedAt:Date.now()}]));
+        await window.__codenodeProject.getState().openFile('preview-current.txt');
+        window.__codenodeProject.getState().updateDraft('保留未保存草稿');
+      })()`);
+      const before = await state();
+      assert.equal(before.dirty, true);
+      assert.equal(before.file, projectFile);
+
+      await js(`document.querySelector('.sidebar-links button[aria-label="文件"], .activity-bar button[aria-label="文件"]').click()`);
+      await waitFor(async () => await js(`!!${selector} && !!document.querySelector('.pm-file[title="preview-current.txt"]')`), '文件预览入口');
+      assert.ok(await js(`document.querySelector('.app-project-navigation').hidden && document.querySelector('.conversation-right').hidden && !document.querySelector('.files-document textarea')`));
+      const openPreview = async (title, content) => {
+        await waitFor(async () => await js(`!!document.querySelector('.files-explorer .pm-file[title="${title}"]')`), title);
+        await js(`document.querySelector('.files-explorer .pm-file[title="${title}"]').click()`);
+        await waitFor(async () => await js(`document.querySelector('.files-document .fp-content')?.textContent === ${JSON.stringify(content)}`), content);
+      };
+      await openPreview('preview-current.txt', '当前目录文件');
+      await js(`[...document.querySelectorAll('.files-document button')].find(button => button.textContent === '编辑文件').click()`);
+      await waitFor(async () => await js(`document.querySelector('.files-document .dock-code-editor')?.value === '保留未保存草稿'`), '显式编辑保留草稿');
+      await js(`document.querySelector('.sidebar-links button[aria-label="文件"], .activity-bar button[aria-label="文件"]').click()`);
+      await waitFor(async () => await js(`!!${selector}`), '返回只读文件页');
+      await js(`(() => { const select = ${selector}; select.value = [...select.options].find(option => option.title === ${JSON.stringify(alternateRoot)}).value; select.dispatchEvent(new Event('change', {bubbles:true})); })()`);
+      await openPreview('preview-external.txt', '最近项目目录文件');
+      assert.equal(await js(`[...document.querySelectorAll('.files-document button')].some(button => button.textContent === '编辑文件')`), false);
+      await js(`window.dispatchEvent(new KeyboardEvent('keydown', {key:'s', ctrlKey:true, bubbles:true, cancelable:true}))`);
+      assert.deepEqual(await state(), before);
+      assert.equal(fs.readFileSync(readme, 'utf8'), '当前目录文件');
+      assert.equal(fs.readFileSync(external, 'utf8'), '最近项目目录文件');
+
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [manualRoot] });
+      try {
+        await js(`document.querySelector('.files-workspace-picker button').click()`);
+        await openPreview('preview-manual.txt', '手选目录文件');
+      } finally {
+        dialog.showOpenDialog = originalOpenDialog;
+      }
+      assert.deepEqual(await state(), before);
+      win.showInactive();
+      for (const [width, height] of [[1300, 850], [720, 650]]) {
+        win.setSize(width, height);
+        await sleep(150);
+        assert.ok(await js(`document.querySelector('.files-document').getBoundingClientRect().height > 100 && document.documentElement.scrollWidth <= innerWidth`));
+        const screenshot = path.join(os.tmpdir(), `codenode-readonly-preview-${width}.png`);
+        fs.writeFileSync(screenshot, (await win.webContents.capturePage()).toPNG());
+        console.log('PROJECT PREVIEW SCREENSHOT', screenshot);
+      }
+      win.setSize(1300, 850);
+      await js(`document.querySelector('[aria-label="切换到对话"]').click(); window.__codenodeUi.setState({navigationOpen:true})`);
+      await waitFor(async () => await js(`!!(${group(sibling)})`), '同目录两个工程分别显示');
+      assert.ok(await js(`!!(${group(projectFile)})`));
+      await js(`(${group(sibling)}).querySelector('.project-group-name').click()`);
+      const siblingSession = `(${group(sibling)})?.querySelector('.project-session-row button[title="同目录第二条对话"]')`;
+      await waitFor(async () => await js(`!!(${siblingSession})`), '展开其他工程按需读取会话');
+      assert.deepEqual(await state(), before);
+
+      writeSibling([first]);
+      await js(`(${siblingSession}).click()`);
+      await waitFor(async () => await js(`document.body.textContent.includes('找不到这条对话')`), '失效会话阻止切换');
+      assert.deepEqual(await state(), before);
+      writeSibling([first, second]);
+
+      await js(`window.testSwitchConfirmCalls = 0; window.confirm = () => { window.testSwitchConfirmCalls++; return false; }; (${siblingSession}).click()`);
+      await waitFor(async () => await js(`window.testSwitchConfirmCalls === 1 && !(${siblingSession}).disabled`), '取消切换');
+      assert.deepEqual(await state(), before);
+
+      let rejectSave = true;
+      ipcMain.removeHandler('project:save');
+      ipcMain.handle('project:save', (_event, target, payload) => {
+        if (rejectSave) return { ok:false, error:'模拟磁盘写入失败' };
+        fs.writeFileSync(target, cnode.encodeCnode(payload));
+        return { ok:true, filePath:target };
+      });
+      await js(`window.confirm = () => true; window.__codenodeSession.getState().pushUser('切换前保存的消息'); (${siblingSession}).click()`);
+      await waitFor(async () => await js(`document.body.textContent.includes('当前项目未能保存')`), '保存失败阻止切换');
+      assert.equal((await state()).file, projectFile);
+      assert.equal((await state()).draft, before.draft);
+      rejectSave = false;
+      await js(`(${siblingSession}).click()`);
+      await waitFor(async () => (await state()).id === 'sibling-second', '确认后进入同目录指定会话');
+      const after = await state();
+      assert.equal(after.root, root);
+      assert.equal(after.file, sibling);
+      assert.deepEqual(after.messages.map(message => message.content), ['第二条独立消息']);
+      assert.ok(cnode.decodeCnode(fs.readFileSync(projectFile)).canvases.messages.some(message => message.content === '切换前保存的消息'));
+      assert.equal(fs.readFileSync(readme, 'utf8'), '当前目录文件');
+      assert.ok(await js(`!!(${group(projectFile)}) && !!(${group(sibling)})`));
+      assert.equal(await js(`window.__codenodeProject.getState().projectFile === ${currentPath}`), false);
+      console.log('PROJECT SWITCH AND READ-ONLY PREVIEW UI: PASS');
+      app.quit();
+      return;
+    }
     if(process.env.CODENODE_BATCH_ARCHIVE_TEST==='1'){
       const js=code=>win.webContents.executeJavaScript(code);win.showInactive();win.setSize(1300,850);
       await js(`window.__codenodeUi.getState().updatePreferences({autoSaveEnabled:false})`);
@@ -613,12 +738,14 @@ app.whenReady().then(async () => {
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".workspace-tabs button")).some(button=>button.textContent==="预览")'), false);
       fs.writeFileSync(path.join(root,'readme.txt'),'文件内容直接打开');
       await win.webContents.executeJavaScript('window.__codenodeProject.getState().refresh()');
-      await win.webContents.executeJavaScript(`document.querySelector('.activity-bar button[aria-label="文件"]').click()`);
+      await win.webContents.executeJavaScript(`document.querySelector('.sidebar-links button[aria-label="文件"], .activity-bar button[aria-label="文件"]').click()`);
       await waitFor(async () => await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".files-explorer .pm-file")).some(row=>row.title==="readme.txt")'), '文件列表');
       await win.webContents.executeJavaScript(`document.querySelector('.files-explorer .pm-file[title="readme.txt"]').click()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .dock-code-editor")?.value==="文件内容直接打开"'), '点击文件直接显示内容');
-      assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().sideTab'), 'project');
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")?.textContent==="文件内容直接打开"'), '点击文件进入只读预览');
+      assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().sideTab'), 'preview');
       assert.equal(await win.webContents.executeJavaScript('document.querySelector(".activity-bar button[aria-current=page]").getAttribute("aria-label")'), '文件');
+      await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.files-document .fp-actions button')).find(button=>button.textContent==='编辑文件').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .dock-code-editor")?.value==="文件内容直接打开"'), '显式编辑入口');
       win.showInactive(); await sleep(100);
       fs.mkdirSync(path.join(__dirname,"../../out"),{recursive:true});
       fs.writeFileSync(path.join(__dirname,"../../out/unified-file-view.png"),(await win.webContents.capturePage()).toPNG());
@@ -649,13 +776,15 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript(`document.querySelector('.activity-bar button[aria-label="工作台"]').click()`);
       await sleep(80);
       const beforeProjectOrder = await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)');
-      await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[1].click()');
-      await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().root === '+JSON.stringify(alternateRoot)+' && window.__codenodeProject.getState().projectFile === '+JSON.stringify(alternateFile)+' && !!window.__codenodeSession.getState().sessions["alternate-session"]'), '展开其他项目');
+      const projectGroup = file => `[...document.querySelectorAll('.project-group')].find(group => group.dataset.projectPath === ${JSON.stringify(file)})`;
+      await win.webContents.executeJavaScript(`(${projectGroup(alternateFile)}).querySelector('.project-group-name').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript(`!!(${projectGroup(alternateFile)})?.querySelector('.project-session-row button')`), '展开其他项目');
+      assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().projectFile'), projectFile);
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'expanding another project must not reorder projects');
-      await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[1].click()');
-      await sleep(100);
+      await win.webContents.executeJavaScript(`(${projectGroup(alternateFile)}).querySelector('.project-session-row button').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().projectFile === '+JSON.stringify(alternateFile)+' && window.__codenodeSession.getState().activeId==="alternate-session"'), '进入其他项目对话');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
-      await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[0].click()');
+      await win.webContents.executeJavaScript(`[...(${projectGroup(projectFile)}).querySelectorAll('.project-row-menu button')].find(button=>button.textContent==='打开项目').click()`);
       await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().root === '+JSON.stringify(root)+' && window.__codenodeProject.getState().projectFile === '+JSON.stringify(projectFile)), '返回原项目');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
       await win.webContents.executeJavaScript('(() => { const button=document.querySelector(".project-group-name"); if (button.getAttribute("aria-expanded") === "true") button.click(); })()');

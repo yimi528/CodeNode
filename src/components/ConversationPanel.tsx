@@ -4,7 +4,7 @@ import AgentPanel from './side/AgentPanel';
 import AgentSwitcher from './AgentSwitcher';
 import {GoalBinding} from './GoalManager';
 
-export default function ConversationPanel() {
+export default function ConversationPanel({ suspended = false }: { suspended?: boolean }) {
   const open = useUiStore(state => state.conversationOpen);
   const width = useUiStore(state => state.conversationWidth);
   const setWidth = useUiStore(state => state.setConversationWidth);
@@ -23,7 +23,7 @@ export default function ConversationPanel() {
     cleanup.current = finish; document.body.classList.add('is-resizing-side');
     window.addEventListener('blur',finish); window.addEventListener('pointermove',move); window.addEventListener('pointerup',finish); window.addEventListener('pointercancel',finish);
   };
-  return <aside ref={panel} id="conversation-panel" className="conversation-workspace conversation-right" hidden={!open} aria-label="对话" style={{'--conversation-width': width+'px'} as CSSProperties}>
+  return <aside ref={panel} id="conversation-panel" className="conversation-workspace conversation-right" hidden={suspended || !open} aria-label="对话" style={{'--conversation-width': width+'px'} as CSSProperties}>
     <div className="conversation-resize" role="separator" aria-label="调整对话栏宽度" aria-orientation="vertical" aria-valuemin={320} aria-valuemax={640} aria-valuenow={width} tabIndex={0} onPointerDown={resize} onDoubleClick={()=>setWidth(400)} onKeyDown={event => { if(event.key==='ArrowLeft'||event.key==='ArrowRight') { event.preventDefault(); setWidth(width+(event.key==='ArrowLeft'?16:-16)); } }} />
     <header className="conversation-head"><strong>对话</strong><div className="conversation-head-actions"><AgentSwitcher /></div></header>
     <GoalBinding/>

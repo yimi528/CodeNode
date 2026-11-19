@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld('codenode', {
   subagentViews: (root, options) => ipcRenderer.invoke('agent:subagents', root, options),
   // §4.2：运行中插话（steering）—— 长任务跑偏时不用整停
   steerAgent: (requestId, text) => ipcRenderer.invoke('agent:steer', requestId, text),
-  createProject: () => ipcRenderer.invoke('project:create'),
+  createProject: (currentFile) => ipcRenderer.invoke('project:create', currentFile),
   listProject: (root) => ipcRenderer.invoke('project:list', root),
   readProjectFile: (root, relPath, options) => ipcRenderer.invoke('project:read', root, relPath, options),
   writeProjectFile: (root, relPath, content, backup) => ipcRenderer.invoke('project:write', root, relPath, content, backup),

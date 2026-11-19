@@ -39,6 +39,13 @@ async function main() {
   const saved = await handlers.get('project:save')(null, chosenPath, { graph: { nodes: [], edges: [] } });
   assert.deepEqual(saved, { ok: true, filePath: chosenPath });
 
+  const before = fs.readFileSync(chosenPath);
+  const inUse = await handlers.get('project:create')(null, chosenPath);
+  assert.equal(inUse.ok, false);
+  assert.match(inUse.error, /当前工程正在打开/);
+  assert.deepEqual(fs.readFileSync(chosenPath), before);
+
+
   fs.writeFileSync = (target, data) => {
     if (target === chosenPath || typeof target === 'number') throw new Error('EPERM: write denied');
     return originalWrite(target, data);

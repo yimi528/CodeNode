@@ -10,11 +10,12 @@ function RailIcon({kind}:{kind:'home'|'files'|'plugins'|'settings'|'sidebar'|'ta
 }
 export default function ActivityBar() {
   const {appPage,setAppPage,setPluginView,navigationOpen,toggleNavigation,preferences,sideTab,setSideTab,openSettings}=useUiStore();
+  const filePreview = appPage === 'workbench' && sideTab === 'preview';
   return <nav className="activity-bar" aria-label="主导航" style={{'--activity-bar-width':preferences.activityBarWidth+'px'} as CSSProperties}>
-    <button className="toolbar-navigation-toggle" title={(navigationOpen?'隐藏':'显示')+'侧边栏 (Ctrl+B)'} aria-label={(navigationOpen?'隐藏':'显示')+'侧边栏'} aria-expanded={navigationOpen} onClick={toggleNavigation}><RailIcon kind="sidebar"/></button>
+    <button className="toolbar-navigation-toggle" disabled={filePreview} title={filePreview ? '文件预览中已收起项目栏' : (navigationOpen?'隐藏':'显示')+'侧边栏 (Ctrl+B)'} aria-label={(navigationOpen && !filePreview?'隐藏':'显示')+'侧边栏'} aria-expanded={navigationOpen && !filePreview} onClick={toggleNavigation}><RailIcon kind="sidebar"/></button>
     <div className="activity-bar-links">
       <button title="工作台" aria-label="工作台" aria-current={appPage==='workbench'&&!['project','preview'].includes(sideTab)?'page':undefined} onClick={()=>{setAppPage('workbench');setSideTab('agent')}}><RailIcon kind="home"/></button>
-      <button title="文件" aria-label="文件" aria-current={appPage==='workbench'&&['project','preview'].includes(sideTab)?'page':undefined} onClick={()=>{setAppPage('workbench');setSideTab('project')}}><RailIcon kind="files"/></button>
+      <button title="文件" aria-label="文件" aria-current={appPage==='workbench'&&['project','preview'].includes(sideTab)?'page':undefined} onClick={()=>{setAppPage('workbench');setSideTab('preview')}}><RailIcon kind="files"/></button>
       <button title="插件" aria-label="插件" aria-current={appPage==='plugins'?'page':undefined} onClick={()=>setPluginView('plugins')}><RailIcon kind="plugins"/></button>
       <button title="任务" aria-label="任务" aria-current={appPage==='tasks'?'page':undefined} onClick={()=>setAppPage('tasks')}><RailIcon kind="tasks"/></button>
     </div>

@@ -34,7 +34,7 @@ export default function ProjectGate() {
   }, []);
 
   const run = useCallback(
-    async (label: string, action: () => Promise<void>) => {
+    async (label: string, action: () => Promise<unknown>) => {
       if (busy) return;
       if (!hasApi) {
         setStatus('未检测到 Electron 环境');

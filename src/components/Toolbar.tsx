@@ -53,11 +53,13 @@ export default function Toolbar() {
   const setToast = useUiStore((s) => s.setToast);
   const openDock = useUiStore((s) => s.openDock);
   const { fitView, getViewport, setViewport: rfSetViewport, screenToFlowPosition } = useReactFlow();
+  const filePreview = useUiStore(s => s.sideTab === 'preview');
 
   return (
     <header className="toolbar">
       <span className={'toolbar-save-state state-'+saveState.status} role="status" title={saveState.error || (autoSave?'项目自动保存已开启；Ctrl+S 可手动保存':'自动保存已关闭；Ctrl+S 可手动保存')}>{saveState.status==='saving'?'保存中…':saveState.status==='error'?'保存失败':saveState.status==='dirty'?'未保存':saveState.status==='idle'?'未保存项目':'已保存'}</span>
 
+      {!filePreview && <>
       <div className="toolbar-group">
         <button title="撤销 (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
           ↶
@@ -113,9 +115,10 @@ export default function Toolbar() {
           })}
         </div>
       </details>
+      </>}
 
       <WorkbenchViewSwitcher/>
-      <div className="toolbar-group toolbar-spacer" style={{ marginLeft: 'auto' }}>
+      {!filePreview && <div className="toolbar-group toolbar-spacer" style={{ marginLeft: 'auto' }}>
         <button
           className="toolbar-vector"
           title="在当前画布中央放置一个画布节点：预设配件 + 自由绘制（设计/逻辑模式）；也可按 Shift+A 从添加菜单选择"
@@ -126,7 +129,7 @@ export default function Toolbar() {
         <button className="conversation-toggle" title={conversationOpen?'隐藏对话栏':'显示对话栏'} aria-label={conversationOpen?'隐藏对话栏':'显示对话栏'} aria-expanded={conversationOpen} aria-controls="conversation-panel" onClick={toggleConversation}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg>
         </button>
-      </div>
+      </div>}
     </header>
   );
 }

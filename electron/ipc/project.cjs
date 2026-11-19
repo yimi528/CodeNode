@@ -56,7 +56,8 @@ async function walkProject(root) {
     let items;
     try {
       items = await fsp.readdir(absDir, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (!relDir) throw error;
       continue;
     }
     for (const it of items) {
@@ -82,7 +83,8 @@ async function walkProject(root) {
 function safeProjectPath(root, relPath) {
   const resolvedRoot = path.resolve(root);
   const full = path.resolve(root, relPath);
-  return full === resolvedRoot || full.startsWith(resolvedRoot + path.sep) ? full : null;
+  const relative = path.relative(resolvedRoot, full);
+  return relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative) ? null : full;
 }
 
 function splitProjectCommand(command) {
@@ -245,6 +247,7 @@ function register(ctx) {
           workspace: dec.workspace,
           manifest: dec.manifest,
           canvases: dec.canvases || null,
+          checkpoints: dec.checkpoints || null,
           warnings: dec.warnings,
         },
       };
@@ -262,7 +265,7 @@ function register(ctx) {
     return { ok: true, root: filePaths[0] };
   });
 
-  ipcMain.handle('project:create', async () => {
+  ipcMain.handle('project:create', async (_event, currentFile) => {
     const { canceled, filePath } = await dialog.showSaveDialog(/** @type {any} */ (getFocusedWindow()), {
       title: '新建 CodeNode 项目',
       defaultPath: '未命名项目.cnode',
@@ -270,6 +273,13 @@ function register(ctx) {
     });
     if (canceled || !filePath) return { ok: false };
     try {
+      if (typeof currentFile === 'string' && currentFile && fs.existsSync(filePath) && fs.existsSync(currentFile)) {
+        const selected = fs.statSync(filePath);
+        const current = fs.statSync(currentFile);
+        if (selected.dev === current.dev && selected.ino === current.ino) {
+          return { ok: false, error: '请选择其他位置，当前工程正在打开。' };
+        }
+      }
       const buf = cnode.encodeCnode({
         graph: { revision: 1, nodes: [], edges: [] },
         workspace: { viewport: { x: 0, y: 0, zoom: 1 } },
@@ -312,9 +322,8 @@ function register(ctx) {
 
   ipcMain.handle('project:read', async (_event, root, relPath, options) => {
     try {
-      const resolvedRoot = path.resolve(root);
-      const full = path.resolve(root, relPath);
-      if (full !== resolvedRoot && !full.startsWith(resolvedRoot + path.sep)) {
+      const full = safeProjectPath(root, relPath);
+      if (!full) {
         return { ok: false, error: '路径越界' };
       }
       // 二进制读取（图像节点用）：只接受图片扩展名，转成 data URL 给渲染进程显示
@@ -543,6 +552,7 @@ function register(ctx) {
           workspace: dec.workspace,
           manifest: dec.manifest,
           canvases: dec.canvases || null,
+          checkpoints: dec.checkpoints || null,
           warnings: dec.warnings,
         },
       };

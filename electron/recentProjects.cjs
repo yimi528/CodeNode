@@ -6,7 +6,10 @@ const { atomicWriteFile } = require('./atomicFile.cjs');
 const MAX = 12;
 const MAX_BYTES = 256 * 1024;
 const fileOf = userDataDir => path.join(userDataDir, 'recent-projects.json');
-const normalizePath = value => String(value || '').trim().replace(/[\\/]+$/, '');
+const normalizePath = value => {
+  const trimmed = String(value || '').trim();
+  return trimmed.replace(/[\\/]+$/, '') || trimmed;
+};
 const nameOf = value => normalizePath(value).split(/[\\/]/).filter(Boolean).pop() || normalizePath(value);
 const normalizeEntry = input => {
   const file = normalizePath(input && input.file) || undefined;
@@ -15,8 +18,12 @@ const normalizeEntry = input => {
   return { root, ...(file ? { file } : {}), name: String(input && input.name || nameOf(file || root)).slice(0, 160), openedAt: Number(input && input.openedAt) || Date.now() };
 };
 const same = (a, b) => {
-  const key = value => normalizePath(value).toLowerCase();
-  return key(a.file) && key(b.file) ? key(a.file) === key(b.file) : key(a.root) === key(b.root);
+  const key = value => {
+    const normalized = normalizePath(value);
+    return /^[a-z]:|^\\\\|^\/\//i.test(normalized) ? normalized.replace(/\\/g, '/').toLowerCase() : normalized;
+  };
+  if (a.file || b.file) return !!a.file && !!b.file && key(a.file) === key(b.file);
+  return key(a.root) === key(b.root);
 };
 function read(userDataDir) {
   const file = fileOf(userDataDir);
