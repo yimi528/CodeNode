@@ -34,13 +34,13 @@
  *   4. 名单外的工具名一律忽略（注册表里没有的能力不该让判定变复杂），见 resolveToolProfiles。
  */
 const PROFILE_TOOLS = Object.freeze({
-  /** 常驻核心面：读、写、找、跑命令、看进程、取项目知识、技能正文、写计划、求助、记忆写入 */
+  /** 常驻核心面：文件读写与定位、命令和进程、技能、记忆及工具发现。 */
   core: Object.freeze([
     'read_file', 'write_file', 'edit_file',
     'find_files', 'search_files', 'list_directory',
     'execute_shell', 'poll_job',
     'read_skill',
-    'update_plan', 'ask_user', 'remember',
+    'remember',
     'discover_tools',
   ]),
   /** 代码面：项目扫描、概况、审查与看图。 */
@@ -76,6 +76,10 @@ const PROFILE_TOOLS = Object.freeze({
     'find_files', 'search_files', 'list_directory',
     'execute_shell', 'poll_job', 'read_skill', 'discover_tools',
   ]),
+  /** 复杂或明确要求制定计划的任务。 */
+  planning: Object.freeze(['update_plan']),
+  /** 暂停本轮并等待用户答复，按需取回或显式选择。 */
+  interaction: Object.freeze(['ask_user']),
 });
 
 const PROFILE_NAMES = Object.freeze(Object.keys(PROFILE_TOOLS));
@@ -95,6 +99,8 @@ function profilesForTool(name) {
 const RESEARCH_RE = /联网|搜索|搜一下|查一下|查资料|调研|最新的?资料|网上|浏览器|抓取|爬取|文档站|web|http|dify/i;
 const ORCHESTRATION_RE = /子代理|子任务|并行|分工|多个\s*(agent|代理)|delegate|工作树|worktree/i;
 const SYMBOL_RE = /符号|跳转.*定义|查找.*定义|谁调用|谁引用|调用链|引用链|\b(find_definition|find_references|get_callers|get_callees|callers?|callees?)\b/i;
+const MULTI_STEP_RE = /重构|迁移|跨(?:文件|模块|项目)|多个(?:文件|模块|子代理)|多(?:步|阶段)|分(?:步|阶段|(?:[三四五六七八九十]|[3-9]|[1-9]\d+)\s*(?:步|阶段))|(?:安排|派|调度).{0,8}(?:子代理|子任务)|\b(?:refactor|migrate|migration|multi[- ](?:step|phase|file|module))\b/i;
+const PLAN_REQUEST_RE = /(?:制定|拟定|列出|编写|生成|给出).{0,12}(?:计划|路线图)|(?:先|需要)做(?:个|一份)?计划|\b(?:make|create|draft|write) (?:an? )?(?:implementation )?plan\b/i;
 const SIMPLE_EDIT_ACTION_RE = /修改|改(?:一下|动|成)|替换|更新|修复|编辑|新增|添加|插入|删除|移除|去掉|\b(rename|change|edit|replace|update|fix|add|remove|delete)\b/i;
 const BROAD_EDIT_RE = /重构|批量|所有|每个|全局|整个项目|多个文件|跨文件|项目整体|架构|报错|错误|异常|堆栈|问题|故障|\b(bug|error|debug|issue|test|tests)\b|分析|审查|调研|联网|搜索|查找|部署|发布/i;
 const FILE_TARGET_RE = /[\w@.-]+(?:[\\/][\w@.-]+)*\.(?:js|cjs|mjs|ts|tsx|jsx|java|py|go|rs|json|md|css|scss|html|yml|yaml|toml|properties|txt|xml|sql|sh|ps1)\b/gi;
@@ -111,9 +117,10 @@ function isSimpleEditRequest(prompt) {
  * 按任务判定该暴露哪些 profile。
  *
  * @param {{canvas?: boolean, prompt?: string, intentHint?: string|null, mode?: string,
- *          resuming?: boolean, resumeProfiles?: string[]|null}} input
+ *          hasActivePlan?: boolean, resuming?: boolean, resumeProfiles?: string[]|null}} input
  *   canvas  —— `agent.resolvePromptLayers().canvas` 的结论（唯一来源，本模块不重判）
  *   mode    —— 'off' 关闭裁剪 / 'auto' 或未给按任务裁剪 / 其他值 = 逗号分隔的显式 profile 名
+ *   hasActivePlan —— 已有尚未完成的结构化计划，短提示也可以继续更新计划
  *   resuming —— 本次是**续跑**：读不到原面时退回全量面，绝不重新裁一次（同一 run 只增不减）
  *   resumeProfiles —— 原 run 记下的 profile 名单（续跑时优先于 mode；见下方的续跑分支）
  * @returns {{profiles: string[], reason: string, source: 'auto'|'explicit'|'off'|'resume'|'resume-full'}}
@@ -134,6 +141,7 @@ function resolveToolProfiles(input) {
    */
   if (Array.isArray(i.resumeProfiles) && i.resumeProfiles.length) {
     const set = new Set(i.resumeProfiles.filter((p) => PROFILE_NAMES.includes(p)));
+    if (i.hasActivePlan) set.add('planning');
     return { profiles: PROFILE_NAMES.filter((p) => set.has(p)), reason: 'resume-original-face', source: 'resume' };
   }
   if (i.resuming === true) return { profiles: [], reason: 'resume-keep-full-face', source: 'resume-full' };
@@ -161,9 +169,13 @@ function resolveToolProfiles(input) {
     reasons.push('canvas-task');
   }
   const prompt = String(i.prompt == null ? '' : i.prompt);
+  const planReason = i.hasActivePlan ? 'active-plan' :
+    (MULTI_STEP_RE.test(prompt) || PLAN_REQUEST_RE.test(prompt) ? 'prompt-mentions-planning' : null);
   if (i.canvas !== true && isSimpleEditRequest(prompt)
     && !RESEARCH_RE.test(prompt) && !ORCHESTRATION_RE.test(prompt)) {
-    return { profiles: ['edit'], reason: 'explicit-single-file-edit', source: 'auto' };
+    return planReason
+      ? { profiles: ['edit', 'planning'], reason: 'explicit-single-file-edit+' + planReason, source: 'auto' }
+      : { profiles: ['edit'], reason: 'explicit-single-file-edit', source: 'auto' };
   }
   if (RESEARCH_RE.test(prompt)) {
     profiles.push('research');
@@ -176,6 +188,10 @@ function resolveToolProfiles(input) {
   if (ORCHESTRATION_RE.test(prompt)) {
     profiles.push('orchestration');
     reasons.push('prompt-mentions-orchestration');
+  }
+  if (planReason) {
+    profiles.push('planning');
+    reasons.push(planReason);
   }
   if (!reasons.length) reasons.push('baseline-only');
   return { profiles: PROFILE_NAMES.filter((p) => profiles.includes(p)), reason: reasons.join('+'), source: 'auto' };

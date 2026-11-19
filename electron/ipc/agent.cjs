@@ -35,6 +35,7 @@ const modelProtocol = require('../modelProtocol.cjs');
 const runStore = require('../runStore.cjs');
 const eventBus = require('../eventBus.cjs');
 const runCheckpoint = require('../runCheckpoint.cjs');
+const planLib = require('../plan.cjs');
 const runRollback = require('../runRollback.cjs');
 const { createSteerQueue } = require('../steerQueue.cjs');
 const { SideEffectLedger, createGuard } = require('../sideEffects.cjs');
@@ -590,7 +591,7 @@ function register(ctx) {
 
   ipcMain.handle('agent:plan-read', async (_event, projectRoot, sessionId) => {
     if (!projectRoot || !sessionId) return { ok: false, error: '缺少项目或会话编号', plan: null };
-    return { ok: true, plan: require('../plan.cjs').readSessionPlan(projectRoot, sessionId) };
+    return { ok: true, plan: planLib.readSessionPlan(projectRoot, sessionId) };
   });
 
   ipcMain.handle('agent:resume-start', async (_event, projectRoot, runId, replacementRunId) => {
@@ -1367,10 +1368,12 @@ function register(ctx) {
           mode: cfg.prompt && cfg.prompt.canvasRules,
           intentHint: intentPolicy ? intentPolicy.routeHint : null,
         });
+        const existingPlan = resumePlan?.taskPlan || planLib.readSessionPlan(projectRoot, cfg.planSessionId);
         const decision = toolkit.profiles.resolveToolProfiles({
           canvas: layers.canvas,
           prompt,
           mode: cfg.tools.toolProfile,
+          hasActivePlan: !!(existingPlan?.items?.length && !planLib.isTerminalPlan(existingPlan)),
           // 续跑：沿原 run 记下的面（读不到就退回全量面）—— 同一 run 的工具面只增不减
           resuming: !!resumePlan,
           resumeProfiles: resumePlan ? lastToolFaceProfiles(projectRoot, resumePlan.runId) : null,

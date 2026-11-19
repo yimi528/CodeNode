@@ -183,15 +183,34 @@ async function runTurn(registry, script) {
   check('[B] 调研 ≤7,000、编排 ≤8,000 tokens（编排包含子代理结果复核）', researchFace.fixed <= 7000 && orchFace.fixed <= 8000,
     'research=' + researchFace.fixed + ' orch=' + orchFace.fixed);
   const editDecision = profiles.resolveToolProfiles({ canvas: false, prompt: '修改 src/app.ts' });
-  const broadDecision = profiles.resolveToolProfiles({ canvas: false, prompt: '修复多个文件的问题' });
+  const complexPrompt = '重构多个模块，再分阶段迁移数据';
+  const complexDecision = profiles.resolveToolProfiles({ prompt: complexPrompt });
+  const complexFace = measureFace(complexDecision, { canvas: false, prompt: complexPrompt });
   const editRegistry = buildRegistry(true);
   toolkit.registerDiscoverTool(editRegistry);
   const editTools = profiles.namesForProfiles(editDecision.profiles, editRegistry.listTools().map((t) => t.name));
   check('[B] 明确单文件小改走 edit 面，保留读写/验证/取回入口',
     JSON.stringify(editDecision.profiles) === JSON.stringify(['edit']) &&
     ['read_file', 'edit_file', 'execute_shell', 'discover_tools'].every((name) => editTools.includes(name)) &&
-    !editTools.includes('retrieve_context') && !broadDecision.profiles.includes('edit'),
-    JSON.stringify({ edit: editDecision.profiles, broad: broadDecision.profiles, tools: editTools.length }));
+    !editTools.includes('retrieve_context') && !complexDecision.profiles.includes('edit'),
+    JSON.stringify({ edit: editDecision.profiles, complex: complexDecision.profiles, tools: editTools.length }));
+  const classicFace = measureFace({ profiles: ['core', 'code', 'planning', 'interaction'], source: 'explicit' },
+    { canvas: false, prompt: '把 add 改成加法' });
+  const classicSchema = classicFace.registry.schemaInfo();
+  const deferred = new Set(['ask_user', 'update_plan']);
+  const standardSchema = codeFace.registry.schemaInfo();
+  check('[B] 普通编码首轮仅减少提问和规划，其他工具定义逐字节相同',
+    standardSchema.count === classicSchema.count - deferred.size &&
+    standardSchema.json === JSON.stringify(classicSchema.tools.filter(tool => !deferred.has(tool.function.name))),
+    JSON.stringify({ before: classicSchema.count, after: standardSchema.count, beforeTokens: classicFace.schemaTokens, afterTokens: codeFace.schemaTokens }));
+  check('[B] 复杂任务首轮加载规划，单文件小改和简单画布任务首轮不加载',
+    complexFace.registry.isExposed('update_plan') && !complexFace.registry.isExposed('ask_user') &&
+    !editTools.includes('update_plan') && !canvasFace.registry.isExposed('update_plan') &&
+    complexFace.system.includes('先用 update_plan 拆解') && !codeFace.system.includes('先用 update_plan 拆解'),
+    JSON.stringify({ complex: complexDecision.profiles, count: complexFace.count, schemaTokens: complexFace.schemaTokens }));
+  const explicitPlan = profiles.resolveToolProfiles({ prompt: '修改 src/app.ts，先列出实施计划' });
+  check('[B] 用户明确要求计划时保留单文件编辑面并加载规划',
+    JSON.stringify(explicitPlan.profiles) === JSON.stringify(['edit', 'planning']));
   check('[B] 裁剪后的面都是基线的子集（不会凭空多出工具）',
     profiles.namesForProfiles(['core', 'code', 'canvas'], base.listTools().map((t) => t.name)).length <= baseTools.length);
 
@@ -360,6 +379,9 @@ async function runTurn(registry, script) {
     check('[G] 真实请求体里的工具数 = 裁剪后的面', codeBody.tools.length === codeFace.count, 'body=' + codeBody.tools.length + ' face=' + codeFace.count);
     check('[G] 真实请求体里确实没有 workbench_edit', !codeBody.tools.some((t) => t.function.name === 'workbench_edit'));
     check('[G] 未裁剪的请求体里仍然有全部工具（负向）', offBody.tools.length === baseTools.length);
+    check('[G] 普通首轮请求隐藏提问和规划，复杂任务请求从首轮带计划',
+      !codeBody.tools.some(tool => deferred.has(tool.function.name)) &&
+      (await runTurn(complexFace.registry, [{ content: '开始规划' }]))[0].body.tools.some(tool => tool.function.name === 'update_plan'));
     check('[G] 单轮输入 token 下降 ≥35%', (offTokens - codeTokens) / offTokens >= 0.35,
       ((offTokens - codeTokens) / offTokens * 100).toFixed(1) + '%');
 
@@ -388,6 +410,20 @@ async function runTurn(registry, script) {
     const repeat = await codeReg.execute('discover_tools', { query: 'analyze_project' }, new AgentToolContext({ projectRoot: root }));
     check('[G] 再按完整工具名搜索，保持既有暴露面', repeat.ok === true &&
       repeat.data.enabled.length === 0 && codeReg.schemaInfo().count === secondTools.length);
+
+    const onDemand = await runTurn(codeReg, [
+      { toolCalls: [{ name: 'discover_tools', args: { query: 'ask_user' }, id: 'discover-question' }] },
+      { toolCalls: [{ name: 'ask_user', args: { question: '需要继续吗？' }, id: 'ask' }] },
+      { toolCalls: [{ name: 'discover_tools', args: { query: 'update_plan' }, id: 'discover-plan' }] },
+      { toolCalls: [{ name: 'update_plan', args: { items: [{ step: '检查入口', acceptanceCriteria: '已识别入口', status: 'pending' }] }, id: 'plan' }] },
+      { content: '完成' },
+    ]);
+    const added = (turn, previous) => toolNames(onDemand[turn].body.tools).filter(name => !toolNames(onDemand[previous].body.tools).includes(name));
+    const results = onDemand[4].body.messages.filter(message => message.role === 'tool');
+    check('[G] 按需取回提问和规划时只新增各自工具，且下一轮可执行',
+      JSON.stringify(added(1, 0)) === '["ask_user"]' && JSON.stringify(added(3, 2)) === '["update_plan"]' &&
+      results.some(message => message.tool_call_id === 'ask' && String(message.content).includes('ok')) &&
+      results.some(message => message.tool_call_id === 'plan' && String(message.content).includes('计划已更新')));
 
     const explicit = profiles.resolveToolProfiles({ mode: 'core,code,project-analysis' });
     check('[G] 显式 project-analysis 和 off 全量模式都包含分析工具',
@@ -445,6 +481,11 @@ async function runTurn(registry, script) {
     check('[J] 原面优先于显式配置（同一 run 的面只增不减，配置改动不影响进行中的 run）',
       JSON.stringify(profiles.resolveToolProfiles({ mode: 'core,code', resuming: true, resumeProfiles: ['core', 'canvas'] }).profiles) ===
       JSON.stringify(['core', 'canvas']));
+
+    check('[J] 短提示继续未完成计划时带规划，续跑旧任务的原工具面追加规划',
+      profiles.resolveToolProfiles({ prompt: '继续', hasActivePlan: true }).profiles.includes('planning') &&
+      JSON.stringify(profiles.resolveToolProfiles({ resuming: true, resumeProfiles: ['core', 'canvas'], hasActivePlan: true }).profiles) ===
+      JSON.stringify(['core', 'canvas', 'planning']));
 
     // 读取层：真的能从 run 记录里读到那个面（不是只看代码）
     const ipcMod = require("../../electron/ipc/agent.cjs");
