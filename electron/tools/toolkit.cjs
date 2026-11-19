@@ -13,6 +13,7 @@ const { registerProjectExtensions } = require('./extensions.cjs');
 // 角色契约（白名单 / 是否只读 / 授予的能力 / 角色提示）的唯一来源 —— 见 tools/roles.cjs。
 // 本文件只做「按角色裁剪注册表」这件事，不再自己维护一份角色语义。
 const roles = require('./roles.cjs');
+const { compileSelectors } = require('./actionRoutes.cjs');
 // 工具面分层（阶段 A / P0-1）：profile 名单与「按任务裁剪」的确定性判定
 const profiles = require('./profiles.cjs');
 
@@ -107,34 +108,16 @@ function registerDiscoverTool(registry) {
 /** 按配置过滤工具（tools.enabled / tools.allowed / tools.deny）。 */
 function filterByConfig(registry, config) {
   const cfg = config || {};
-  if (cfg.toolsEnabled === false) {
-    for (const spec of registry.listTools()) registry.unregister(spec.name);
-    return registry;
+  registry.toolsEnabled = cfg.toolsEnabled !== false;
+  registry.configAllowed = cfg.toolsAllowed?.length ? compileSelectors(cfg.toolsAllowed, registry.registeredNames) : null;
+  registry.configDenied = compileSelectors(cfg.toolsDeny || [], registry.registeredNames, true);
+  if (cfg.ragEnabled === false) registry.configDenied.tools.add('retrieve_context');
+  if (cfg.webSearchEnabled !== true) registry.configDenied.tools.add('web_search');
+  if (cfg.difyEnabled !== true) registry.configDenied.tools.add('dify_call');
+  for (const name of registry.tools.keys()) {
+    if (!registry.permitsTool(name)) registry.unregister(name);
   }
-  const allowed = cfg.toolsAllowed || null; // null 或空 = 全部允许
-  const deny = cfg.toolsDeny || [];
-  for (const spec of registry.listTools()) {
-    if (spec.name === 'retrieve_context' && cfg.ragEnabled === false) {
-      registry.unregister(spec.name);
-      continue;
-    }
-    // 联网搜索同样是「关掉的能力不占上下文」：未启用就不注册（不留下一个永远报错的工具）
-    if (spec.name === 'web_search' && cfg.webSearchEnabled !== true) {
-      registry.unregister(spec.name);
-      continue;
-    }
-    if (spec.name === 'dify_call' && cfg.difyEnabled !== true) {
-      registry.unregister(spec.name);
-      continue;
-    }
-    if (deny.includes(spec.name)) {
-      registry.unregister(spec.name);
-      continue;
-    }
-    if (allowed && allowed.length > 0 && !allowed.includes(spec.name)) {
-      registry.unregister(spec.name);
-    }
-  }
+  registry._invalidateSchemas();
   return registry;
 }
 
@@ -175,10 +158,11 @@ function filterByRole(registry, role) {
     return registry;
   }
   const allowedSet = new Set(allowed);
-  for (const spec of registry.listTools()) {
-    if (!allowedSet.has(spec.name)) registry.unregister(spec.name);
-  }
   registry.allowedTools = allowedSet;
+  for (const name of registry.tools.keys()) {
+    if (!registry.permitsTool(name)) registry.unregister(name);
+  }
+  registry._invalidateSchemas();
   registry.roleCapabilities = new Set(roles.roleCapabilities(role));
   return registry;
 }

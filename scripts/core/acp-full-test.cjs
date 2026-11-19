@@ -47,11 +47,25 @@ async function main() {
     management.capabilityInfo = {};
     await assert.rejects(management.control('session/delete', { sessionId: 'full-session' }), /未声明/);
   } finally { await management.rpc.close(); }
-  const bridge = await require('../../electron/backends/acpMcp.cjs').createToolBridge(registry, context, () => {});
+  const scopedRegistry = require('../../electron/tools/toolkit.cjs').buildDefaultRegistryWithConfig({ toolsAllowed: ['list_files.glob'] });
+  const bridge = await require('../../electron/backends/acpMcp.cjs').createToolBridge(scopedRegistry, context, () => {});
   const environment = Object.fromEntries(bridge.descriptor.env.map(x => [x.name, x.value]));
   const endpoint = environment.CODENODE_MCP_ENDPOINT;
   assert.equal((await fetch(endpoint, { method: 'POST', body: '{}' })).status, 403, 'MCP rejects callers without the per-run token');
-  await bridge.close();
+  try {
+    const call = async (name, args) => {
+      const response = await fetch(endpoint, { method: 'POST', headers: { Authorization: 'Bearer ' + environment.CODENODE_MCP_TOKEN },
+        body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'tools/call', params:{ name, arguments:args } }) });
+      const message = /** @type {{result: {isError:boolean, content:{text:string}[]}}} */ (await response.json());
+      return message.result;
+    };
+    const alias = await call('list_files', {kind:'glob', pattern:'*.txt'});
+    assert.equal(alias.isError, false);
+    assert.deepEqual(alias.content, (await call('find_files', {pattern:'*.txt'})).content);
+    const forbidden = await call('list_files', {kind:'dir'});
+    assert.equal(forbidden.isError, true);
+    assert.equal(JSON.parse(forbidden.content[0].text).data.code, 'PERMISSION_DENIED');
+  } finally { await bridge.close(); }
   await assert.rejects(fetch(endpoint, { method: 'POST', headers: { Authorization: 'Bearer ' + environment.CODENODE_MCP_TOKEN }, body: '{}' }), /fetch failed/, 'MCP run capability is revoked on close');
   const owner = { cwd: root, sessionId: 'unit', settings, stopping: false, deps: {}, emit() {}, input: { confirm: async () => true } };
   const client = new AcpClient(owner);

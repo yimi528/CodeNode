@@ -19,6 +19,7 @@ const { AgentToolResult } = require('./result.cjs');
 // 跨 Agent 资源租约（多 Agent 信息完整性 P3 的「单一写者」）：资源键的推导也在那边
 const { resourceKeysFor } = require('./leases.cjs');
 // P0-3：动作级复核要不要问模型，先看这个动作的副作用类别（read/write/unknown）
+const actionRoutes = require('./actionRoutes.cjs');
 const sideEffectsLib = require('../sideEffects.cjs');
 const descriptorLib = require('./descriptor.cjs');
 const { validateOutput } = require('./outputSchema.cjs');
@@ -133,6 +134,10 @@ function closeInputSchema(schema) {
 
 class AgentToolRegistry {
   constructor(options) {
+    this.registeredNames = new Set();
+    this.configAllowed = null;
+    this.configDenied = { tools: new Set(), actions: new Set() };
+    this.toolsEnabled = true;
     this.tools = new Map(); // name -> { spec, descriptor, executor }
     this.allowedTools = options && options.allowedTools ? new Set(options.allowedTools) : null;
     /**
@@ -228,8 +233,7 @@ class AgentToolRegistry {
   /** 当前有效暴露名单（注册顺序）；`null` 暴露 = 全部工具 */
   exposedNames() {
     const hidden = this._hiddenTools;
-    if (!hidden) return [...this.tools.keys()];
-    return [...this.tools.keys()].filter((n) => !hidden.has(n));
+    return [...this.tools.keys()].filter(n => this.permitsTool(n) && !hidden?.has(n));
   }
 
   /**
@@ -239,7 +243,7 @@ class AgentToolRegistry {
    */
   isExposed(name) {
     const n = String(name || '');
-    if (!this.tools.has(n)) return false;
+    if (!this.contains(n)) return false;
     return !this._hiddenTools || !this._hiddenTools.has(n);
   }
 
@@ -256,18 +260,18 @@ class AgentToolRegistry {
     const wanted = names == null ? null : (Array.isArray(names) ? names.map((n) => String(n)) : []);
     const list = wanted == null
       ? this.exposedNames()
-      : [...this.tools.keys()].filter((n) => wanted.includes(n));
-    const key = list.join('\u0000') + '#' + this.schemaRevision;
+      : [...this.tools.keys()].filter((n) => wanted.includes(n) && this.permitsTool(n));
+    const key = list.join('\u0000') + '#' + this.schemaRevision + JSON.stringify(this.allowedTools ? [...this.allowedTools] : null);
     const cached = this._schemaCache.get(key);
     if (cached) return cached;
     const tools = list.map((n) => {
-      const t = this.tools.get(n);
+      const spec = this.modelSpec(this.tools.get(n));
       return {
         type: 'function',
         function: {
-          name: t.spec.name,
-          description: t.spec.description,
-          parameters: t.spec.inputSchema == null ? { type: 'object', properties: {} } : t.spec.inputSchema,
+          name: spec.name,
+          description: spec.description,
+          parameters: spec.inputSchema == null ? { type: 'object', properties: {} } : spec.inputSchema,
         },
       };
     });
@@ -287,6 +291,7 @@ class AgentToolRegistry {
 
   /** 旧接口：按名单合成保守契约（未声明只读 = 可写） */
   register(name, description, inputSchema, executor) {
+    this.registeredNames.add(name);
     const spec = { name, description, inputSchema: closeInputSchema(inputSchema || null) };
     this.tools.set(name, {
       spec,
@@ -304,6 +309,7 @@ class AgentToolRegistry {
    */
   registerDescriptor(input, executor) {
     const descriptor = descriptorLib.normalizeDescriptor({ ...(input || {}), explicit: true });
+    this.registeredNames.add(descriptor.name);
     descriptor.inputSchema = closeInputSchema(descriptor.inputSchema);
     this.tools.set(descriptor.name, {
       spec: { name: descriptor.name, description: descriptor.description, inputSchema: descriptor.inputSchema },
@@ -319,8 +325,38 @@ class AgentToolRegistry {
     this._invalidateSchemas();
   }
 
+  permitsAction(name, id) {
+    return this.toolsEnabled && !actionRoutes.matches(this.configDenied, name, id) &&
+      (!this.configAllowed || actionRoutes.matches(this.configAllowed, name, id)) &&
+      (!this.allowedTools || this.allowedTools.has(name) ||
+        (!this.registeredNames.has(id) && this.allowedTools.has(id)));
+  }
+
+  permitsTool(name) {
+    return actionRoutes.selectors(name).some(id => this.permitsAction(name, id));
+  }
+
+  modelSpec(tool) {
+    return actionRoutes.projectSpec(tool.spec, (name, id) => this.permitsAction(name, id));
+  }
+
+  resolveCall(name, args) {
+    try {
+      const call = actionRoutes.resolve(name, args, this.registeredNames.has(name));
+      if (!call.ids.every(id => this.permitsAction(call.name, id))) {
+        return { ...call, error: AgentToolResult.failure('PERMISSION_DENIED', '当前配置或角色无权使用工具动作：' + call.ids.join(', '), { tool: name }) };
+      }
+      if (!this.tools.has(call.name)) {
+        return { ...call, error: AgentToolResult.failure('FATAL_FAILURE', '未知工具：' + name, { tool: name }) };
+      }
+      return { ...call, error: null };
+    } catch (error) {
+      return { name, args, ids: [], error: AgentToolResult.error(String(error.message), { code: 'INVALID_TOOL_ARGUMENTS', tool: name }) };
+    }
+  }
+
   listTools() {
-    return [...this.tools.values()].map((t) => t.spec);
+    return [...this.tools.values()].map(tool => this.modelSpec(tool)).filter(Boolean);
   }
 
   /** 单个工具的契约；未注册返回 null */
@@ -362,7 +398,7 @@ class AgentToolRegistry {
   }
 
   contains(name) {
-    return this.tools.has(name);
+    return this.tools.has(name) && this.permitsTool(name);
   }
 
   /**
@@ -397,14 +433,12 @@ class AgentToolRegistry {
   }
 
   async _executeChecked(name, arguments_, context, callInfo) {
-    if (this.allowedTools && !this.allowedTools.has(name)) {
-      // S5：显式失败码 —— 分类化提示才能告诉模型「这是权限问题，别原样重试」
-      return AgentToolResult.failure('PERMISSION_DENIED', '当前子代理角色无权使用工具：' + name, { tool: name });
-    }
+    const call = this.resolveCall(name, arguments_);
+    if (call.error) return call.error;
+    name = call.name;
     const tool = this.tools.get(name);
-    if (!tool) return AgentToolResult.failure('FATAL_FAILURE', '未知工具：' + name, { tool: name });
     const descriptor = tool.descriptor;
-    const args = arguments_ == null ? {} : arguments_;
+    const args = call.args;
     const destructiveCanvas = name === 'workbench_edit' && (Array.isArray(args.operations) && args.operations.length ? args.operations : [args])
       .some(operation => operation && ['delete', 'clear', 'reset'].includes(String(operation.action || '').toLowerCase()));
     const ordinaryAuto = this.confirmWrites === false && descriptor.requiresConfirmation !== 'HIGH' && require('../agentSettings.cjs').canAutoExecute(name, args);

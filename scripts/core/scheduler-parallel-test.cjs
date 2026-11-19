@@ -140,7 +140,7 @@ ok('A 并发数归一（1–' + schedulerLib.MAX_CONCURRENCY + '，非法值回�
     inFlight = 0;
     peak = 0;
     completed = 0;
-    const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false, toolsAllowed: ['read_file'] });
+    const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false, toolsAllowed: ['read_file', 'slow_read_a', 'slow_read_b', 'slow_write'] });
     const slowBody = (label) => async () => {
       inFlight += 1;
       peak = Math.max(peak, inFlight);

@@ -102,6 +102,9 @@ soul_file=config/soul.md
 # agent.tool_profile=auto
 # 白名单：非空时只允许列出的工具（逗号分隔）；留空=全部允许
 # 实际暴露范围还会按角色、任务 profile 和功能配置筛选；画布节点创建/连线统一使用 workbench_edit。
+# 名单可使用旧工具名或精确的「族名.动作」，如 list_files.glob、memory.search、
+# workbench_edit.create、get_workbench_model.focus。旧名仅覆盖该旧工具原有的动作。
+# tools.deny 优先于 tools.allowed，角色权限与功能开关仍须同时满足。
 # tools.allowed=read_file,write_file,edit_file,find_files,search_files,list_directory,get_workbench_model,workbench_edit,ask_user,execute_shell,fetch_url,code_review,scan_project,analyze_project,project_info,save_project,bulk_edit,ui_control,write_analysis_md,retrieve_context,remember,recall,update_plan,read_skill,view_image,worktree
 # 黑名单：禁用某些工具（逗号分隔）
 # tools.deny=execute_shell,bulk_edit

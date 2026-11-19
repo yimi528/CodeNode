@@ -274,6 +274,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       runId: 'run-j',
     });
     const { registry } = makeRegistry(confirmHandler);
+    if (extraToolsCfg) toolkit.filterByConfig(registry, extraToolsCfg);
     const stub = installScriptedModel(script, { loopLast: false });
     const deltas = [];
     try {
@@ -316,6 +317,20 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   assert.ok(nudge, '拒绝后必须有失败提示（接 S5 的分类化提示）');
   assert.ok(String(nudge.content).includes('权限'), '审批拒绝必须归到权限类（劝退原样重试）');
   ok('J 主循环：批准才执行、拒绝即不执行并归到权限类提示');
+
+  const routed = [
+    { toolCalls: [{ name: 'workbench_edit', args: { kind:'save_project' }, id:'routed_save' }], finishReason:'tool_calls' },
+    { content:'完成。', finishReason:'stop' },
+  ];
+  const routedPrompts = [];
+  const ask = async (_level, name) => { routedPrompts.push(name); return false; };
+  const routedTurn = await runTurn(routed, ask, {toolsAllowed:['save_project']});
+  assert.deepStrictEqual(routedPrompts, ['save_project']);
+  assert.equal(routedTurn.seen[1].messages.find(m => m.role === 'tool').name, 'workbench_edit');
+  const blocked = await runTurn(routed, ask, {toolsAllowed:['workbench_edit']});
+  assert.deepStrictEqual(routedPrompts, ['save_project']);
+  assert.match(blocked.seen[1].messages.find(m => m.role === 'tool').content, /无权/);
+  ok('K 新入口沿用原动作审批和协议调用名，未授权动作在审批前拒绝');
 
   fs.rmSync(root, { recursive: true, force: true });
   console.log('approval token ok');

@@ -100,7 +100,7 @@ function registry() {
     const first = userMemory.addUserMemory({ key: 'pkg', content: '这个用户习惯用 pnpm，不用 npm' });
     check('[B] 写入一条', first.ok === true && first.duplicate === false && first.entries === 1, JSON.stringify(first));
     const dup = userMemory.addUserMemory({ key: 'pkg', content: '这个用户习惯用 pnpm，不用 npm' });
-    check('[B] 同内容重复写 → 如实报 duplicate 且不重复落盘', dup.duplicate === true && userMemory.readUserMemory().entries.length === 1, JSON.stringify(dup));
+    check('[B] 同内容重复写 → 如实报 duplicate 且不重复落盘', dup.duplicate === true && dup.id === first.id && userMemory.readUserMemory().entries.length === 1, JSON.stringify(dup));
     const empty = userMemory.addUserMemory({ content: '   ' });
     check('[B] 空内容被拒（EMPTY_CONTENT）', empty.ok === false && empty.error === 'EMPTY_CONTENT');
     for (let i = 0; i < userMemory.MAX_USER_MEMORY_ENTRIES + 5; i += 1) {
@@ -111,6 +111,16 @@ function registry() {
     check('[B] 上限触发时丢最旧的（首条已被挤掉）', !after.some((e) => e.content === '这个用户习惯用 pnpm，不用 npm'), 'first=' + String(after[0].content));
     // 清干净，后面的用例从空开始
     userMemory.writeUserMemory([]);
+  }
+
+  {
+    userMemory.addUserMemory({ key: 'pkg', content: '使用 pnpm' });
+    const updated = userMemory.addUserMemory({ key: 'pkg', content: '使用 yarn' });
+    const before = fs.readFileSync(userMemory.userMemoryPath());
+    const repeat = userMemory.addUserMemory({ key: 'pkg', content: '使用 yarn' });
+    check('[B] 重复写返回当前版本的 ID 和版本号', !!updated.id && updated.version > 1 && repeat.duplicate &&
+      repeat.id === updated.id && repeat.version === updated.version);
+    check('[B] 重复写保留原记忆文件', before.equals(fs.readFileSync(userMemory.userMemoryPath())));
   }
 
   // ==================== C. 检索 ====================

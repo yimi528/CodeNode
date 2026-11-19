@@ -261,6 +261,90 @@ const REGISTRY_KEYS = [
       JSON.stringify({ ok: legacyWrite.ok, text: String(legacyWrite.text).slice(0, 40) }));
   }
 
+  // New invocation spellings route to the original executor and output contract.
+  {
+    const registry = toolkit.buildDefaultRegistryWithConfig({ ragEnabled: false });
+    let prompts = 0;
+    const context = makeContext({ confirm: async () => { prompts++; return true; } });
+    const oldArgs = { kind: 'preference', key: 'editor', content: 'use vim', value: 'vim' };
+    const newArgs = { action: 'save', memoryKind: 'preference', key: 'editor', content: 'use vim', value: 'vim' };
+    assert.deepStrictEqual(registry.resolveCall('remember', oldArgs), registry.resolveCall('memory', newArgs));
+    const first = await registry.execute('remember', oldArgs, context);
+    assert.equal(first.ok, true, first.text);
+    assert.ok(first.data.id);
+    const saved = await registry.execute('memory', newArgs, context);
+    assert.equal(saved.ok, true, saved.text);
+    assert.equal(saved.data.duplicate, true);
+    assert.equal(saved.data.id, first.data.id);
+    assert.equal(saved.data.version, first.data.version);
+    assert.equal(saved.data.total, first.data.total);
+    assert.equal(prompts, 2);
+    assert.equal(oldArgs.kind, 'preference');
+    assert.equal(newArgs.memoryKind, 'preference');
+    const oldRead = await registry.execute('recall', { query: 'vim' }, context);
+    const newRead = await registry.execute('memory', { action: 'search', query: 'vim' }, context);
+    assert.equal(newRead.ok, true);
+    assert.deepStrictEqual(newRead.data, oldRead.data);
+    assert.equal(prompts, 2);
+    assert.deepStrictEqual(registry.resolveCall('query_scalars', { key: 'a,b' }),
+      registry.resolveCall('retrieve_context', { mode: 'scalar', keys: ['a','b'] }));
+    assert.equal(registry.resolveCall('get_workbench_model', { view: 'typo' }).error.data.code, 'INVALID_TOOL_ARGUMENTS');
+    assert.equal((await registry.execute('recall', { action: 'save', content: 'unexpected' }, context)).ok, false);
+    assert.equal(prompts, 2);
+    check('G1 旧记忆参数、结果、确认次数及标量参数与新写法兼容', true);
+  }
+
+  {
+    const context = makeContext();
+    const registry = toolkit.buildDefaultRegistryWithConfig({
+      toolsAllowed: ['find_files', 'ui_control', 'workbench_edit.create', 'query_scalars'],
+      toolsDeny: ['get_workbench_model.zoom'], ragEnabled: false,
+    });
+    const hasError = (name, args) => registry.resolveCall(name, args).error?.data.code;
+    assert.equal(hasError('list_files', { kind: 'dir' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('list_directory', {}), 'PERMISSION_DENIED');
+    assert.equal(registry.resolveCall('list_files', { kind: 'glob', pattern: '*.txt' }).error, null);
+    const glob = await registry.execute('list_files', { kind: 'glob', pattern: '*.txt' }, context);
+    assert.equal(glob.ok, true);
+    assert.deepStrictEqual(glob.data, (await registry.execute('find_files', { pattern: '*.txt' }, context)).data);
+    assert.equal(hasError('ui_control', { action: 'zoom' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('get_workbench_model', { view: 'zoom' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('get_workbench_model', { view: 'focus' }), undefined);
+    assert.equal(hasError('get_workbench_model', {}), 'PERMISSION_DENIED');
+    assert.equal(hasError('workbench_edit', { kind: 'save_project' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('workbench_edit', { operations: [{action:'create'}, {action:'delete'}] }), 'PERMISSION_DENIED');
+    assert.equal(hasError('retrieve_context', { mode: 'file', query: 'vim' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('retrieve_context', { mode: 'scalar', key: 'a' }), undefined);
+    assert.equal(registry.contains('list_files'), false);
+    const exposed = registry.toOpenAiTools().map(tool => tool.function);
+    assert.deepStrictEqual(exposed.find(tool => tool.name === 'workbench_edit').parameters.properties.operations.items.properties.action.enum, ['create']);
+    assert.ok(!exposed.find(tool => tool.name === 'ui_control').parameters.properties.action.enum.includes('zoom'));
+    registry.register('late_tool', 'extension', {}, () => AgentToolResult.ok('unexpected'));
+    assert.equal(hasError('late_tool', {}), 'PERMISSION_DENIED');
+    const denyOnly = toolkit.buildDefaultRegistryWithConfig({toolsDeny:['list_directory']});
+    assert.equal(denyOnly.resolveCall('list_files', { kind:'dir' }).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(denyOnly.resolveCall('list_files', { kind:'glob' }).error, null);
+    const reviewer = toolkit.buildDefaultRegistryWithConfig({role:'reviewer', toolsAllowed:['analyze_project','project_info']});
+    assert.equal(reviewer.resolveCall('project_overview', {kind:'structure'}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(reviewer.resolveCall('project_overview', {kind:'info'}).error, null);
+    const oldCanvasReader = toolkit.buildDefaultRegistryWithConfig({toolsAllowed:['get_workbench_model']});
+    assert.equal(oldCanvasReader.resolveCall('get_workbench_model', {view:'counts'}).error, null);
+    assert.equal(oldCanvasReader.resolveCall('get_workbench_model', {view:'focus'}).error.data.code, 'PERMISSION_DENIED');
+    const colliding = toolkit.buildDefaultRegistry();
+    colliding.register('memory.search', 'existing extension', {}, () => AgentToolResult.ok('extension'));
+    toolkit.filterByConfig(colliding, {toolsAllowed:['memory.search']});
+    assert.equal(colliding.resolveCall('memory.search', {}).error, null);
+    assert.equal(colliding.resolveCall('recall', {query:'x'}).error.data.code, 'PERMISSION_DENIED');
+    const lateCollision = toolkit.buildDefaultRegistryWithConfig({toolsAllowed:['memory.search']});
+    lateCollision.register('memory.search', 'late extension', {}, () => AgentToolResult.ok('unexpected'));
+    assert.equal(lateCollision.contains('memory.search'), false);
+    assert.equal(lateCollision.resolveCall('memory.search', {}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(lateCollision.resolveCall('memory', {action:'search', query:'x'}).error, null);
+    const wholeFamily = toolkit.buildDefaultRegistryWithConfig({toolsAllowed:['list_files'], toolsDeny:['list_files.dir']});
+    assert.deepStrictEqual(wholeFamily.listTools().map(spec => spec.name), ['find_files']);
+    check('G2 动作名单、角色交集、整批校验与模型可见范围', true);
+  }
+
   console.log(failures === 0 ? 'TOOL DESCRIPTOR TEST: PASS' : 'TOOL DESCRIPTOR TEST: FAIL (' + failures + ')');
   process.exitCode = failures === 0 ? 0 : 1;
 })().catch((error) => {

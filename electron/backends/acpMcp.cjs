@@ -26,7 +26,9 @@ async function createToolBridge(registry, context, emit) {
         if (!active || context.cancelled()) throw new Error('会话已取消');
         if (calls >= 8) throw new Error('MCP 并发调用超过上限');
         const name = m.params?.name;
-        if (!registry.contains(name)) { res.end(JSON.stringify({ jsonrpc: '2.0', id: m.id, error: { code: -32602, message: 'Unknown tool' } })); return; }
+        const resolved = registry.resolveCall?.(name, m.params.arguments);
+        const unknown = resolved ? resolved.error?.failure?.code === 'FATAL_FAILURE' : !registry.contains(name);
+        if (unknown) { res.end(JSON.stringify({ jsonrpc: '2.0', id: m.id, error: { code: -32602, message: 'Unknown tool' } })); return; }
         const callId = crypto.randomUUID();
         emit({ kind: 'tool', toolCalls: [{ name, callId, args: require('../redaction.cjs').redact(m.params.arguments), ok: null }] });
         calls++;
