@@ -61,13 +61,14 @@ function measureFace(decision, { canvas, prompt }) {
   const registry = buildRegistry(true);
   // 与 ipc 同序：裁剪生效时先注册取回入口（discover_tools 在 core 名单里），再定面
   if (decision.source !== 'off') toolkit.registerDiscoverTool(registry);
-  registry.setExposure(profiles.namesForProfiles(decision.profiles, registry.listTools().map((t) => t.name)));
+  registry.setExposure(profiles.namesForProfiles(decision.profiles, registry.registeredExecutorNames()));
   const info = registry.schemaInfo();
-  const guide = agent.buildToolGuide(registry.listTools().filter((t) => registry.isExposed(t.name)));
+  const guide = agent.buildToolGuide(registry.exposedTools());
   const system = agent.buildSystemPrompt(soul, canvas ? '[{"id":"n1"}]' : '', guide, '', '', {
     prompt,
     canvasMode: canvas ? 'always' : 'auto',
     exposedTools: registry.toolExposure,
+    exposedExecutors: registry.exposedExecutorNames(),
     toolFaceTrimmed: true,
   });
   return {
@@ -138,19 +139,10 @@ async function runTurn(registry, script) {
     '   基线：工具 ' + baseTools.length + '，schema ' + baseSchemaTokens + ' tokens/' + JSON.stringify(baseTools).length +
     ' 字符；固定输入 纯代码 ' + basePureFixed + ' / 画布 ' + baseCanvasFixed,
   );
-  const navigationNames = new Set(['find_definition', 'find_references', 'get_callers', 'get_callees']);
-  const legacyTools = baseTools.filter((tool) => !navigationNames.has(tool.function.name) && !['inspect_subagent_retry', 'retry_subagent_task'].includes(tool.function.name));
-  const legacyGuide = agent.buildToolGuide(base.listTools().filter((tool) => !navigationNames.has(tool.name)));
-  const legacyPure = agent.buildSystemPrompt(soul, '', legacyGuide, '', '', { prompt: '把 add 改成加法', canvasMode: 'auto' });
-  const legacyCanvas = agent.buildSystemPrompt(soul, '[{"id":"n1"}]', legacyGuide, '', '', { prompt: '画布上建一条链路', canvasMode: 'always' });
-  const legacyPureFixed = compaction.estimateTokens([{ role: 'system', content: legacyPure }], legacyTools);
-  const legacyCanvasFixed = compaction.estimateTokens([{ role: 'system', content: legacyCanvas }], legacyTools);
-  check('[A] 完整装配新增四个按需符号工具和两个重做工具，原 34 个工具保持完整', baseTools.length === 40 && legacyTools.length === 34, 'tools=' + baseTools.length);
-  check('[A] 基线固定输入仍在有界范围（新增复核工具和文件分页 schema）',
-    legacyPureFixed > 10000 && legacyPureFixed < 11000 && legacyCanvasFixed > 11000 && legacyCanvasFixed < 12000,
-    'legacyPure=' + legacyPureFixed + ' legacyCanvas=' + legacyCanvasFixed);
-  check('[A] 四个新增符号工具的完整 schema 与引导增量 ≤ 2,000 tokens；默认任务按需隐藏',
-    basePureFixed - legacyPureFixed <= 2000, 'navigationIncrement=' + (basePureFixed - legacyPureFixed));
+  check('[A] 完整装配 18 个公开工具，含文件、终端、符号和子代理工具',
+    baseTools.length === 18 && ['file_ops','terminal','symbol_nav','delegate','subagent_read','subagent_control'].every(name => base.schemaInfo().names.includes(name)),
+    'tools=' + baseTools.length);
+  check('[A] 合并后的全量定义估算不超过 6,000 tokens', baseSchemaTokens <= 6000, 'tokens=' + baseSchemaTokens);
 
   // ============================ B. 裁剪后的面（棘轮） ============================
   console.log('\n== B. 按任务裁剪后的固定输入（棘轮：只允许降） ==');
@@ -173,8 +165,7 @@ async function runTurn(registry, script) {
     '降幅=' + (((basePureFixed - codeFace.fixed) / basePureFixed) * 100).toFixed(1) + '%');
   /**
    * 画布那一档的上界**没有**达到审计文档的 6,000 估算：文档的画布 profile 是「core + 画布工具」，
-   * 而 core 只留 8 个工具；本实现把 `retrieve_context` / `execute_shell` / `find_files` /
-   * `list_directory` 等都留在常驻面（常驻运行规则直接点名它们，裁掉会让规则悬空），
+   * 而 core 只留 8 个工具；本实现把 `retrieve_context` / `execute_shell` / `list_files` 等都留在常驻面（常驻运行规则直接点名它们，裁掉会让规则悬空），
    * 并且画布轮仍带 code 面（同因）；固定规则压缩后实测 8,873 tokens，回到 9,000 以内。
    * 要更激进可显式配 `agent.tool_profile=core,canvas`。
    * 这里的上界是**棘轮**：只允许随「有意新增能力」抬高，且必须在注释里写明理由。
@@ -188,7 +179,7 @@ async function runTurn(registry, script) {
   const complexFace = measureFace(complexDecision, { canvas: false, prompt: complexPrompt });
   const editRegistry = buildRegistry(true);
   toolkit.registerDiscoverTool(editRegistry);
-  const editTools = profiles.namesForProfiles(editDecision.profiles, editRegistry.listTools().map((t) => t.name));
+  const editTools = profiles.namesForProfiles(editDecision.profiles, editRegistry.registeredExecutorNames());
   check('[B] 明确单文件小改走 edit 面，保留读写/验证/取回入口',
     JSON.stringify(editDecision.profiles) === JSON.stringify(['edit']) &&
     ['read_file', 'edit_file', 'execute_shell', 'discover_tools'].every((name) => editTools.includes(name)) &&
@@ -212,11 +203,11 @@ async function runTurn(registry, script) {
   check('[B] 用户明确要求计划时保留单文件编辑面并加载规划',
     JSON.stringify(explicitPlan.profiles) === JSON.stringify(['edit', 'planning']));
   check('[B] 裁剪后的面都是基线的子集（不会凭空多出工具）',
-    profiles.namesForProfiles(['core', 'code', 'canvas'], base.listTools().map((t) => t.name)).length <= baseTools.length);
+    base.schemaInfo(profiles.namesForProfiles(['core', 'code', 'canvas'], base.registeredExecutorNames())).count <= baseTools.length);
 
   // ============================ C. 负向：off 逐字节一致 ============================
   console.log('\n== C. 负向判据：tool_profile=off（不触发时逐字节不变） ==');
-  const allNames = base.listTools().map((t) => t.name);
+  const allNames = base.registeredExecutorNames();
   const offRegistry = buildRegistry(true);
   {
     const offJson = JSON.stringify(offRegistry.toOpenAiTools());
@@ -263,10 +254,10 @@ async function runTurn(registry, script) {
     !codeSystem.includes('大批量画布操作按「逻辑组」分批提交'),
     'len=' + codeSystem.length);
   check('[D] 纯代码面：规则 7 只摘掉画布那半句、保留 offset 分段续读建议',
-    !codeSystem.includes('工作台节点（创建/编辑/连线）统一用 workbench_edit') && codeSystem.includes('大文件/大目录用 read_file 的 offset'));
+    !codeSystem.includes('工作台节点（创建/编辑/连线）统一用 workbench_edit') && codeSystem.includes('大文件/大目录用 file_ops(kind=read)'));
   check('[D] 纯代码面：画布建模规则 14 退成占位', codeSystem.includes('【画布建模规则本次未注入】'));
   check('[D] 纯代码面：核心规则一条不少（读写文件 / 低敏感免问 / 读取策略）',
-    codeSystem.includes('读写文件用 read_file / write_file / edit_file') &&
+    codeSystem.includes('用 file_ops 的 read、write、edit') &&
     codeSystem.includes('低敏感/只读操作') && codeSystem.includes('读取策略（泛读/精读分层'));
   check('[D] 纯代码面：追加了 discover_tools 取回规则（21）', codeSystem.includes('缺少能力时用 discover_tools 搜索并启用'));
   check('[D] 画布面：画布规则 2 与建模规则 a–h 都在（工具在面里 → 规则一条不收敛）',
@@ -292,7 +283,7 @@ async function runTurn(registry, script) {
     const tiny = buildRegistry(true);
     toolkit.registerDiscoverTool(tiny);
     tiny.setExposure(['read_file', 'discover_tools']);
-    const hiddenTiny = tiny.listTools().map((t) => t.name).filter((n) => !tiny.isExposed(n));
+    const hiddenTiny = tiny.registeredExecutorNames().filter(name => !tiny.exposedExecutorNames().includes(name));
     check('[E] 变异：不同的暴露面得到不同的隐藏集（discover_tools 对着真实隐藏集工作）',
       hiddenTiny.length > 25 && hiddenTiny.includes('workbench_edit') && !profiles.namesForProfiles(['core', 'code'], allNames).includes('workbench_edit'));
 
@@ -309,7 +300,7 @@ async function runTurn(registry, script) {
   {
     const registry = buildRegistry(true);
     toolkit.registerDiscoverTool(registry);
-    const codeNames = profiles.namesForProfiles(['core', 'code'], registry.listTools().map((t) => t.name));
+    const codeNames = profiles.namesForProfiles(['core', 'code'], registry.registeredExecutorNames());
     registry.setExposure(codeNames);
     const before = registry.exposedNames().slice();
     check('[F] 未裁剪时不注册 discover_tools（off 请求体逐字节一致的保证）',
@@ -369,7 +360,7 @@ async function runTurn(registry, script) {
     const offBody = offSeen[0].body;
     const codeReg = buildRegistry(true);
     toolkit.registerDiscoverTool(codeReg);
-    codeReg.setExposure(profiles.namesForProfiles(['core', 'code'], codeReg.listTools().map((t) => t.name)));
+    codeReg.setExposure(profiles.namesForProfiles(['core', 'code'], codeReg.registeredExecutorNames()));
     const codeSeen = await runTurn(codeReg, [{ content: '直接回答' }]);
     const codeBody = codeSeen[0].body;
     const offTokens = compaction.estimateTokens(offBody.messages, offBody.tools);
@@ -386,23 +377,32 @@ async function runTurn(registry, script) {
       ((offTokens - codeTokens) / offTokens * 100).toFixed(1) + '%');
 
     fs.writeFileSync(path.join(root, 'analysis-probe.ts'), 'export function answer() { return 42; }\n');
+    const listings = await runTurn(codeReg, [
+      { toolCalls: [{ name: 'list_files', args: { kind: 'glob', pattern: '*.ts' }, id: 'list-glob' }] },
+      { toolCalls: [{ name: 'list_directory', args: { path: '.' }, id: 'legacy-dir' }] },
+      { content: '列出完成' },
+    ]);
+    const listingNames = listings[0].body.tools.map(tool => tool.function.name);
+    const listingReplies = listings[2].body.messages.filter(message => message.role === 'tool');
+    check('[G] 同一请求面只公布 list_files，旧名调用仍得到目录结果',
+      listingNames.includes('list_files') && listingNames.includes('search_files') &&
+      !listingNames.includes('find_files') && !listingNames.includes('list_directory') &&
+      ['list-glob', 'legacy-dir'].every(id => listingReplies.some(message =>
+        message.tool_call_id === id && String(message.content).includes('analysis-probe.ts'))));
     const analysisSeen = await runTurn(codeReg, [
       { toolCalls: [{ name: 'discover_tools', args: { query: 'analyze_project' }, id: 'discover-analysis' }] },
-      { toolCalls: [{ name: 'analyze_project', args: { limitFiles: 10 }, id: 'run-analysis' }] },
+      { toolCalls: [{ name: 'project_overview', args: { kind:'structure', limitFiles: 10 }, id: 'run-analysis' }] },
       { content: '分析完成' },
     ]);
     const firstTools = analysisSeen[0].body.tools;
     const secondTools = analysisSeen[1].body.tools;
     const toolNames = tools => tools.map(tool => tool.function.name);
-    check('[G] 首轮保留项目概况和扫描；下一轮只新增逐文件分析',
-      firstTools.length + 1 === secondTools.length &&
-      ['project_info', 'scan_project', 'discover_tools'].every(name => toolNames(firstTools).includes(name)) &&
-      !toolNames(firstTools).includes('analyze_project') &&
-      toolNames(firstTools).every(name => toolNames(secondTools).includes(name)) &&
-      toolNames(secondTools).includes('analyze_project'),
-      JSON.stringify({ before: firstTools.length, after: secondTools.length,
-        schemaTokensBefore: compaction.estimateTokens([], firstTools),
-        schemaTokensAfter: compaction.estimateTokens([], secondTools) }));
+    const projectKinds = tools => tools.find(tool => tool.function.name === 'project_overview').function.parameters.properties.kind.enum;
+    check('[G] 同一个工程工具定义仅在下一轮新增逐文件分析动作',
+      firstTools.length === secondTools.length && ['project_overview', 'discover_tools'].every(name => toolNames(firstTools).includes(name)) &&
+      projectKinds(firstTools).includes('scan') &&
+      !projectKinds(firstTools).includes('structure') && projectKinds(secondTools).includes('structure'),
+      JSON.stringify({ before: projectKinds(firstTools), after: projectKinds(secondTools) }));
     check('[G] 取回后可以真实执行分析并返回样本源码摘要',
       analysisSeen[2].body.messages.some(message => message.role === 'tool' &&
         message.tool_call_id === 'run-analysis' && String(message.content).includes('已分析') &&
@@ -428,9 +428,9 @@ async function runTurn(registry, script) {
     const explicit = profiles.resolveToolProfiles({ mode: 'core,code,project-analysis' });
     check('[G] 显式 project-analysis 和 off 全量模式都包含分析工具',
       profiles.namesForProfiles(explicit.profiles, allNames).includes('analyze_project') &&
-      toolNames(offBody.tools).includes('analyze_project'));
+      projectKinds(offBody.tools).includes('structure'));
     const denied = toolkit.buildDefaultRegistryWithConfig({ toolsDeny: ['analyze_project'], discoverTools: true });
-    denied.setExposure(profiles.namesForProfiles(['core', 'code'], denied.listTools().map(tool => tool.name)));
+    denied.setExposure(profiles.namesForProfiles(['core', 'code'], denied.registeredExecutorNames()));
     await denied.execute('discover_tools', { query: 'analyze_project' }, new AgentToolContext({ projectRoot: root }));
     check('[G] 工具黑名单优先于按需发现',
       !denied.isExposed('analyze_project') && !denied.contains('analyze_project'));
@@ -481,7 +481,6 @@ async function runTurn(registry, script) {
     check('[J] 原面优先于显式配置（同一 run 的面只增不减，配置改动不影响进行中的 run）',
       JSON.stringify(profiles.resolveToolProfiles({ mode: 'core,code', resuming: true, resumeProfiles: ['core', 'canvas'] }).profiles) ===
       JSON.stringify(['core', 'canvas']));
-
     check('[J] 短提示继续未完成计划时带规划，续跑旧任务的原工具面追加规划',
       profiles.resolveToolProfiles({ prompt: '继续', hasActivePlan: true }).profiles.includes('planning') &&
       JSON.stringify(profiles.resolveToolProfiles({ resuming: true, resumeProfiles: ['core', 'canvas'], hasActivePlan: true }).profiles) ===

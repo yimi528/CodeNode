@@ -117,6 +117,26 @@ sandbox.setDefaultPolicy(policy);
     check('[B] 动作范围、批次全覆盖、去重、权限级别、强制复核和旧执行器边界', true);
   }
 
+  {
+    const file = rules.rulesFile(root);
+    const prior = { id:'existing-write', executor:'write_file', action:'write_file', requiredCapability:'workspace.write', level:'WRITE' };
+    fs.writeFileSync(file, JSON.stringify({ version:2, rules:[prior] }));
+    const registry = toolkit.buildDefaultRegistryWithConfig({});
+    const preview = (name, args) => {
+      const call = registry.resolveCall(name, args);
+      assert.equal(call.error, null);
+      return rules.matchRule(rules.readRules(root).rules, {
+        tool:call.name, actionIds:call.ids, capability:'workspace.write', level:'WRITE',
+      });
+    };
+    assert.deepEqual(preview('write_file', {}), prior);
+    assert.deepEqual(preview('file_ops', { kind:'write' }), prior);
+    assert.equal(preview('file_ops', { kind:'edit' }), null);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).rules, [prior]);
+    rules.writeRules(root, []);
+    check('[B] 已保存的独立工具审批 ID 仍支持新旧调用，且不授权同族其他动作', true);
+  }
+
   // ==================== C. 执行链路（命中免打扰 / 未命中照问）====================
   console.log('\n== C. 执行链路 ==');
   {

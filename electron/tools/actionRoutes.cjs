@@ -1,27 +1,35 @@
 'use strict';
 
-// Action IDs are also the qualified selectors accepted by tools.allowed/deny.
-// Each action still runs the existing executor with its original schema and approval identity.
+// Qualified selectors identify actions in tools.allowed/deny. Execution and
+// approval keep the original identity, including old standalone action IDs.
 const routes = new Map();
 const byExecutor = new Map();
 const families = new Map();
+// Previously standalone tools already have persisted action IDs equal to their names.
+const stableIds = new Set(['read_file', 'write_file', 'edit_file', 'view_image', 'execute_shell', 'poll_job', 'scan_project']);
 
 function family(name, field, fallback, members) {
-  families.set(name, { field, fallback });
+  const actions = new Map();
+  families.set(name, { field, fallback, actions });
   for (const [action, member] of Object.entries(members)) {
     const [executor, legacyField, legacyValue] = Array.isArray(member) ? member : [member];
-    const route = { id: name + '.' + action, executor, legacyField, legacyValue };
-    routes.set(route.id, route);
+    const selector = name + '.' + action;
+    const route = { id: stableIds.has(executor) ? executor : selector, selector, executor, legacyField, legacyValue };
+    routes.set(selector, route);
+    actions.set(action, route);
     if (!byExecutor.has(executor)) byExecutor.set(executor, []);
     byExecutor.get(executor).push(route);
   }
 }
 
-family('list_files', 'kind', 'dir', { dir: 'list_directory', glob: 'find_files' });
+const listFilesSurface = require('./listFilesSurface.cjs');
+family(listFilesSurface.NAME, 'kind', 'dir', listFilesSurface.members);
+family('file_ops', 'kind', 'read', { read: 'read_file', write: 'write_file', edit: 'edit_file', image: 'view_image' });
+family('terminal', 'kind', 'run', { run: 'execute_shell', poll: 'poll_job' });
 family('symbol_nav', 'kind', 'definition', {
   definition: 'find_definition', references: 'find_references', callers: 'get_callers', callees: 'get_callees',
 });
-family('project_overview', 'kind', 'info', { info: 'project_info', structure: 'analyze_project', review: 'code_review' });
+family('project_overview', 'kind', 'info', { info: 'project_info', scan: 'scan_project', structure: 'analyze_project', review: 'code_review' });
 family('web', 'kind', 'fetch', { fetch: 'fetch_url', search: 'web_search', dify: 'dify_call' });
 family('memory', 'action', 'search', { search: 'recall', save: 'remember' });
 family('delegate', 'kind', '', { single: 'delegate_task', batch: 'delegate_tasks' });
@@ -74,6 +82,7 @@ function selectors(executor) {
 
 function matches(policy, executor, id) {
   return policy.tools.has(executor) || (id !== executor && policy.actions.has(id)) ||
+    (stableIds.has(executor) && byExecutor.get(executor).some(route => policy.actions.has(route.selector))) ||
     (executor === 'workbench_edit' && policy.actions.has('workbench_edit.edit'));
 }
 
@@ -164,4 +173,9 @@ function prepareModelCall(registry, call) {
   return { ...call, requestedName: call.name, name: resolved.name, args: JSON.stringify(resolved.args) };
 }
 
-module.exports = { resolve, matches, selectors, projectSpec, prepareModelCall, compileSelectors };
+function familyOfExecutor(name) {
+  const route = byExecutor.get(name)?.[0];
+  return route ? route.selector.split('.')[0] : name;
+}
+
+module.exports = { resolve, matches, selectors, projectSpec, prepareModelCall, compileSelectors, familyOfExecutor, families };

@@ -63,8 +63,8 @@ const BUILTINS = [
 // （见 registerDiscoverTool）。理由：`agent.tool_profile=off` 时请求体必须与没有这个功能**逐字节一致**，
 // 而进 BUILTINS 会让它无条件多出一个工具 schema（约 60 tokens/轮）。
 
-function buildDefaultRegistry() {
-  const registry = new AgentToolRegistry();
+function buildDefaultRegistry(mergeToolSurfaces = true) {
+  const registry = new AgentToolRegistry({ mergeToolSurfaces });
   for (const mod of BUILTINS) {
     mod.register(registry);
   }
@@ -80,7 +80,7 @@ function buildDefaultRegistry() {
  * 行为变化只允许来自显式配置（tools.confirm_writes）。
  */
 function declareSemantics(registry) {
-  for (const descriptor of registry.listDescriptors()) {
+  for (const { descriptor } of registry.tools.values()) {
     registry.declareContract(descriptor.name, {
       readOnly: descriptor.readOnly,
       idempotent: descriptor.idempotent,
@@ -123,7 +123,7 @@ function filterByConfig(registry, config) {
 
 function buildDefaultRegistryWithConfig(config) {
   const cfg = config || {};
-  const registry = buildDefaultRegistry();
+  const registry = buildDefaultRegistry(false);
   // S7：确认策略三态随配置下发（true = 声明了 requiresConfirmation 的工具全部强制审批；
   // false = 全部关闭；未配置 = 沿用各工具 descriptor 自带的判定，兼容既有行为）
   if (cfg.toolsConfirmWrites !== undefined) {
@@ -133,6 +133,7 @@ function buildDefaultRegistryWithConfig(config) {
   // 否则各建一份 = 谁也没锁住谁。实例由 ipc 按 run 创建后传进来。
   if (cfg.leases) registry.leases = cfg.leases;
   if (cfg.projectRoot) registerProjectExtensions(registry, cfg.projectRoot);
+  registry.mergeToolSurfaces = true;
   if (cfg.role) filterByRole(registry, cfg.role);
   // CLI 等独立入口也可在配置过滤前注册取回入口，再应用与桌面相同的工具分层。
   if (cfg.discoverTools === true) registerDiscoverTool(registry);
@@ -152,7 +153,7 @@ function filterByRole(registry, role) {
   }
   const allowed = ROLE_TOOLS[role];
   if (!allowed) {
-    for (const spec of registry.listTools()) registry.unregister(spec.name);
+    for (const name of registry.tools.keys()) registry.unregister(name);
     registry.allowedTools = new Set();
     registry.roleCapabilities = new Set();
     return registry;

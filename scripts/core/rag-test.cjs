@@ -181,12 +181,11 @@ async function main() {
     toolsAllowed: ['retrieve_context'],
     ragEnabled: true,
   });
-  const disabledNames = toolkit
-    .buildDefaultRegistryWithConfig({ toolsEnabled: true, ragEnabled: false })
-    .listTools()
-    .map((item) => item.name);
+  const disabledRegistry = toolkit.buildDefaultRegistryWithConfig({ toolsEnabled: true, ragEnabled: false });
   assert.ok(enabledRegistry.listTools().some((item) => item.name === 'retrieve_context'), '启用 RAG 时应注册检索工具');
-  assert.ok(!disabledNames.includes('retrieve_context'), '关闭 RAG 时应移除检索工具');
+  const scalarOnly = disabledRegistry.listTools().find(item => item.name === 'retrieve_context');
+  assert.deepStrictEqual(scalarOnly.inputSchema.properties.mode.enum, ['exact'], '关闭 RAG 时只公布标量精确查询');
+  assert.equal(disabledRegistry.resolveCall('retrieve_context', { mode: 'vector', query: 'session recovery' }).error.data.code, 'PERMISSION_DENIED');
 
   const toolContext = new AgentToolContext({ projectRoot: root, ragConfig: config });
   const toolResult = await enabledRegistry.execute(

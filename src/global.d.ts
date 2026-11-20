@@ -284,7 +284,7 @@ interface CodenodeApi {
   ) => Promise<{ greeting: string; name: string; configured: boolean }>;
   agentTools: (
     root: string | null
-  ) => Promise<{ enabled: boolean; tools: AgentToolSpecDto[] }>;
+  ) => Promise<{ enabled: boolean; tools: AgentToolSpecDto[]; executorNames?: string[] }>;
   agentRuns: (root: string | null) => Promise<Array<{
     runId: string | null;
     status: string;

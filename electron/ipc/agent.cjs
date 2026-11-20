@@ -531,16 +531,13 @@ function register(ctx) {
     const subagentManager = new SubagentManager({ agent, toolkit, cfg, registry });
     subagentManager.register(registry);
     toolkit.filterByConfig(registry, { ...cfg.tools, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg).enabled, difyEnabled: cfg.dify.enabled });
-    return {
-      enabled: cfg.tools.toolsEnabled,
-      tools: registry.listTools().map((spec) => ({
+    return { enabled: cfg.tools.toolsEnabled, executorNames: registry.registeredExecutorNames(),
+      tools: registry.listDescriptors().map((spec) => ({
         name: spec.name,
         description: spec.description,
         parameters: spec.inputSchema,
         // 契约摘要：只读/幂等/是否改工作区/要不要确认/需要的能力/超时/缓存与并行策略
-        descriptor: registry.descriptorOf(spec.name)
-          ? descriptorLib.describeDescriptor(registry.descriptorOf(spec.name))
-          : null,
+        descriptor: descriptorLib.describeDescriptor(spec),
       })),
     };
   });
@@ -1378,15 +1375,15 @@ function register(ctx) {
           resuming: !!resumePlan,
           resumeProfiles: resumePlan ? lastToolFaceProfiles(projectRoot, resumePlan.runId) : null,
         });
-        const registered = registry.listTools().map((t) => t.name);
+        const availableCount = registry.modelToolNames().length;
         if (decision.source === 'off' || decision.source === 'resume-full') {
           // 不裁剪：配置关了，或续跑但读不到原 run 的面（「不知道原来有什么」→ 宁可多带）
-          toolFace = { applied: false, reason: decision.reason, profiles: [], exposed: registered.length, hidden: 0 };
+          toolFace = { applied: false, reason: decision.reason, profiles: [], exposed: availableCount, hidden: 0 };
         } else if (!registry.contains('discover_tools')) {
           // 取回入口被 tools.allowed/deny 挡掉 → **整体放弃裁剪**（fail-open 回旧的全量面）
-          toolFace = { applied: false, reason: 'no-discover-tool', profiles: decision.profiles, exposed: registered.length, hidden: 0 };
+          toolFace = { applied: false, reason: 'no-discover-tool', profiles: decision.profiles, exposed: availableCount, hidden: 0 };
         } else {
-          const names = toolkit.profiles.namesForProfiles(decision.profiles, registered);
+          const names = toolkit.profiles.namesForProfiles(decision.profiles, registry.registeredExecutorNames());
           registry.setExposure(names);
           const info = registry.schemaInfo();
           toolFace = {
@@ -1394,8 +1391,8 @@ function register(ctx) {
             profiles: decision.profiles,
             reason: decision.reason,
             source: decision.source,
-            exposed: names.length,
-            hidden: registered.length - names.length,
+            exposed: info.count,
+            hidden: availableCount - info.count,
             chars: info.chars,
             hash: info.hash,
             tokens: compactionLib.estimateTokens([], info.tools),
@@ -1403,9 +1400,8 @@ function register(ctx) {
         }
         runStore.appendEvent(projectRoot, runId, 'tool_face', toolFace);
       }
-      // 工具引导（名称 + 一句话）只列**实际暴露**的工具：提示词里列着模型看不到的工具 = 悬空指令。
-      // 未裁剪（toolExposure === null）时它与 listTools() 等价 —— 与改动前逐字节一致。
-      const toolGuide = agent.buildToolGuide(registry ? registry.listTools().filter((t) => registry.isExposed(t.name)) : []);
+      const exposedTools = registry?.exposedTools() || [];
+      const toolGuide = agent.buildToolGuide(exposedTools);
       // 注入给模型的画布摘要用**预算裁剪后**的那一份（分类/工具侧仍用完整摘要：它们不是提示词固定税）
       let systemContent = agent.buildSystemPrompt(soul, canvasSummaryForPrompt, toolGuide, memoryText, skillsText, {
         prompt,
@@ -1419,11 +1415,12 @@ function register(ctx) {
         intentHint: intentPolicy ? intentPolicy.routeHint : null,
         // 工具面同源：按暴露面收敛运行规则（null = 未裁剪 → 规则一个不动，逐字节一致）
         exposedTools: registry ? registry.toolExposure : null,
+        exposedExecutors: registry?.exposedExecutorNames(),
         // 「真的裁剪过」才追加 discover_tools 那条规则（暴露全部工具 ≠ 没裁剪，二者提示词必须一致）
         toolFaceTrimmed: !!(toolFace && toolFace.applied),
       }) + promptContext.trellisText + answerFeedback;
       if (executionRole) systemContent = require('../subagentPrompt.cjs').buildSubagentPrompt({ role: executionRole, objective: prompt }, {
-        role: executionRole, tools: registry ? registry.listTools().filter(tool => registry.isExposed(tool.name)) : [],
+        role: executionRole, tools: exposedTools,
         trellisContext: trellis.assertReady(trellisSnapshot, executionRole),
       });
       const messages = resumePlan

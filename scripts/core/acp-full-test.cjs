@@ -53,6 +53,11 @@ async function main() {
   const endpoint = environment.CODENODE_MCP_ENDPOINT;
   assert.equal((await fetch(endpoint, { method: 'POST', body: '{}' })).status, 403, 'MCP rejects callers without the per-run token');
   try {
+    const list = await fetch(endpoint, { method: 'POST', headers: { Authorization: 'Bearer ' + environment.CODENODE_MCP_TOKEN },
+      body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'tools/list' }) });
+    const published = /** @type {{result: {tools: {name:string,inputSchema:any}[]}}} */ (await list.json()).result.tools;
+    assert.deepEqual(published.map(tool => tool.name), ['list_files']);
+    assert.deepEqual(published[0].inputSchema.properties.kind.enum, ['glob']);
     const call = async (name, args) => {
       const response = await fetch(endpoint, { method: 'POST', headers: { Authorization: 'Bearer ' + environment.CODENODE_MCP_TOKEN },
         body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'tools/call', params:{ name, arguments:args } }) });

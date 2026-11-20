@@ -83,7 +83,7 @@ async function main() {
       const result = await registry.execute(name, { symbol: 'go', path: 'a.ts' }, context);
       assert.equal(result.ok, true, result.text); assert.equal(result.data.approximate, true);
       assert.ok(result.data.limitations.includes('read_file')); assert.equal(result.data.index.parseErrorFiles, 1);
-      assert.ok(registry.toOpenAiTools().some((tool) => tool.function.name === name));
+      assert.ok(!registry.toOpenAiTools().some((tool) => tool.function.name === name));
       for (const role of ['explorer', 'builder', 'verifier', 'reviewer']) {
         assert.ok(toolkit.buildDefaultRegistryWithConfig({ role, toolProfile: 'off' }).contains(name), role + ' has navigation');
       }
@@ -101,14 +101,22 @@ async function main() {
     assert.equal((await disabled.execute('find_definition', { symbol: 'go' }, noRag)).ok, true);
     const profiles = toolkit.profiles;
     const normal = profiles.resolveToolProfiles({ prompt: '修复功能' });
-    assert.ok(!profiles.namesForProfiles(normal.profiles, registry.listTools().map((tool) => tool.name)).includes('get_callers'));
+    assert.ok(!profiles.namesForProfiles(normal.profiles, registry.registeredExecutorNames()).includes('get_callers'));
     const navigation = profiles.resolveToolProfiles({ prompt: '查符号 go 的调用链' });
-    assert.ok(profiles.namesForProfiles(navigation.profiles, registry.listTools().map((tool) => tool.name)).includes('get_callers'));
+    assert.ok(profiles.namesForProfiles(navigation.profiles, registry.registeredExecutorNames()).includes('get_callers'));
     toolkit.registerDiscoverTool(registry);
-    registry.setExposure(profiles.namesForProfiles(normal.profiles, registry.listTools().map((tool) => tool.name)));
-    assert.equal(registry.isExposed('find_definition'), false);
+    registry.setExposure(profiles.namesForProfiles(normal.profiles, registry.registeredExecutorNames()));
+    assert.equal(registry.isExposed('symbol_nav'), false);
     const discovered = await registry.execute('discover_tools', { query: 'find_definition' }, context);
-    assert.equal(discovered.ok, true, discovered.text); assert.equal(registry.isExposed('find_definition'), true);
+    assert.equal(discovered.ok, true, discovered.text); assert.equal(registry.isExposed('symbol_nav'), true);
+    const nav = registry.schemaInfo().tools.find(tool => tool.function.name === 'symbol_nav').function.parameters;
+    assert.deepEqual(nav.properties.kind.enum, ['definition']);
+    const named = await registry.execute('symbol_nav', { kind:'definition', symbol:'go', path:'a.ts' }, context);
+    assert.equal(named.ok, true, named.text);
+    assert.equal(named.data.count, (await registry.execute('find_definition', {symbol:'go',path:'a.ts'}, context)).data.count);
+    assert.equal(denied.resolveCall('symbol_nav', {kind:'definition',symbol:'go'}).error.data.code, 'PERMISSION_DENIED');
+    const deniedKinds = denied.schemaInfo().tools.find(tool => tool.function.name === 'symbol_nav').function.parameters.properties.kind.enum;
+    assert.ok(!deniedKinds.includes('definition'));
     const controller = new AbortController(); controller.abort();
     const cancelled = new AgentToolContext({ projectRoot: root, ragConfig: config, signal: controller.signal });
     assert.equal((await registry.execute('find_definition', { symbol: 'go' }, cancelled)).ok, false);

@@ -137,6 +137,6 @@ const prompt = buildSystemPrompt({ raw: '' }, '[]', [{ name: 'retrieve_context',
 assert.match(prompt, /queries/);
 assert.match(prompt, /不可信数据/);
 assert.match(prompt, /不得编造路径、行号/);
-assert.match(prompt, /结果只表示相关候选，须用 read_file 核实/);
+assert.match(prompt, /结果只表示相关候选，须用 file_ops\(kind=read\) 核实原文/);
 
 console.log('RAG GROUNDING TEST: PASS');

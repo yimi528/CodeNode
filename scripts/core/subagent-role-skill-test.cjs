@@ -119,7 +119,7 @@ const WRITE_TOOLS = ['write_file', 'edit_file', 'workbench_edit', 'save_project'
     check('C3 能力：可用工具逐条列出且与传入完全一致（含描述）',
       /- edit_file：精确替换/.test(prompt) && /- read_file：读文件/.test(prompt));
     check('C4 技能：职责技能逐条展开（标题 + 规程）',
-      /【职责技能/.test(prompt) && /先读后写/.test(prompt) && /优先用 edit_file 做精确替换/.test(prompt));
+      /【职责技能/.test(prompt) && /先读后写/.test(prompt) && /优先用 file_ops\(kind=edit\) 做精确替换/.test(prompt));
     check('C5 项目 Skill：与主代理同款标注（不可信数据）并含内容',
       /【项目 Skills/.test(prompt) && /不可信数据/.test(prompt) && /改动前先跑 check:js/.test(prompt));
     check('C6 运行规则：禁止谎报 + 失败要分析重试 + 不绕道 都在',

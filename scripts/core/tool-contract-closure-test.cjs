@@ -61,14 +61,15 @@ function context() {
       (d) => d.inputSchema && d.inputSchema.properties && d.inputSchema.additionalProperties !== false,
     );
     check('A1 每个内置工具的 inputSchema 都已闭合（additionalProperties=false）',
-      unclosed.length === 0 && descriptors.length >= 20,
+      unclosed.length === 0 && descriptors.length === 15,
       JSON.stringify({ total: descriptors.length, unclosed: unclosed.map((d) => d.name) }));
 
     const exposed = registry.toOpenAiTools();
     const leaky = exposed.filter((t) => t.function.parameters && t.function.parameters.properties && t.function.parameters.additionalProperties !== false);
     check('A2 下发给模型的 tools 参数同样闭合', leaky.length === 0, JSON.stringify(leaky.map((t) => t.function.name)));
 
-    const nested = exposed.find((t) => t.function.name === 'retrieve_context');
+    const ragRegistry = toolkit.buildDefaultRegistryWithConfig({ ragEnabled: true });
+    const nested = ragRegistry.toOpenAiTools().find((t) => t.function.name === 'retrieve_context');
     check('A3 闭合不影响原有约束（retrieve_context 的 maxItems 仍在）',
       !nested || (nested.function.parameters.properties && JSON.stringify(nested.function.parameters).includes('maxItems')),
       JSON.stringify(nested ? nested.function.parameters : null).slice(0, 200));
@@ -81,7 +82,7 @@ function context() {
       bad.ok === false && bad.data.code === 'INVALID_TOOL_ARGUMENTS' && /maxLine/.test(String(bad.text)),
       JSON.stringify({ ok: bad.ok, code: bad.data && bad.data.code, text: bad.text }));
 
-    const good = await registry.execute('read_file', { path: 'a.txt', maxLines: 2 }, context());
+    const good = await registry.execute('file_ops', { kind: 'read', path: 'a.txt', maxLines: 2 }, context());
     check('B2 正确参数不受影响（maxLines=2 仍可用）',
       good.ok === true && /l1/.test(String(good.text)) && !/l4/.test(String(good.text)),
       JSON.stringify({ ok: good.ok, text: String(good.text).slice(0, 60) }));
@@ -97,7 +98,7 @@ function context() {
 
   // ======================= C. 契约显式化而不改语义 =======================
   {
-    const descriptors = registry.listDescriptors();
+    const descriptors = registry.registeredExecutorNames().map(name => registry.descriptorOf(name));
     const legacy = descriptors.filter((d) => d.source !== 'explicit');
     check('C1 全部工具的契约都是显式声明（source=explicit）', legacy.length === 0, JSON.stringify(legacy.map((d) => d.name)));
 
@@ -146,7 +147,7 @@ function context() {
 
     // 「文件在、工具却没注册」是一种静默漂移：每个工具实现都必须进入默认注册表。
     const implDir = path.join(__dirname, "../../electron/tools/impl");
-    const registeredNames = new Set(toolkit.buildDefaultRegistry().listTools().map((t) => t.name));
+    const registeredNames = new Set(toolkit.buildDefaultRegistry().registeredExecutorNames());
     /** @type {string[]} */
     const missing = [];
     for (const file of fs.readdirSync(implDir)) {

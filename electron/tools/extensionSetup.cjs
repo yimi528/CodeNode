@@ -66,7 +66,8 @@ async function prepare(item,root,discover) {
 async function addUnlocked(root,input) {
   const loc=targetFor(root);const before=readExisting(loc);
   const raw=decode(input);if(raw.length>config.maxEntries)throw Error('一次接入的扩展过多');
-  const names=new Set(require('./toolkit.cjs').buildDefaultRegistryWithConfig({}).listTools().map(tool=>tool.name));
+  const registry = require('./toolkit.cjs').buildDefaultRegistryWithConfig({});
+  const names = new Set([...registry.registeredExecutorNames(), ...registry.modelToolNames()]);
   for(const entry of before.entries) {names.add(entry.name);for(const tool of entry.tools||[])names.add(tool.name);}
   const added=[];
   for(const item of raw) {

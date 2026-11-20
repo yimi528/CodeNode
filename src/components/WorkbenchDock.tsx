@@ -421,7 +421,7 @@ function RunsPanel() {
     const [toolsResult, cfg] = await Promise.all([api.agentTools(root), api.agentConfig(root)]);
     const availableModels = [cfg.model, ...(cfg.models || []).flatMap((model) => [model.id, model.label, model.model])];
     const missing = missingTemplateDeps(deps, {
-      tools: (toolsResult.tools || []).map((tool) => tool.name),
+      tools: [...(toolsResult.executorNames || []), ...(toolsResult.tools || []).map((tool) => tool.name)],
       models: availableModels,
       tree: useProjectStore.getState().tree,
     });

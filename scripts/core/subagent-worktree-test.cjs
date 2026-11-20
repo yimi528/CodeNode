@@ -191,8 +191,8 @@ function makeContext(projectRoot, audits, model) {
     await supervisor.execute('delegate_task', { role: 'explorer', objective: '审计用', isolation: 'worktree' }, ctx);
     check('[F] 建有 subagent_worktree 审计', audits.some((a) => /subagent_worktree"/.test(a)), JSON.stringify(audits.filter((a) => /subagent_worktree/.test(a)).slice(0, 1)));
     check('[F] 收尾有 subagent_worktree_summary 审计（改动数/提交数）', audits.some((a) => /subagent_worktree_summary/.test(a)));
-    const schema = supervisor.listTools().find((t) => t.name === 'delegate_task').inputSchema;
-    check('[F] delegate_task 的 schema 暴露 isolation 枚举', JSON.stringify(schema.properties.isolation.enum) === JSON.stringify(['none', 'worktree']), JSON.stringify(schema.properties.isolation));
+    const schema = supervisor.listTools().find((t) => t.name === 'delegate').inputSchema;
+    check('[F] delegate 的 schema 暴露 isolation 枚举', JSON.stringify(schema.properties.isolation.enum) === JSON.stringify(['none', 'worktree']), JSON.stringify(schema.properties.isolation));
   }
 
   // ==================== G. 确认与代码合入绑定 ====================

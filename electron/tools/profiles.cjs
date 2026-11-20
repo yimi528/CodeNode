@@ -37,7 +37,7 @@ const PROFILE_TOOLS = Object.freeze({
   /** 常驻核心面：文件读写与定位、命令和进程、技能、记忆及工具发现。 */
   core: Object.freeze([
     'read_file', 'write_file', 'edit_file',
-    'find_files', 'search_files', 'list_directory',
+    'list_files', 'find_files', 'search_files', 'list_directory',
     'execute_shell', 'poll_job',
     'read_skill',
     'remember',
@@ -73,7 +73,7 @@ const PROFILE_TOOLS = Object.freeze({
   /** 单文件小改：目标文件读写、必要的定位/验证与按需取回；不常驻 RAG/编排/全项目分析。 */
   edit: Object.freeze([
     'read_file', 'write_file', 'edit_file',
-    'find_files', 'search_files', 'list_directory',
+    'list_files', 'find_files', 'search_files', 'list_directory',
     'execute_shell', 'poll_job', 'read_skill', 'discover_tools',
   ]),
   /** 复杂或明确要求制定计划的任务。 */
