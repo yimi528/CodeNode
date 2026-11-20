@@ -215,6 +215,8 @@ interface GraphState extends GraphLike {
   appendGraph: (graph: Graph) => void;
   deleteNodes: (ids: string[]) => void;
   duplicateNode: (id: string) => void;
+  copyNodes: (ids: string[]) => Graph;
+  pasteNodes: (graph: Graph, offset: Node['position']) => void;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   moveNode: (id: string, position: { x: number; y: number }, options?: { moveChildren?: boolean }) => void;
   /** 自动横向整理当前画布节点：全部排在同一行，分支并列 */
@@ -422,13 +424,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           }
         }
       }
-      let selectedId = s.selectedId;
-      for (const c of changes) {
-        if (c.type === 'select' && 'selected' in c) {
-          selectedId = c.selected ? c.id : selectedId === c.id ? null : selectedId;
-        }
-      }
       const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
+      const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
       // 删除节点（含 React Flow 的 Delete/Del 键）应记入撤销历史
       return { nodes, selectedId, selectedIds, ...(hasRemove ? withHistory(s) : {}) };
     }),
@@ -549,6 +546,67 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       nodes.push(copy);
       return { nodes: nodes.map(withZIndex), selectedId: copy.id, selectedIds: [copy.id], ...withHistory(s) };
     }),
+
+  copyNodes: (ids) => {
+    const { nodes, edges } = get();
+    const included = new Set(ids);
+    for (const node of nodes) {
+      if (node.type === 'scope' && included.has(node.id)) {
+        for (const id of descendantIds(node.id, nodes)) included.add(id);
+      }
+    }
+    return snapshot({
+      nodes: nodes.filter((node) => included.has(node.id)),
+      edges: edges.filter((edge) => included.has(edge.source) && included.has(edge.target)),
+    });
+  },
+
+  pasteNodes: (graph, offset) => {
+    if (!graph.nodes.length) return;
+    const copies = snapshot(graph);
+    const ids = new Map(copies.nodes.map((node) => [node.id, crypto.randomUUID()]));
+    const translate = ({ x, y }: Node['position']) => ({ x: x + offset.x, y: y + offset.y });
+
+    const nodes = normalizeParentChild(copies.nodes.map((node) => {
+      const data = { ...node.data, parentId: ids.get(parentIdOf(node) || '') ?? null };
+      if (node.type === 'scope') {
+        setScopeChildren(data, childIdsOf(node).flatMap((id) => ids.get(id) ?? []));
+      }
+      return {
+        ...node,
+        id: ids.get(node.id)!,
+        position: translate(node.position),
+        selected: !data.parentId || Boolean(node.selected),
+        dragging: false,
+        resizing: false,
+        data,
+      };
+    })).map(withZIndex);
+
+    const edges = copies.edges.flatMap((edge) => {
+      const source = ids.get(edge.source);
+      const target = ids.get(edge.target);
+      if (!source || !target) return [];
+      const waypoints = (edge.data as { waypoints?: Node['position'][] } | undefined)?.waypoints;
+      return [{
+        ...edge,
+        id: crypto.randomUUID(),
+        source,
+        target,
+        selected: false,
+        data: Array.isArray(waypoints) ? { ...edge.data, waypoints: waypoints.map(translate) } : edge.data,
+      }];
+    });
+
+    const selectedIds = nodes.filter((node) => node.selected).map((node) => node.id);
+    set((s) => ({
+      nodes: [...s.nodes.map((node) => node.selected ? { ...node, selected: false } : node), ...nodes],
+      edges: [...s.edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge), ...edges],
+      selectedId: selectedIds.length === 1 ? selectedIds[0] : null,
+      selectedIds,
+      ...withHistory(s),
+    }));
+  },
 
   updateNodeData: (id, patch) =>
     set((s) => ({

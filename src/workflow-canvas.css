@@ -13,6 +13,15 @@
   pointer-events: none;
 }
 .canvas-raster-mode > .react-flow { position: relative; z-index: 1; background: transparent; }
+
+.canvas-copy-preview {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  border: 1px dashed var(--glass-accent);
+  border-radius: 8px;
+  background: var(--glass-control);
+}
 .canvas-raster-mode .react-flow__edge,
 .canvas-raster-mode .react-flow__node { opacity: 0; }
 .canvas-raster-mode .wf-waypoint { opacity: 0; }

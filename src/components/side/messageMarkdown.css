@@ -1,0 +1,126 @@
+.cs-msg-text.cs-msg-markdown {
+  min-width: 0;
+  white-space: normal;
+}
+
+.cs-msg-markdown :is(p, ul, ol, blockquote, pre, .cs-markdown-table) {
+  margin: 0 0 .7em;
+}
+
+.cs-msg-markdown > :last-child,
+.cs-msg-markdown li > :last-child,
+.cs-msg-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.cs-msg-markdown p {
+  white-space: pre-wrap;
+}
+
+.cs-msg-markdown > p:has(+ .cs-typewriter-cursor) {
+  display: inline;
+}
+
+.cs-msg-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1em 0 .35em;
+  font-size: 1.08em;
+  line-height: 1.4;
+}
+
+.cs-msg-markdown > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+
+.cs-msg-markdown :is(ol, ul) {
+  padding-inline-start: 1.5em;
+}
+
+.cs-msg-markdown li > :is(ul, ol) {
+  margin-top: .2em;
+}
+
+.cs-msg-markdown li + li {
+  margin-top: .17em;
+}
+
+.cs-msg-markdown li::marker {
+  color: var(--glass-muted);
+}
+
+.cs-msg-markdown :is(hr, blockquote) {
+  border: 0;
+}
+
+.cs-msg-markdown hr {
+  margin: 1em 0;
+  border-top: 1px solid var(--glass-border);
+}
+
+.cs-msg-markdown blockquote {
+  padding-inline-start: .85em;
+  border-inline-start: 2px solid var(--glass-border);
+  color: var(--glass-muted);
+}
+
+.cs-msg-markdown a {
+  text-decoration: underline;
+  text-underline-offset: .15em;
+}
+
+.cs-msg-markdown code {
+  padding: .12em .3em;
+  border-radius: 4px;
+  background: var(--glass-control);
+  font-family: Consolas, monospace;
+  font-size: .93em;
+}
+
+.cs-msg-markdown pre {
+  max-width: 100%;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--glass-base);
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.cs-msg-markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.cs-markdown-table {
+  overflow-x: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  scrollbar-width: thin;
+}
+
+.cs-markdown-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cs-markdown-table :is(th, td) {
+  min-width: 5em;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--glass-border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.cs-markdown-table th {
+  background: var(--glass-control);
+  font-weight: 650;
+}
+
+.cs-markdown-table :is(th, td) + :is(th, td) {
+  border-inline-start: 1px solid var(--glass-border);
+}
+
+.cs-markdown-table tbody tr:last-child td {
+  border-bottom: 0;
+}

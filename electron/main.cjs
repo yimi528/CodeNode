@@ -40,6 +40,48 @@ if (process.platform === 'win32') {
 }
 
 /**
+ * 启动自检：`ELECTRON_RUN_AS_NODE` 会让 Electron 二进制**以纯 Node 身份**运行。
+ *
+ * 症状（实测，2026-11-18）：从某个设置了该变量的父进程（Electron 系 IDE / harness 的
+ * shell / 带该变量的终端）启动本应用时，进程**确实起来了**，但只是把 `main.cjs` 当普通
+ * Node 脚本跑一遍：不创建窗口、不写日志、**退出码 0**。对外表现就是「双击图标毫无反应」，
+ * 而直接从资源管理器双击同一个快捷方式却一切正常（explorer 的环境是干净的）。
+ *
+ * 这个问题在 `scripts/run-electron.cjs` 里已经踩过（那里会主动删掉该变量），但**打包后的
+ * 用户入口**没有防护。所以这里把它变成**明确、可诊断的启动失败**，而不是静默成功：
+ *   - stderr 打一段人能看懂的原因；
+ *   - 在 exe 目录写 `logs/startup-error.log`（GUI 双击看不到 stderr，日志才是唯一线索）；
+ *   - 以退出码 1 结束 —— 0 会被启动器当成「打开成功」。
+ *
+ * 只影响「以 main.cjs 为入口却被当成 Node 跑」这一种情况；`--codenode-selftest`、
+ * ACP/stdio 中继、`scripts/run-electron.cjs` 等刻意用 Node 语义跑的入口都不经过这里。
+ */
+(function rejectNodeModeStartup() {
+  const raw = process.env.ELECTRON_RUN_AS_NODE;
+  if (!raw) return;
+  const lines = [
+    'CodeNode 无法启动：检测到环境变量 ELECTRON_RUN_AS_NODE=' + String(raw) + '。',
+    '',
+    '这个变量会让 Electron 以「纯 Node」身份运行：应用不会创建窗口，进程会立刻以退出码 0 结束，',
+    '所以看起来像「双击没有反应」，而且不会有任何报错弹窗。',
+    '',
+    '常见来源：从一个设置了该变量的父进程启动（例如 Electron 系的 IDE / Agent harness 的终端、',
+    '或带该变量的批处理）。修复办法：',
+    '  1) 清除该变量后再启动：PowerShell 里先执行  Remove-Item Env:ELECTRON_RUN_AS_NODE',
+    '  2) 或者直接从「开始菜单 / 资源管理器 / 桌面快捷方式」启动（这些入口的环境是干净的）。',
+  ];
+  const text = lines.join('\n');
+  try { console.error(text); } catch {}
+  try {
+    const dir = path.join(path.dirname(process.execPath), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'startup-error.log'),
+      '[' + new Date().toISOString() + '] ELECTRON_RUN_AS_NODE=' + String(raw) + '\n' + text + '\n\n', 'utf-8');
+  } catch {}
+  process.exit(1);
+})();
+
+/**
  * 控制台日志面板：把主进程的 console.log/info/warn/error 同时写入
  * <exe 目录>/logs/console.log。打包后的便携版 exe 没有附着控制台，配合
  * “CodeNode 控制台.cmd”启动器（桌面快捷方式指向它）即可在独立的 cmd 面板实时查看日志。

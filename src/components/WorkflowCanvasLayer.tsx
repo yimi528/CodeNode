@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore, type Edge, type Node } from '@xyflow/react';
+import { workflowNodeAccent } from '../lib/workflowNodeAccent';
 import { useUiStore } from '../store/uiStore';
 import { getVectorStore } from '../vector/vectorStore';
 import type { VecObject } from '../vector/types';
@@ -207,12 +208,12 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
       if ((x + width) * zoom + tx < -40 || x * zoom + tx > bounds.width + 40 || (y + height) * zoom + ty < -40 || y * zoom + ty > bounds.height + 40) continue;
       // Rich editors remain live DOM surfaces while selected; Canvas paints their inactive preview.
       if (node.selected && ['vector', 'image', 'scope', 'object'].includes(node.type || '')) continue;
-      const accent = data.accent || '#3b82f6';
+      const accent = workflowNodeAccent(node.type, data.accent);
       const statusColor = statuses[data.status || ''] || accent;
       const isScope = node.type === 'scope';
       ctx.save();
       ctx.fillStyle = isScope ? `${data.fill || '#3b2f6b'}${Math.round((data.opacity ?? .16) * 255).toString(16).padStart(2, '0')}` : surface;
-      ctx.strokeStyle = node.selected ? token(style, '--glass-accent', accent) : hoverScopeId === node.id ? accent : data.status && statuses[data.status] ? statusColor : accent;
+      ctx.strokeStyle = node.selected || hoverScopeId === node.id ? accent : statusColor;
       ctx.lineWidth = node.selected ? 2.5 : 1.4;
       if (data.status === 'running') { ctx.shadowColor = statusColor; ctx.shadowBlur = 8 + 5 * Math.sin(animationTick * .28); }
       if (isScope) ctx.setLineDash([7, 5]);

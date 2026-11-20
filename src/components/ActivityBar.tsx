@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { useUiStore } from '../store/uiStore';
+import { useProjectStore } from '../store/projectStore';
 function RailIcon({kind}:{kind:'home'|'files'|'plugins'|'settings'|'sidebar'|'tasks'}) {
   return <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {kind==='tasks'&&<><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m6 9 1 1 2-2m3 1h5m-11 6 1 1 2-2m3 1h5"/></>}
@@ -10,14 +11,15 @@ function RailIcon({kind}:{kind:'home'|'files'|'plugins'|'settings'|'sidebar'|'ta
 }
 export default function ActivityBar() {
   const {appPage,setAppPage,setPluginView,navigationOpen,toggleNavigation,preferences,sideTab,setSideTab,openSettings}=useUiStore();
-  const filePreview = appPage === 'workbench' && sideTab === 'preview';
+  const hasProject = useProjectStore(s => !!s.root);
+  const filePreview = hasProject && appPage === 'workbench' && sideTab === 'preview';
   return <nav className="activity-bar" aria-label="主导航" style={{'--activity-bar-width':preferences.activityBarWidth+'px'} as CSSProperties}>
     <button className="toolbar-navigation-toggle" disabled={filePreview} title={filePreview?'文件预览中已收起项目栏':(navigationOpen?'隐藏':'显示')+'侧边栏 (Ctrl+B)'} aria-label={(navigationOpen?'隐藏':'显示')+'侧边栏'} aria-expanded={navigationOpen&&!filePreview} onClick={toggleNavigation}><RailIcon kind="sidebar"/></button>
     <div className="activity-bar-links">
       <button title="工作台" aria-label="工作台" aria-current={appPage==='workbench'&&!['project','preview'].includes(sideTab)?'page':undefined} onClick={()=>{setAppPage('workbench');setSideTab('agent')}}><RailIcon kind="home"/></button>
-      <button title="文件" aria-label="文件" aria-current={appPage==='workbench'&&['project','preview'].includes(sideTab)?'page':undefined} onClick={()=>{setAppPage('workbench');setSideTab('preview')}}><RailIcon kind="files"/></button>
+      <button title={hasProject ? '文件' : '打开工程后可查看文件'} aria-label="文件" disabled={!hasProject} aria-current={hasProject&&appPage==='workbench'&&['project','preview'].includes(sideTab)?'page':undefined} onClick={()=>{setAppPage('workbench');setSideTab('preview')}}><RailIcon kind="files"/></button>
       <button title="插件" aria-label="插件" aria-current={appPage==='plugins'?'page':undefined} onClick={()=>setPluginView('plugins')}><RailIcon kind="plugins"/></button>
-      <button title="任务" aria-label="任务" aria-current={appPage==='tasks'?'page':undefined} onClick={()=>setAppPage('tasks')}><RailIcon kind="tasks"/></button>
+      <button title={hasProject ? '任务' : '打开工程后可查看任务'} aria-label="任务" disabled={!hasProject} aria-current={appPage==='tasks'?'page':undefined} onClick={()=>setAppPage('tasks')}><RailIcon kind="tasks"/></button>
     </div>
     <div className="activity-bar-footer"><button className="global-settings-trigger" title="设置" aria-label="全局设置" onClick={()=>openSettings()}><RailIcon kind="settings"/></button></div>
   </nav>;

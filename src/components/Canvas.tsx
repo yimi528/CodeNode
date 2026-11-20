@@ -18,6 +18,8 @@ import { childIdsOf, computeChildren, parentIdOf, isDescendantOf } from '../lib/
 import { useSpacePan } from '../hooks/useSpacePan';
 import WorkflowCanvasLayer from './WorkflowCanvasLayer';
 
+const NODE_CLICK_TOLERANCE = 4;
+
 function collectHiddenIds(nodes: Node[]): Set<string> {
   const hidden = new Set<string>();
   const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -147,6 +149,12 @@ export default function Canvas() {
   const progress = useSessionStore((s) => s.progress);
   const { fitView, getViewport, setViewport: rfSetViewport, screenToFlowPosition } = useReactFlow();
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const copyDrag = useRef<{ id: string; pointerId: number; start: Pt; bounds: DOMRect } | null>(null);
+  const [copyPreview, setCopyPreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const clearCopyDrag = () => {
+    copyDrag.current = null;
+    setCopyPreview(null);
+  };
 
   const dragState = useRef<{
     id: string;
@@ -260,6 +268,58 @@ export default function Canvas() {
     <div
       ref={canvasRef}
       className={`canvas-wrap${rasterSupported ? ' canvas-raster-mode' : ''}`}
+      onPointerDownCapture={(e) => {
+        if (e.button !== 0 || !e.altKey || e.ctrlKey || e.metaKey || spacePressed) return;
+        const target = e.target as Element;
+        const owner = target.closest<HTMLElement>('.react-flow__node[data-id]');
+        if (!owner || target.closest('.nodrag,.react-flow__handle,.vs-scope,input,textarea,select,button,a[href],[contenteditable="true"]')) return;
+        const node = nodes.find((item) => item.id === owner.dataset.id);
+        if (!node || node.draggable === false || (node.dragHandle && !target.closest(node.dragHandle))) return;
+        copyDrag.current = {
+          id: node.id,
+          pointerId: e.pointerId,
+          start: { x: e.clientX, y: e.clientY },
+          bounds: owner.getBoundingClientRect(),
+        };
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        owner.focus({ preventScroll: true });
+      }}
+      onPointerMove={(e) => {
+        const drag = copyDrag.current;
+        if (!drag || drag.pointerId !== e.pointerId) return;
+        const dx = e.clientX - drag.start.x;
+        const dy = e.clientY - drag.start.y;
+        if (Math.hypot(dx, dy) < 4) {
+          setCopyPreview(null);
+          return;
+        }
+        const canvas = e.currentTarget.getBoundingClientRect();
+        setCopyPreview({
+          x: drag.bounds.left - canvas.left + dx,
+          y: drag.bounds.top - canvas.top + dy,
+          width: drag.bounds.width,
+          height: drag.bounds.height,
+        });
+      }}
+      onPointerUp={(e) => {
+        const drag = copyDrag.current;
+        if (!drag || drag.pointerId !== e.pointerId) return;
+        clearCopyDrag();
+        if (Math.hypot(e.clientX - drag.start.x, e.clientY - drag.start.y) < 4) {
+          setSelectedIds(useGraphStore.getState().selectedIds.filter((id) => id !== drag.id));
+          return;
+        }
+        const canvas = e.currentTarget.getBoundingClientRect();
+        if (e.clientX < canvas.left || e.clientX >= canvas.right || e.clientY < canvas.top || e.clientY >= canvas.bottom) return;
+        const start = screenToFlowPosition(drag.start, { snapToGrid: false });
+        const end = screenToFlowPosition({ x: e.clientX, y: e.clientY }, { snapToGrid: false });
+        const graph = useGraphStore.getState();
+        graph.pasteNodes(graph.copyNodes([drag.id]), { x: end.x - start.x, y: end.y - start.y });
+      }}
+      onPointerCancel={clearCopyDrag}
+      onLostPointerCapture={clearCopyDrag}
       onMouseDown={(e) => {
         if (e.button === 2 && e.ctrlKey) {
           const rect = e.currentTarget.getBoundingClientRect();
@@ -327,8 +387,11 @@ export default function Canvas() {
         panActivationKeyCode={null}
         selectionOnDrag
         selectionMode={SelectionMode.Full}
-        multiSelectionKeyCode="Control"
-        selectionKeyCode="Shift"
+        multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
+        // 空白处拖动即可框选，Shift 留给逐个加选或减选节点。
+        selectionKeyCode={null}
+        nodeClickDistance={NODE_CLICK_TOLERANCE}
+        nodeDragThreshold={NODE_CLICK_TOLERANCE}
         deleteKeyCode={null}
         onMoveEnd={() => setViewport(getViewport())}
         onNodeDragStart={(e, node) => {
@@ -360,7 +423,7 @@ export default function Canvas() {
             useUiStore.getState().setHoverScopeId(next);
           }
         }}
-        onNodeDragStop={(e, node) => {
+        onNodeDragStop={(_, node) => {
           const ds = dragState.current;
           const st = useGraphStore.getState();
           const target = findHoverScope(node) ?? hoverScope.current;
@@ -371,7 +434,7 @@ export default function Canvas() {
             // Ctrl + 拖出范围：从原 scope 中移出
             for (const id of ds.ids) {
               const current = st.nodes.find((n) => n.id === id);
-              if (current && (e.altKey || !target)) st.removeFromScope(id);
+              if (current && !target) st.removeFromScope(id);
               else if (current && target && target !== parentIdOf(current) && target !== id) st.addToScope(id, target);
             }
           } else if (target && target !== oldParent) {
@@ -422,18 +485,7 @@ export default function Canvas() {
             const owner=target.closest<HTMLElement>('.react-flow__node');
             if(owner){if(!owner.hasAttribute('tabindex'))owner.tabIndex=0;owner.focus({preventScroll:true});}
           }
-          if (e.altKey) {
-            // Alt+左键：取消该节点选中
-            const st = useGraphStore.getState();
-            st.setSelectedIds(st.selectedIds.filter((id) => id !== node.id));
-          } else if (e.shiftKey || e.ctrlKey || e.metaKey) {
-            // 加选 / 减选
-            const st = useGraphStore.getState();
-            const cur = st.selectedIds;
-            st.setSelectedIds(cur.includes(node.id) ? cur.filter((id) => id !== node.id) : [...cur, node.id]);
-          } else {
-            useGraphStore.getState().setSelectedIds([node.id]);
-          }
+          if (!e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) setSelectedIds([node.id]);
         }}
         onPaneClick={() => {
           closeAddMenu();
@@ -451,6 +503,9 @@ export default function Canvas() {
         }}
       >
       </ReactFlow>
+      {copyPreview && <div className="canvas-copy-preview" style={{
+        left: copyPreview.x, top: copyPreview.y, width: copyPreview.width, height: copyPreview.height,
+      }} />}
       {!nodes.length && <div className="canvas-welcome">
         <p>Shift + A 添加节点</p>
       </div>}

@@ -4,7 +4,8 @@ import { useUiStore } from '../store/uiStore';
 import { useSessionStore } from '../store/sessionStore';
 import { useCheckpointStore, type Checkpoint } from '../store/checkpointStore';
 import { useProjectSaveStore } from '../store/projectSaveStore';
-import { loadRecentProjects, rememberRecentProject } from './recentProjects';
+import { loadRecentProjects, rememberRecentProject, sameRecentProject } from './recentProjects';
+import { readWorkspaceLocation } from './workspaceHistory';
 import type { Graph, SessionCanvas, SessionDoc, SessionMsg } from '../types';
 
 const LAST_ROOT_KEY = 'codenode.lastProjectRoot';
@@ -198,6 +199,7 @@ export async function newProject(): Promise<void> {
   useGraphStore.getState().clear();
   const { raw, greeting } = await fetchSoul(root);
   useSessionStore.getState().initProject(greeting || raw, raw);
+  useUiStore.getState().showCanvas();
   useUiStore.getState().setToast('已新建项目：' + nameOf(res.filePath));
 }
 
@@ -228,6 +230,7 @@ export async function openProject(): Promise<void> {
     useSessionStore.getState().initProject(greeting || raw, raw);
     useUiStore.getState().setToast('已打开项目目录（无 .cnode 工程文件）：' + res.root);
   }
+  useUiStore.getState().showCanvas();
 }
 
 export async function openProjectFile(): Promise<void> {
@@ -261,6 +264,7 @@ export async function openProjectFile(): Promise<void> {
   useCheckpointStore.getState().setProjectRoot(root);
   useProjectStore.getState().setProjectFile(res.filePath);
   if (res.data) applyLoaded(root, res.data);
+  useUiStore.getState().showCanvas();
   const warn = res.data?.warnings?.length ? '（' + res.data.warnings.join('；') + '）' : '';
   useUiStore.getState().setToast('已打开工程文件：' + res.filePath + warn);
 }
@@ -312,20 +316,45 @@ export async function saveProject():Promise<boolean> {
   catch(error){useProjectSaveStore.setState({status:'error',error:String(error)});useUiStore.getState().setToast('保存失败：'+String(error));return false;}
 }
 
-/**
- * 启动时恢复上次打开的工程。
- *
- * 需求变更：不再自动进入最近打开的工程，而是停在门禁页，
- * 由用户在「最近打开」列表里自己选择（见 ProjectGate）。
- * 这里只负责结束启动引导（置 booted），让门禁页接管。
- */
-export async function restoreLastProject(): Promise<void> {
+/** 恢复上次离开时的工程、会话和工作区。 */
+export async function restoreLastWorkspace(): Promise<void> {
   try {
     if (!window.codenode) return;
-    // 兼容旧版本：把单条"上次打开"迁移进最近列表（只做迁移，不自动打开）
-    await loadRecentProjects();
-  } catch (e) {
-    console.error('[CodeNode] 读取最近工程失败:', e);
+    const location = readWorkspaceLocation();
+    const recent = await loadRecentProjects();
+    const entry = location ? location.project : recent[0];
+    if (entry) {
+      await openRecentProject(entry, location?.sessionId, true);
+      const project = useProjectStore.getState();
+      if (!sameRecentProject({ root: project.root || '', file: project.projectFile || undefined }, entry)) {
+        useUiStore.getState().showCanvas();
+        return;
+      }
+      if (location?.newCanvas) useSessionStore.getState().newConversation();
+    }
+    if (location) {
+      const ui = useUiStore.getState();
+      ui.updatePreferences({ workbenchView: location.overview ? 'overview' : 'conversation' });
+      useUiStore.setState({
+        appPage: !entry && location.page === 'tasks' ? 'workbench' : location.page,
+        pluginView: location.pluginView,
+        sideTab: entry ? location.tab : 'agent',
+        sideOpen: !!entry && location.tab === 'node',
+        filePreviewLocation: entry ? location.preview || null : null,
+      });
+      if (entry && location.tab === 'project' && location.editorFile) {
+        try { await useProjectStore.getState().openFile(location.editorFile); }
+        catch { ui.setToast('上次编辑的文件已无法打开'); }
+      }
+    } else if (entry) {
+      useUiStore.getState().showCanvas();
+    }
+  } catch (error) {
+    useProjectStore.setState({ root: null, projectFile: null, tree: [], error: null });
+    useSessionStore.getState().reset();
+    useGraphStore.getState().clear();
+    useUiStore.getState().showCanvas();
+    throw error;
   } finally {
     useUiStore.getState().setBooted(true);
   }
@@ -334,7 +363,7 @@ export async function restoreLastProject(): Promise<void> {
 /**
  * 打开一条「最近打开」记录：优先加载 .cnode 文件，只有目录时按目录打开。
  */
-export async function openRecentProject(entry: { root: string; file?: string; name?: string }, sessionId?: string): Promise<void> {
+export async function openRecentProject(entry: { root: string; file?: string; name?: string }, sessionId?: string, restoring = false): Promise<void> {
   const api = window.codenode;
   if (!api) {
     useUiStore.getState().setToast('需要 Electron 环境');
@@ -347,12 +376,14 @@ export async function openRecentProject(entry: { root: string; file?: string; na
   const savedSessions = requested?.data?.canvases?.sessions as SessionPayload[] | undefined;
   if (sessionId && (!requested?.ok || !Array.isArray(savedSessions) ||
     !savedSessions.some(session => session?.id === sessionId && !session.archived))) {
-    throw Error('找不到这条对话，请重新展开项目。');
+    if (!restoring) throw Error('找不到这条对话，请重新展开项目。');
+    sessionId = undefined;
   }
 
   const root = entry.file ? dirOf(entry.file) : entry.root;
   await useProjectStore.getState().loadRoot(root);
   const st = useProjectStore.getState();
+  if (restoring && st.error) throw Error('无法恢复上次打开的工程：' + st.error);
   if (!st.root) {
     useUiStore.getState().setToast('打开失败：' + (st.error || '目录不可用'));
     return;
@@ -365,7 +396,7 @@ export async function openRecentProject(entry: { root: string; file?: string; na
       useProjectStore.getState().setProjectFile(loadedFile);
       useCheckpointStore.getState().setProjectRoot(root);
       applyLoaded(root, lr.data, sessionId);
-      rememberRecentProject({ root, file: loadedFile });
+      rememberRecentProject({ root, file: loadedFile, name: entry.name });
       useUiStore.getState().setToast('已打开最近工程：' + nameOf(loadedFile));
       return;
     }

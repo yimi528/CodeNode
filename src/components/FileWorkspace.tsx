@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { buildTree, useProjectStore, type FileNode, type SelectedFile } from '../store/projectStore';
+import { buildTree, useProjectStore, type FileNode } from '../store/projectStore';
+import { useUiStore } from '../store/uiStore';
 import { projectNameOf, readRecentProjects, recentPathKey } from '../lib/recentProjects';
 import { EditorPanel } from './WorkbenchDock';
 import ProjectPanel, { ProjectFileTree } from './side/ProjectPanel';
-import PreviewPanel, { FilePreview } from './side/PreviewPanel';
+import PreviewPanel, { FilePreview, type PreviewFile } from './side/PreviewPanel';
 
 function WorkspaceFiles({ root, workspaceLabel }: { root: string; workspaceLabel: ReactNode }) {
   const [tree, setTree] = useState<FileNode[]>([]);
@@ -11,8 +12,9 @@ function WorkspaceFiles({ root, workspaceLabel }: { root: string; workspaceLabel
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [refresh, setRefresh] = useState(0);
-  const [selectedPath, selectPath] = useState<string | null>(null);
-  const [selected, setSelected] = useState<SelectedFile | null>(null);
+  const selectedPath = useUiStore(s => s.filePreviewLocation?.root === root ? s.filePreviewLocation.relPath : null);
+  const selectPath = (relPath: string) => useUiStore.setState({ filePreviewLocation: { root, relPath } });
+  const [selected, setSelected] = useState<PreviewFile | null>(null);
   const [previewError, setPreviewError] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -48,9 +50,18 @@ function WorkspaceFiles({ root, workspaceLabel }: { root: string; workspaceLabel
     setPreviewLoading(true);
     void (async () => {
       try {
-        const result = await window.codenode?.readProjectFile(root, selectedPath);
-        if (!result?.ok) throw Error(result?.error || '文件读取失败');
-        if (active) setSelected({ relPath: selectedPath, content: result.content || '', truncated: !!result.truncated, mtimeMs: result.mtimeMs });
+        const result = await window.codenode?.readProjectFile(root, selectedPath, { preview: true });
+        if (!result?.ok || !result.preview) throw Error(result?.error || '文件读取失败');
+        const preview = result.preview;
+        if (active) setSelected({
+          relPath: selectedPath,
+          content: preview.kind === 'text' ? preview.content : '',
+          truncated: preview.kind === 'text' && preview.truncated,
+          mtimeMs: result.mtimeMs,
+          bytes: result.bytes,
+          encoding: preview.kind === 'text' ? preview.encoding : undefined,
+          media: preview.kind === 'text' ? undefined : preview,
+        });
       } catch (cause) {
         if (active) setPreviewError(cause instanceof Error ? cause.message : String(cause));
       } finally {
@@ -89,7 +100,8 @@ function WorkspaceEditor() {
 
 export default function FileWorkspace({ editing }: { editing: boolean }) {
   const projectRoot = useProjectStore(state => state.root) || '';
-  const [browseRoot, setBrowseRoot] = useState<string | null>(null);
+  const browseRoot = useUiStore(s => s.filePreviewLocation?.root || null);
+  const setBrowseRoot = (root: string | null) => useUiStore.setState({ filePreviewLocation: root ? { root, relPath: null } : null });
   const [choosing, setChoosing] = useState(false);
   const [chooseError, setChooseError] = useState('');
   const choices = new Map<string, string>();

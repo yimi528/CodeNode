@@ -5,20 +5,24 @@ import { useUiStore } from '../store/uiStore';
 import { useProjectSaveStore } from '../store/projectSaveStore';
 import { newProject, openProject, openProjectFile, openRecentProject, saveProject } from '../lib/projectActions';
 import { readRecentProjects, projectNameOf, forgetRecentProject, recentPathKey, sameRecentProject, type RecentProject } from '../lib/recentProjects';
+import { conversationTitle, firstTitleMessage } from '../lib/conversationTitle';
+import type { SessionMsg } from '../types';
 
 type ProjectEntry = Pick<RecentProject, 'root' | 'file' | 'name'>;
-type SessionEntry = { id: string; label?: string; prompt?: string; archived?: boolean };
+type SessionEntry = { id: string; label?: string; messages?: SessionMsg[]; archived?: boolean };
 
-function ProjectSessions({ target, liveSessions, activeId, busy, onSelect, onArchive }: {
+function ProjectSessions({ target, liveSessions, activeId, busy, onSelect, onArchive, onOpenProject }: {
   target: string;
   liveSessions: SessionEntry[] | null;
   activeId?: string | null;
   busy: boolean;
   onSelect: (id: string) => void;
   onArchive?: (id: string) => void;
+  onOpenProject?: () => void;
 }) {
   const current = liveSessions !== null;
   const [saved, setSaved] = useState<SessionEntry[] | null>(null);
+  const [showAll, setShowAll] = useState(false);
   useEffect(() => {
     if (current) return;
     let alive = true;
@@ -27,33 +31,59 @@ function ProjectSessions({ target, liveSessions, activeId, busy, onSelect, onArc
     if (!api) { setSaved([]); return; }
     void api.loadProject(target).then(result => {
       const sessions = result.data?.canvases?.sessions as SessionEntry[] | undefined;
-      if (alive) setSaved(result.ok && Array.isArray(sessions) ? sessions : []);
+      if (alive) setSaved(result.ok && Array.isArray(sessions)
+        ? sessions.filter(session => typeof session?.id === 'string' && !session.archived)
+          .map(({ id, label, messages }) => ({ id, label: conversationTitle(label, firstTitleMessage(messages)) }))
+        : []);
     }).catch(() => { if (alive) setSaved([]); });
     return () => { alive = false; };
   }, [target, current]);
 
   const entries = (liveSessions ?? saved)?.filter(session => typeof session?.id === 'string' && !session.archived);
+  const latest = entries?.slice(-4).reverse();
+  const active = entries?.find(session => session.id === activeId);
+  if (latest && active && !latest.includes(active)) latest.push(active);
+  const visible = showAll ? entries?.slice().reverse() : latest;
   return <div className="project-nav-sessions">
-    {!entries?.length && <div className="project-nav-empty">{entries ? '暂无已保存的对话' : '正在读取对话…'}</div>}
-    {entries?.map(session => {
-      const label = session.prompt && !session.prompt.startsWith('#') ? session.prompt : session.label || '未命名对话';
+    {!entries?.length && <div className="project-nav-empty">
+      <span>{entries ? '暂无已保存的对话' : '正在读取对话…'}</span>
+      {entries && onOpenProject && <button type="button" className="project-nav-open" disabled={busy} onClick={onOpenProject}>打开工程</button>}
+    </div>}
+    {visible?.map(session => {
+      const label = session.label || '未命名对话';
       return <div key={session.id} className="project-session-row">
         <button className={session.id === activeId ? 'active' : ''} disabled={busy} aria-current={session.id === activeId ? 'page' : undefined} onClick={() => onSelect(session.id)} title={label}>{label}</button>
         {onArchive && <button className="session-archive" aria-label={`归档 ${session.label || label}`} title="归档聊天" disabled={busy} onClick={() => onArchive(session.id)}>▣</button>}
       </div>;
     })}
+    {entries && latest && entries.length > latest.length && <button
+      type="button"
+      className="project-nav-more"
+      aria-expanded={showAll}
+      onClick={() => setShowAll(value => !value)}
+    >{showAll ? '收起对话' : '展开更多对话'}</button>}
   </div>;
 }
 
 function showConversation() {
   const ui = useUiStore.getState();
   ui.updatePreferences({ workbenchView: 'conversation' });
-  ui.setSideTab('agent');
+  ui.setSideTab('conversation');
   useUiStore.setState({ conversationOpen: true, conversationAutoHidden: false, ...(window.innerWidth <= 600 ? { navigationOpen: false } : {}) });
 }
 
+function startCanvas() {
+  useSessionStore.getState().newConversation();
+  useUiStore.getState().showCanvas();
+  if (window.innerWidth <= 600) useUiStore.setState({ navigationOpen: false });
+  void saveProject();
+}
+
 /** Project/session navigation is independent of the conversation/inspector. */
-export default function ProjectNavigation() {
+export default function ProjectNavigation({ switching, runProjectAction }: {
+  switching: boolean;
+  runProjectAction: (action: () => Promise<void>) => Promise<boolean>;
+}) {
   const root = useProjectStore(s => s.root);
   const file = useProjectStore(s => s.projectFile);
   const sessions = useSessionStore(s => s.sessions);
@@ -61,6 +91,7 @@ export default function ProjectNavigation() {
   const order = useSessionStore(s => s.order);
   const activeId = useSessionStore(s => s.activeId);
   const open = useUiStore(s => s.navigationOpen);
+  const recentReady = useUiStore(s => s.booted);
   const width = useUiStore(s => s.navigationWidth);
   const setWidth = useUiStore(s => s.setNavigationWidth);
   const panel = useRef<HTMLElement>(null);
@@ -78,8 +109,6 @@ export default function ProjectNavigation() {
     resizeCleanup.current = finish; document.body.classList.add('is-resizing-side');
     window.addEventListener('blur',finish); window.addEventListener('pointermove',move); window.addEventListener('pointerup',finish); window.addEventListener('pointercancel',finish);
   };
-  const [error, setError] = useState('');
-  const [switching, setSwitching] = useState(false);
   const [revision, refresh] = useState(0);
   const [projectOrder, setProjectOrder] = useState<string[]>(() => { try { const value = JSON.parse(localStorage.getItem('codenode.projectOrder') || '[]'); return Array.isArray(value) ? value.filter(key => typeof key === 'string') : []; } catch { return []; } });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -92,18 +121,10 @@ export default function ProjectNavigation() {
     return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', dismiss); };
   }, []);
   const act = async (operation: () => Promise<void>) => {
-    if (switching || useSessionStore.getState().streaming) return;
-    setError('');
-    setSwitching(true);
-    try {
-      await operation();
-      const state = useProjectStore.getState();
-      changeMeta(state.projectFile || state.root || '', { hidden: false });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '打开项目失败');
-    } finally {
-      setSwitching(false);
-    }
+    if (!await runProjectAction(operation)) return;
+    const state = useProjectStore.getState();
+    const key = state.projectFile || state.root;
+    if (key) changeMeta(key, { hidden: false });
   };
   const openOtherProject = async (project: ProjectEntry, sessionId?: string) => {
     const projectState = useProjectStore.getState();
@@ -120,10 +141,10 @@ export default function ProjectNavigation() {
   };
 
   const currentProject = { root: root || '', file: file || undefined };
-  const isCurrent = (project: ProjectEntry) => sameRecentProject(project, currentProject);
+  const isCurrent = (project: ProjectEntry) => !!root && sameRecentProject(project, currentProject);
   const recent = readRecentProjects();
   const projects = [
-    { ...currentProject, name: projectNameOf(file || root || '当前项目') },
+    ...(root ? [{ ...currentProject, name: projectNameOf(file || root) }] : []),
     ...recent.filter(item => !isCurrent(item)),
   ].filter(item => !meta[item.file || item.root]?.hidden);
   const candidateKeys = projects.map(item => recentPathKey(item.file || item.root));
@@ -148,26 +169,39 @@ export default function ProjectNavigation() {
   if (!open) return null;
   return <aside ref={panel} className="project-navigation" aria-label="项目与会话" style={{'--navigation-width':width+'px'} as CSSProperties}>
     <div className="navigation-resize" role="separator" aria-label="调整项目栏宽度" aria-orientation="vertical" aria-valuemin={180} aria-valuemax={400} aria-valuenow={width} tabIndex={0} onPointerDown={startResize} onDoubleClick={()=>setWidth(216)} onKeyDown={event => { if(event.key==='ArrowLeft'||event.key==='ArrowRight') { event.preventDefault(); setWidth(width+(event.key==='ArrowRight'?16:-16)); } }} />
-    <div className="project-nav-head"><strong>CodeNode</strong></div>
-    <button className="project-nav-new" disabled={busy} onClick={() => { useSessionStore.getState().newConversation(); showConversation(); void saveProject(); }}>＋ 新对话</button>
+    <div className="project-nav-head"><strong>工程与对话</strong></div>
+    <button className="project-nav-new" disabled={busy || !root} title={!root ? '打开工程后即可新建对话' : undefined} onClick={startCanvas}>＋ 新对话</button>
     <div className="project-nav-title"><span>最近项目</span><details className="project-actions"><summary aria-label="项目操作">＋</summary><div><button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(newProject); }}>新建项目</button><button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(openProject); }}>打开项目</button><button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(openProjectFile); }}>打开工程文件</button></div></details></div>
     <div className="project-nav-scroll">
-      {projects.map(project => {
+      {projects.length === 0 && <div className="project-nav-placeholder">
+        {recentReady ? '还没有最近工程' : '正在读取最近工程…'}
+      </div>}
+      {projects.map((project, index) => {
         const key = project.file || project.root, current = isCurrent(project);
-        const name = meta[key]?.name || project.name.replace(/\.cnode$/i, '');
-        const folded = collapsed[key] ?? !current;
-        return <section className="project-group" key={key}>
+        const name = meta[key]?.name || (/^workflow\.cnode$/i.test(project.name)
+          ? projectNameOf(project.root)
+          : project.name.replace(/\.cnode$/i, ''));
+        const folded = collapsed[key] ?? (!current && index >= 3);
+        const openProjectEntry = () => void act(async () => {
+          if (await openOtherProject(project)) {
+            setCollapsed(state => ({ ...state, [key]: false }));
+            useUiStore.getState().showCanvas();
+          }
+        });
+        return <section className="project-group" data-project-path={key} key={key}>
           <div className="project-group-row">
-            <button className="project-group-name" aria-expanded={!folded} title={project.root} onClick={() => setCollapsed(state => ({ ...state, [key]: !folded }))}><span>{folded ? '›' : '⌄'}</span><span>▱</span><span>{name}</span>{meta[key]?.pinned && <small>置顶</small>}</button>
+            <button className="project-group-name" aria-expanded={!folded} title={project.root} onClick={() => setCollapsed(state => ({ ...state, [key]: !folded }))}>
+              <span className="project-group-chevron" aria-hidden="true">{folded ? '›' : '⌄'}</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z" /></svg>
+              <span className="project-group-label" title={name}>{name}</span>{meta[key]?.pinned && <small>置顶</small>}
+            </button>
             <button className="project-new-chat" aria-label={`在 ${name} 新建聊天`} disabled={busy} onClick={() => void act(async () => {
               if (!current && !await openOtherProject(project)) return;
               setCollapsed(state => ({ ...state, [key]: false }));
-              useSessionStore.getState().newConversation();
-              showConversation();
-              void saveProject();
+              startCanvas();
             })}>＋</button>
             <details className="project-row-menu"><summary aria-label={`${name} 项目菜单`}>⋯</summary><div onClick={event => event.currentTarget.parentElement?.removeAttribute('open')}>
-              {!current && <button disabled={busy} onClick={() => void act(async () => { if (await openOtherProject(project)) setCollapsed(state => ({ ...state, [key]: false })); })}>打开项目</button>}
+              {!current && <button className="project-open" disabled={busy} onClick={openProjectEntry}>打开项目</button>}
               <button onClick={() => changeMeta(key, { pinned: !meta[key]?.pinned })}>{meta[key]?.pinned ? '取消置顶' : '置顶'}</button>
               <button onClick={() => setRenaming(key)}>编辑名称</button>
               {current && <button disabled={busy} onClick={() => { order.filter(id => !sessions[id]?.archived).forEach(id => useSessionStore.getState().setArchived(id, true)); void saveProject(); }}>归档聊天</button>}
@@ -189,10 +223,10 @@ export default function ProjectNavigation() {
               });
             }}
             onArchive={current ? id => { useSessionStore.getState().setArchived(id, true); void saveProject(); } : undefined}
+            onOpenProject={!current ? openProjectEntry : undefined}
           />}
         </section>;
       })}
     </div>
-{error && <div className="project-nav-error" role="alert">{error}</div>}
   </aside>;
 }

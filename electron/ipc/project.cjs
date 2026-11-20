@@ -20,6 +20,7 @@ const ragIndex = require('../rag/index.cjs');
 const runStore = require('../runStore.cjs');
 const agent = require('../agent.cjs');
 const recentProjects = require('../recentProjects.cjs');
+const { imageTypes, readFilePreview } = require('../filePreview.cjs');
 
 const IGNORE_DIRS = new Set([
   'node_modules',
@@ -311,6 +312,13 @@ function register(ctx) {
   });
 
   ipcMain.handle('project:read', async (_event, root, relPath, options) => {
+    if (options?.preview) {
+      try {
+        return await readFilePreview(root, relPath);
+      } catch (error) {
+        return { ok: false, error: error.code ? '无法读取文件' : error.message };
+      }
+    }
     try {
       const resolvedRoot = path.resolve(root);
       const full = path.resolve(root, relPath);
@@ -320,11 +328,7 @@ function register(ctx) {
       // 二进制读取（图像节点用）：只接受图片扩展名，转成 data URL 给渲染进程显示
       if (options && options.binary) {
         const ext = path.extname(full).toLowerCase();
-        const mimeByExt = {
-          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-          '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp', '.svg': 'image/svg+xml',
-        };
-        const mime = mimeByExt[ext];
+        const mime = imageTypes[ext];
         if (!mime) return { ok: false, error: '不是支持的图片格式：' + (ext || '未知') };
         const MAX_IMG = 8 * 1024 * 1024;
         const stat = await fsp.stat(full);

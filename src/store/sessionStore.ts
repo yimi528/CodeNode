@@ -3,6 +3,7 @@ import { useGraphStore } from './graphStore';
 import { useProjectStore } from './projectStore';
 import { useUiStore } from './uiStore';
 import { applyStreamDelta, warnUnknownDelta } from '../lib/sessionDelta';
+import { conversationTitle, firstTitleMessage } from '../lib/conversationTitle';
 import type { RagGrounding, SessionCanvas, SessionDoc, SessionMsg, ToolRecord } from '../types';
 
 const uid = (p: string) => `${p}-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
@@ -263,7 +264,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const usedLabels = new Set(Object.values(sessions).filter(canvas => !canvas.archived).map(canvas => canvas.label));
     let number = 1;
     while (usedLabels.has('画布' + number)) number++;
-    const label = '画布' + number;
+    const label = conversationTitle('画布' + number, { content: prompt });
     const blank: SessionCanvas = {
       id,
       label,
@@ -343,7 +344,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const order: string[] = [];
     for (const s of list) {
       if (!s || !s.id) continue;
-      sessions[s.id] = s;
+      sessions[s.id] = { ...s, label: conversationTitle(s.label, firstTitleMessage(s.messages)) };
       order.push(s.id);
     }
     let id = activeId && sessions[activeId] && !sessions[activeId].archived ? activeId : null;
@@ -371,8 +372,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       loadGraph(emptyDoc());
       return;
     }
+    const restoredMessages = sessions[id].messages || messages || [];
+    sessions[id] = { ...sessions[id], label: conversationTitle(sessions[id].label, firstTitleMessage(restoredMessages)) };
     loadGraph(sessions[id].doc);
-    set({ sessions, order, activeId: id, memoryConversationId: stableMemoryId, memoryTaskEpoch: taskEpoch, activePlanSessionId: id, plansBySessionId: {}, plan: null, planUpdatedAt: null, planRunId: null, streaming: false, messages: sessions[id].messages || messages || [], progress: null });
+    set({ sessions, order, activeId: id, memoryConversationId: stableMemoryId, memoryTaskEpoch: taskEpoch, activePlanSessionId: id, plansBySessionId: {}, plan: null, planUpdatedAt: null, planRunId: null, streaming: false, messages: restoredMessages, progress: null });
   },
 
   getDocument: () => snapshotGraph(),
@@ -409,9 +412,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   pushUser: (content, attachments) => {
-    set((s) => ({
-      messages: [...s.messages, { role: 'user', content, ...(attachments && attachments.length ? { attachments } : {}) }],
-    }));
+    const message: SessionMsg = { role: 'user', content, ...(attachments?.length ? { attachments } : {}) };
+    set((s) => {
+      const active = s.activeId ? s.sessions[s.activeId] : null;
+      const label = active ? conversationTitle(active.label, message) : '';
+      return {
+        messages: [...s.messages, message],
+        ...(active && label !== active.label && { sessions: { ...s.sessions, [active.id]: { ...active, label } } }),
+      };
+    });
   },
 
   beginTurn: () => {

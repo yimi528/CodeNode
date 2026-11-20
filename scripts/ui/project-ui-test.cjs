@@ -31,6 +31,27 @@ require(process.env.CODENODE_UI_TEST_PACKAGE
   : "../../electron/main.cjs");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function previewPdfFixture() {
+  const firstPage = '0 0 1 rg 0 0 100 100 re f BT /F1 12 Tf 10 120 Td (Page one) Tj ET';
+  const secondPage = '1 0 0 rg 0 0 100 100 re f BT /F1 12 Tf 10 120 Td (Page two) Tj ET';
+  const pages = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 200] /Resources << /Font << /F1 5 0 R >> >> >>',
+    '<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>',
+    '<< /Type /Page /Parent 2 0 R /Contents 7 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ...[firstPage, secondPage].map(commands => `<< /Length ${commands.length} >>\nstream\n${commands}\nendstream`),
+  ];
+  let content = '%PDF-1.4\n';
+  const entries = pages.map((object, index) => {
+    const offset = String(content.length).padStart(10, '0');
+    content += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    return `${offset} 00000 n \n`;
+  });
+  return `${content}xref\n0 ${pages.length + 1}\n0000000000 65535 f \n${entries.join('')}trailer\n<< /Size ${pages.length + 1} /Root 1 0 R >>\nstartxref\n${content.length}\n%%EOF\n`;
+}
+
 async function waitFor(check, label) {
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
@@ -46,7 +67,12 @@ app.whenReady().then(async () => {
     ipcMain.handle('agent:chat', async (_event, payload) => { firstSendCalls++; assert.equal(payload.prompt, '你好'); return await new Promise(resolve => { completeFirstSend = () => resolve({ok:true,reply:'你好，我能为你做什么？',reasoning:'',tools:[]}); }); });
   }
   try {
-    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".gate-actions")').catch(() => false), '启动页');
+    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && !document.querySelector(".startup-splash")').catch(() => false), '主工作区');
+    const reopenProject = async () => {
+      const beforeReload = await win.webContents.executeJavaScript('performance.timeOrigin');
+      win.webContents.reload();
+      await waitFor(async () => await win.webContents.executeJavaScript(`performance.timeOrigin !== ${beforeReload} && window.__codenodeUi?.getState().booted && window.__codenodeProject?.getState().projectFile === ${JSON.stringify(projectFile)}`).catch(() => false), '启动时恢复上次工程');
+    };
     win.hide();
     const modelFixtures = require("../../electron/modelStore.cjs").seedModels({apiKey:'synthetic-ui-key'});
     fs.mkdirSync(app.getPath('userData'),{recursive:true});
@@ -60,7 +86,7 @@ app.whenReady().then(async () => {
       {id:'alternate-archived',label:'已归档对话',archived:true,createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}},
     ],messages:[]}}));
     await win.webContents.executeJavaScript('localStorage.setItem("codenode.recentProjects", '+JSON.stringify(JSON.stringify([{root:alternateRoot,file:alternateFile,name:'alternate-project',openedAt:Date.now()}]))+')');
-    await win.webContents.executeJavaScript('document.querySelectorAll(".gate-actions .gate-btn")[1].click()');
+    await win.webContents.executeJavaScript('document.querySelector(\'[data-project-action="new"]\').click()');
     await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".app") && !!window.__codenodeProject.getState().root'), '新建后进入工作台');
     assert.equal(fs.existsSync(projectFile), true);
     assert.equal(cnode.decodeCnode(fs.readFileSync(projectFile)).ok, true);
@@ -105,8 +131,8 @@ app.whenReady().then(async () => {
       const remaining=await js(`window.__codenodeSession.getState().order`);
       assert.ok(!remaining.includes(archivedIds[0])&&!remaining.includes(archivedIds[1]));assert.ok(remaining.includes(archivedIds[2])&&remaining.includes(activeId));
       for(const theme of ['light','dark']){await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`);await sleep(350);assert.ok(await js(`document.querySelector('.archive-bulk-toolbar')!==null`));}
-      await js(`window.__codenodeUi.getState().closeSettings()`);win.webContents.reload();await sleep(350);await js(`document.querySelector('.gate-recent-item').click()`);
-      await waitFor(async()=>await js(`!!document.querySelector('.activity-bar')`),'批量删除后重开项目');
+      await js(`window.__codenodeUi.getState().closeSettings()`);
+      await reopenProject();
       const saved=cnode.decodeCnode(fs.readFileSync(projectFile));assert.ok(!saved.canvases.sessions.some(session=>archivedIds.slice(0,2).includes(session.id)));assert.ok(saved.canvases.sessions.some(session=>session.id===archivedIds[2]));
       console.log('BATCH ARCHIVE UI: PASS (select/all/partial, count confirmation, cancel, all-or-nothing guard, failure rollback, preserve unselected/active, reload persistence, both themes)');
     }
@@ -151,9 +177,7 @@ app.whenReady().then(async () => {
       assert.ok(saved.canvases.sessions.some(session=>session.id===activeId));
       assert.equal(await js(`window.__codenodeSession.getState().messages.some(message=>message.content==='必须保留的聊天')`),true);
       await js(`window.__codenodeUi.getState().closeSettings()`);
-      win.webContents.reload();await sleep(350);
-      await js(`document.querySelector('.gate-recent-item').click()`);
-      await waitFor(async()=>await js(`!!document.querySelector('.activity-bar')`),'重新打开项目');
+      await reopenProject();
       assert.equal(await js(`!!window.__codenodeSession.getState().sessions[${JSON.stringify(archivedId)}]`),false);
       await js(`window.__codenodeUi.getState().openSettings('rag')`);await sleep(120);
       assert.equal(await js(`document.querySelector('[aria-label="向量存储"]').value`),'sqlite');
@@ -525,7 +549,7 @@ app.whenReady().then(async () => {
       await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".project-nav-new")'), '窄窗口展开项目栏');
       await win.webContents.executeJavaScript('document.querySelector(".project-nav-new").click()');
       await sleep(100);
-      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".conversation-right").hidden'),false,'new chat must reveal the composer even in a narrow window');
+      assert.equal(await win.webContents.executeJavaScript('getComputedStyle(document.querySelector(".workspace-canvas")).visibility'), 'visible', 'new chat starts in the canvas even in a narrow window');
       await win.webContents.executeJavaScript('window.__codenodeUi.setState({navigationOpen:true,conversationOpen:true,conversationAutoHidden:false})');
       win.setSize(1300,850); await sleep(100);
       console.log('RESPONSIVE WORKBENCH: PASS (five window sizes, both themes, maximum widths, new chat)');
@@ -616,6 +640,12 @@ app.whenReady().then(async () => {
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().navigationWidth'), 216);
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".workspace-tabs button")).some(button=>button.textContent==="预览")'), false);
       fs.writeFileSync(path.join(root,'readme.txt'),'文件内容直接打开');
+      fs.writeFileSync(path.join(root, 'sample.ts'), 'const n = 12; // sample\n<img src=x>');
+      fs.writeFileSync(path.join(root, 'gbk.txt'), Buffer.from('c4e3bac3', 'hex'));
+      fs.writeFileSync(path.join(root, 'utf16.txt'), Buffer.from('\uFEFF文件预览', 'utf16le'));
+      fs.writeFileSync(path.join(root, 'image.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXK0AAAAASUVORK5CYII=', 'base64'));
+      fs.writeFileSync(path.join(root, 'document.pdf'), previewPdfFixture());
+      fs.writeFileSync(path.join(root, 'binary.bin'), Buffer.from([0x50, 0x4b, 0x03, 0x04]));
       fs.writeFileSync(path.join(alternateRoot,'alternate-only.txt'),'另一工作区的文件');
       const beforePreview = await win.webContents.executeJavaScript('({root:window.__codenodeProject.getState().root,file:window.__codenodeProject.getState().projectFile,id:window.__codenodeSession.getState().activeId})');
       await win.webContents.executeJavaScript(`document.querySelector('.activity-bar button[aria-label="文件"]').click()`);
@@ -625,6 +655,32 @@ app.whenReady().then(async () => {
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().sideTab'), 'preview');
       assert.equal(await win.webContents.executeJavaScript('document.querySelector(".activity-bar button[aria-current=page]").getAttribute("aria-label")'), '文件');
       assert.ok(await win.webContents.executeJavaScript('document.querySelector(".app-project-navigation").hidden && document.querySelector(".conversation-right").hidden && !document.querySelector(".files-document textarea")'));
+      const previewJs = code => win.webContents.executeJavaScript(code);
+      const openPreview = name => previewJs(`document.querySelector(${JSON.stringify(`.files-explorer .pm-file[title="${name}"]`)}).click()`);
+      await openPreview('sample.ts');
+      await waitFor(() => previewJs(`document.querySelector('.fp-content .tok-keyword')?.textContent === 'const'`), '文件预览语法高亮');
+      assert.equal(await previewJs(`getComputedStyle(document.querySelector('.fp-content')).backgroundColor`), 'rgb(24, 24, 24)');
+      assert.equal(await previewJs(`document.querySelector('.fp-content').textContent`), 'const n = 12; // sample\n<img src=x>');
+      assert.equal(await previewJs(`!!document.querySelector('.fp-content img')`), false);
+      for (const [name, content] of [['gbk.txt', '你好'], ['utf16.txt', '文件预览']]) {
+        await openPreview(name);
+        await waitFor(() => previewJs(`document.querySelector('.fp-content')?.textContent === ${JSON.stringify(content)}`), `文本解码 ${name}`);
+      }
+      await openPreview('image.png');
+      await waitFor(() => previewJs(`document.querySelector('.fp-media img')?.naturalWidth === 1`), 'PNG 实际解码');
+      win.showInactive();
+      await openPreview('document.pdf');
+      const pdfPixel = () => previewJs(`(()=>{ const canvas = document.querySelector('.fp-media canvas:not([hidden])'); return canvas?.getContext('2d').getImageData(20, 300, 1, 1).data.join(','); })()`);
+      await waitFor(async () => {
+        const message = await previewJs(`document.querySelector('.files-document [role="alert"], .crash')?.textContent`);
+        assert.ok(!message, message);
+        return await pdfPixel() === '0,0,255,255';
+      }, 'PDF 首页实际渲染');
+      await previewJs(`document.querySelector('.fp-pdf-controls button:last-child').click()`);
+      await waitFor(async () => await pdfPixel() === '255,0,0,255', 'PDF 翻页实际渲染');
+      win.hide();
+      await openPreview('binary.bin');
+      await waitFor(() => previewJs(`document.querySelector('.files-document [role="alert"]')?.textContent.includes('无法识别')`), '二进制文件格式提示');
       assert.equal(await win.webContents.executeJavaScript('document.querySelector(".files-workspace-picker select").value'), '');
       await win.webContents.executeJavaScript(`(() => {const select=document.querySelector(".files-workspace-picker select");select.value=[...select.options].find(option=>option.title===${JSON.stringify(alternateRoot)}).value;select.dispatchEvent(new Event("change",{bubbles:true}));})()`);
       await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(\'.files-explorer .pm-file[title="alternate-only.txt"]\')'), '查看其他工作区的文件列表');
@@ -676,12 +732,13 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript(`document.querySelector('.activity-bar button[aria-label="工作台"]').click()`);
       await sleep(80);
       const beforeProjectOrder = await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)');
-      await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[1].click()');
+      await win.webContents.executeJavaScript('(() => { const project = document.querySelectorAll(".project-group-name")[1]; if (project.getAttribute("aria-expanded") !== "true") project.click(); })()');
       await waitFor(async () => await win.webContents.executeJavaScript('document.querySelectorAll(".project-group")[1].querySelectorAll(".project-session-row").length===2'), '展开其他项目的已保存对话');
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), root);
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'expanding another project must not reorder projects');
       await win.webContents.executeJavaScript('document.querySelector(\'.project-session-row button[title="另一项目第二条对话"]\').click()');
       await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().projectFile === '+JSON.stringify(alternateFile)+' && window.__codenodeSession.getState().activeId==="alternate-second" && window.__codenodeSession.getState().messages.some(message=>message.content==="独立的对话记录")'), '直接进入其他项目的指定对话');
+      assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".conversation-main:not([hidden])")'));
       await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[1].click()');
       await sleep(100);
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
@@ -698,6 +755,7 @@ app.whenReady().then(async () => {
       assert.ok(await win.webContents.executeJavaScript('document.querySelector(".project-group-name").textContent.includes("置顶")'));
       const originalSession = await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId');
       await win.webContents.executeJavaScript('window.__codenodeSession.getState().pushUser("原对话记录")');
+      const originalTitle = await win.webContents.executeJavaScript('window.__codenodeSession.getState().current().label');
       const beforeDraftCount = await win.webContents.executeJavaScript('window.__codenodeSession.getState().order.length');
       await win.webContents.executeJavaScript('document.querySelector(".project-nav-new").click()');
       await sleep(100);
@@ -712,7 +770,7 @@ app.whenReady().then(async () => {
       await sleep(80);
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeSession.getState().order.length'), beforeDraftCount+1);
       assert.notEqual(await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId'), originalSession);
-      await win.webContents.executeJavaScript('document.querySelector(".project-nav-sessions button").click()');
+      await win.webContents.executeJavaScript(`[...document.querySelectorAll('.project-session-row > button:first-child')].find(button=>button.title === ${JSON.stringify(originalTitle)}).click()`);
       await sleep(100);
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId'), originalSession);
       assert.ok(await win.webContents.executeJavaScript('window.__codenodeSession.getState().messages.some(m=>m.content==="原对话记录")'));
@@ -736,21 +794,20 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript('(() => { const store=window.__codenodeSession; store.getState().order.forEach(id=>store.getState().setArchived(id,false)); })()');
       await sleep(80);
       await win.webContents.executeJavaScript('window.__codenodeSession.getState().switchSession('+JSON.stringify(originalSession)+')');
+      await win.webContents.executeJavaScript(`document.querySelector('[aria-label="切换到画布"]').click()`);
       const samePage = await win.webContents.executeJavaScript(`(() => { const canvas=document.querySelector('.canvas-wrap').getBoundingClientRect(), composer=document.querySelector('.pp-composer').getBoundingClientRect(), panel=document.querySelector('.conversation-right').getBoundingClientRect(); return {canvas:canvas.height,composer:composer.height,separated:canvas.right<=panel.left,mode:getComputedStyle(document.querySelector('.conversation-right')).position,visible:getComputedStyle(document.querySelector('.workspace-canvas')).visibility}; })()`);
       assert.ok(samePage.canvas > 150 && samePage.composer > 80 && (samePage.separated || samePage.mode === 'absolute') && samePage.visible === 'visible', 'canvas and composer must be usable together on the same page');
-      await win.webContents.executeJavaScript('document.querySelector(".session-archive").click()');
+      await win.webContents.executeJavaScript('document.querySelector(".project-session-row button.active + .session-archive").click()');
       await waitFor(async () => cnode.decodeCnode(fs.readFileSync(projectFile)).canvases?.sessions.some(s=>s.id===originalSession && s.archived), '归档写入工程');
       assert.notEqual(await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId'), originalSession);
-      win.webContents.reload();
-      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".gate-recent-item")').catch(()=>false), '重启后的最近工程');
-      await win.webContents.executeJavaScript('document.querySelector(".gate-recent-item").click()');
+      await reopenProject();
       await waitFor(async () => await win.webContents.executeJavaScript(`!!document.querySelector('.pp-input') && window.__codenodeSession?.getState().sessions['${originalSession}']?.archived === true`).catch(()=>false), '重启后保留归档');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'project order must survive reload and reopening');
       await win.webContents.executeJavaScript('document.querySelector(".global-settings-trigger").click()');
       await sleep(100);
       await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-layout nav button')).find(b=>b.textContent==='已归档聊天').click()`);
       await sleep(100);
-      assert.ok(await win.webContents.executeJavaScript('document.querySelector(".settings-content").textContent.includes("画布1")'));
+      assert.ok(await win.webContents.executeJavaScript(`document.querySelector('.settings-content').textContent.includes(${JSON.stringify(originalTitle)})`));
       await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-content button')).find(b=>b.textContent==='恢复').click()`);
       await waitFor(async () => cnode.decodeCnode(fs.readFileSync(projectFile)).canvases?.sessions.some(s=>s.id===originalSession && !s.archived), '恢复写入工程');
       for (const setting of ['检索']) {
@@ -900,10 +957,10 @@ app.whenReady().then(async () => {
 
     fs.writeFileSync(invalidFile, 'invalid cnode file');
     await win.webContents.executeJavaScript('window.__codenodeProject.setState({root:null,projectFile:null})');
-    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".gate-actions")'), '返回启动页');
-    await win.webContents.executeJavaScript('document.querySelectorAll(".gate-actions .gate-btn")[2].click()');
-    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".gate-status.err")'), '损坏文件错误提示');
-    const error = await win.webContents.executeJavaScript('document.querySelector(".gate-status.err").textContent');
+    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home")'), '返回工作区首页');
+    await win.webContents.executeJavaScript('document.querySelector(\'[data-project-action="file"]\').click()');
+    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".workspace-project-error")'), '损坏文件错误提示');
+    const error = await win.webContents.executeJavaScript('document.querySelector(".workspace-project-error").textContent');
     assert.match(error, /打开工程文件失败/);
     assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), null);
     console.log('PROJECT UI TEST: PASS');

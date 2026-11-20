@@ -2,6 +2,7 @@ import { memo, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useGraphStore } from '../store/graphStore';
 import type { WorkflowNodeData } from '../types';
+import { workflowNodeAccent } from '../lib/workflowNodeAccent';
 
 const STATUS_COLOR: Record<string, string> = {
   pending: '#64748b',
@@ -19,23 +20,11 @@ const STATUS_TEXT: Record<string, string> = {
   blocked: '阻塞',
 };
 
-/** 节点类型 → 主色（与 NODE_TEMPLATES / Agent 建节点保持一致，按类型判定而非外观） */
-const TYPE_ACCENT: Record<string, string> = {
-  start: '#22c55e',
-  end: '#ef4444',
-  task: '#3b82f6',
-  stage: '#8b5cf6',
-  tool: '#f59e0b',
-  file: '#f97316',
-  scope: '#8b5cf6',
-  object: '#06b6d4',
-};
-
 function WorkflowNode({ id, data, selected }: NodeProps) {
   const d = data as unknown as WorkflowNodeData & { objectName?: string };
   const status = d.status || 'pending';
   const nodeType = useGraphStore((s) => s.nodes.find((n) => n.id === id)?.type);
-  const accent = d.accent || TYPE_ACCENT[nodeType || ''] || '#3b82f6';
+  const accent = workflowNodeAccent(nodeType, d.accent);
   const updateNodeData = useGraphStore((s) => s.updateNodeData);
   const flowOut = useGraphStore((s) => s.flow[id]?.output.length ?? 0);
   const flowIn = useGraphStore((s) => s.flow[id]?.input.length ?? 0);

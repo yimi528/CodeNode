@@ -434,7 +434,7 @@ async function main() {
   await startBrowser();
   const targets = /** @type {any[]} */ (await fetch(`http://127.0.0.1:${PORT}/json`).then((r) => r.json()));
   // 必须挑「被测应用」那个 target：Edge 启动时可能先开自己的内部页（#app-root + 混淆类名 + Edge logo），
-  // 直接取第一个 page target 会连到它上面，表现是一直等不到应用自己的元素（.gate / .toolbar）。
+  // 直接取第一个 page target 会连到它上面，表现是一直等不到应用自己的元素。
   const pages = targets.filter((t) => t.type === 'page');
   const page = pages.find((t) => String(t.url || '').startsWith(BASE)) || pages[0];
   if (!page) throw new Error('没有可用的 page target（Edge 未起来？）');
@@ -453,12 +453,9 @@ async function main() {
 
   try {
     /* ========== 0. 基础加载 ========== */
-    /* 启动门禁：未打开工程时必须拦住工作台（本次新增的启动页契约） */
-    await waitFor(cdp, `!!document.querySelector('.gate')`, 9000, '启动门禁页出现');
-    ok('未打开工程时被启动门禁拦住（无工具栏 / 无画布）', await cdp.eval(`!document.querySelector('.toolbar') && !document.querySelector('.react-flow')`));
-    const gateBtns = await cdp.eval(`[...document.querySelectorAll('.gate-btn-title')].map((b) => b.textContent)`);
-    ok(`门禁页提供打开/新建工程入口（${JSON.stringify(gateBtns)}）`, gateBtns.length >= 2 && gateBtns[0].includes('打开工程') && gateBtns[1].includes('新建工程'));
-    // 等价于「打开工程」：直接把工程根目录载入，放行到工作台
+    await waitFor(cdp, `!!document.querySelector('.workspace-home') && !document.querySelector('.startup-splash')`, 9000, '主工作区出现');
+    ok('无工程时可见主导航和工程入口', await cdp.eval(`!!document.querySelector('.activity-bar') && !!document.querySelector('[data-project-action="open"]') && !!document.querySelector('[data-project-action="new"]')`));
+    // 等价于「打开工程」：直接载入工程根目录以挂载画布。
     await cdp.eval(`window.__codenodeProject.getState().loadRoot('E:\\\\demo')`);
     await waitFor(cdp, `document.querySelector('.toolbar') && !!window.__codenodeVectorNode`);
     out('— Agent 工作台已加载，画布节点 store 工厂已挂载');

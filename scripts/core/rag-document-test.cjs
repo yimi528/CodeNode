@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const { LocalRagIndex } = require("../../electron/rag/index.cjs");
 const { parseRagConfig } = require("../../electron/agent.cjs");
 const { extractDocumentText } = require("../../electron/tools/impl/documentText.cjs");
+const { readFilePreview } = require('../../electron/filePreview.cjs');
 const { extractPdfText } = require("../../electron/tools/impl/pdfText.cjs");
 const fsCore = require("../../electron/tools/fsCore.cjs");
 const fsRunner = require("../../electron/tools/fsRunner.cjs");
@@ -102,6 +103,17 @@ const files = {
     assert.match(extractDocumentText(files['budget.xlsx'], 'budget.xlsx').text, /年度预算[\s\S]*A1=预算总额 \| B1=四百万/);
     assert.match(extractDocumentText(files['launch.pptx'], 'launch.pptx').text, /产品发布计划/);
     assert.match(extractDocumentText(files['policy.pdf'], 'policy.pdf').text, /invoice reconciliation deadline/);
+    for (const [name, phrase] of [['agreement.docx', '合同审批时限'], ['launch.pptx', '产品发布计划'], ['budget.xlsx', '年度预算']]) {
+      const { preview, bytes } = await readFilePreview(root, name);
+      assert.strictEqual(bytes, files[name].length);
+      if (preview.kind === 'pdf') {
+        assert.ok('data' in preview && preview.data);
+        assert.strictEqual(preview.data.subarray(0, 5).toString(), '%PDF-');
+      } else {
+        assert.strictEqual(preview.kind, 'document');
+        assert.ok('content' in preview && preview.content?.includes(phrase), `${name} should show text when visual conversion is unavailable`);
+      }
+    }
     const multilinePdf = pdf('BT /F1 12 Tf (First approval paragraph has enough printable content.) Tj T* T* (Second paragraph follows after a blank line.) Tj ET');
     assert.strictEqual(extractDocumentText(multilinePdf, 'multiline.pdf').text, extractPdfText(multilinePdf).text,
       'RAG PDF citation lines must match read_file PDF extraction exactly');

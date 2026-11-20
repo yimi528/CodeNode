@@ -45,6 +45,7 @@ export default function Toolbar() {
   const conversationOpen=useUiStore(s=>s.conversationOpen);
   const toggleConversation=useUiStore(s=>s.toggleConversation);
   const filePreview = useUiStore(s => s.sideTab === 'preview');
+  const mainConversation = useUiStore(s => s.sideTab === 'conversation' && s.preferences.workbenchView !== 'overview');
   const saveState=useProjectSaveStore();
   const autoSave=useUiStore(s=>s.preferences.autoSaveEnabled);
   const nodes=useGraphStore(s=>s.nodes),edges=useGraphStore(s=>s.edges);
@@ -56,7 +57,7 @@ export default function Toolbar() {
   const { fitView, getViewport, setViewport: rfSetViewport, screenToFlowPosition } = useReactFlow();
 
   return (
-    <header className="toolbar" data-file-preview={filePreview || undefined}>
+    <header className="toolbar" data-file-preview={filePreview || undefined} data-main-conversation={mainConversation || undefined}>
       <span className={'toolbar-save-state state-'+saveState.status} role="status" title={saveState.error || (autoSave?'项目自动保存已开启；Ctrl+S 可手动保存':'自动保存已关闭；Ctrl+S 可手动保存')}>{saveState.status==='saving'?'保存中…':saveState.status==='error'?'保存失败':saveState.status==='dirty'?'未保存':saveState.status==='idle'?'未保存项目':'已保存'}</span>
 
       <div className="toolbar-group">

@@ -195,6 +195,11 @@ async function main() {
   useSessionStore.getState().initProject('你好');
   const persistentId = useSessionStore.getState().memoryConversationId;
   useSessionStore.getState().newCanvas();
+  const titleSession = useSessionStore.getState().activeId;
+  useSessionStore.getState().pushUser('你好');
+  useSessionStore.getState().pushUser('帮我修复导出表格。保留现有数据。');
+  useSessionStore.getState().pushUser('再检查一下结果');
+  assert.equal(useSessionStore.getState().current().label, '修复导出表格', '首个有效问题生成短标题，后续消息保留标题');
   const persistentEpoch = useSessionStore.getState().memoryTaskEpoch;
   const projectFile = path.join(os.tmpdir(), 'codenode-memory-session-roundtrip.cnode');
   useProjectStore.setState({ root: path.dirname(projectFile), projectFile, loadRoot: async () => {} });
@@ -209,10 +214,12 @@ async function main() {
   await projectActions.saveProject();
   assert.equal(cnode.decodeCnode(encoded).canvases.memoryConversationId, persistentId);
   assert.equal(cnode.decodeCnode(encoded).canvases.memoryTaskEpoch, persistentEpoch);
+  assert.equal(cnode.decodeCnode(encoded).canvases.sessions.find(session => session.id === titleSession).label, '修复导出表格');
   useSessionStore.getState().reset();
   await projectActions.openProjectFile();
   assert.equal(useSessionStore.getState().memoryConversationId, persistentId, '工程重载后仍使用同一记忆会话 ID');
   assert.equal(useSessionStore.getState().memoryTaskEpoch, persistentEpoch, '工程重载后保留任务代');
+  assert.equal(useUiStore.getState().sideTab, 'agent', '主动打开工程默认进入画布');
 
   reset();
   useSessionStore.getState().startOnCurrent('没有预初始化的指令');

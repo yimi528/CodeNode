@@ -5,6 +5,7 @@ import { useUiStore, type SideTab } from '../store/uiStore';
 
 const LABELS: Record<SideTab, string> = {
   agent: 'Agent',
+  conversation: '对话',
   node: '节点',
   project: '项目',
   preview: '预览',
@@ -20,7 +21,7 @@ export default function InspectorBadge() {
   const messageCount = useSessionStore((s) => s.messages.length);
   const streaming = useSessionStore((s) => s.streaming);
 
-  const count = tab === 'node' ? nodeCount : tab === 'agent' ? messageCount : hasFile ? 1 : 0;
+  const count = tab === 'node' ? nodeCount : tab === 'agent' || tab === 'conversation' ? messageCount : hasFile ? 1 : 0;
 
   return (
     <button

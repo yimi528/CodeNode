@@ -1,8 +1,7 @@
 /**
  * 最近打开的工程（localStorage）。
  *
- * 启动了「不再自动进入最近项目」之后，门禁页需要一份最近列表让用户一键进入，
- * 这里统一维护：{ root, file?, name, openedAt }。
+ * 主界面的项目侧栏通过 { root, file?, name, openedAt } 定位工程。
  *   - root：工程目录（必填）
  *   - file：该工程的 .cnode 文件路径（可选；有它就能直接加载工程内容）
  */
@@ -17,6 +16,7 @@ const KEY = 'codenode.recentProjects';
 const MAX = 8;
 const LEGACY_ROOT = 'codenode.lastProjectRoot';
 const LEGACY_FILE = 'codenode.lastProjectFile';
+let recentRevision = 0;
 
 function nameOf(p: string): string {
   const parts = String(p || '').split(/[\\/]/).filter(Boolean);
@@ -79,6 +79,7 @@ export function readRecentProjects(): RecentProject[] {
 }
 
 function writeRecent(payload: { list: RecentProject[]; entry?: RecentProject }): void {
+  recentRevision++;
   try {
     localStorage.setItem(KEY, JSON.stringify(payload.list.slice(0, MAX)));
   } catch {
@@ -106,19 +107,23 @@ export function rememberRecentProject(input: { root?: string | null; file?: stri
 /** 从主进程的 userData 恢复持久记录，并与当前来源的 localStorage 缓存合并。 */
 export async function loadRecentProjects(): Promise<RecentProject[]> {
   const local = readRecentProjects();
+  const revision = recentRevision;
   const api = typeof window !== 'undefined' ? window.codenode : null;
   if (!api?.recentProjectsList) return local;
   try {
     // 先把旧版本仅存在 localStorage 的记录迁移到稳定存储。
-    for (const entry of [...local].reverse()) await api.recentProjectsRemember(entry);
+    for (const entry of [...local].reverse()) {
+      if (revision !== recentRevision) return readRecentProjects();
+      await api.recentProjectsRemember(entry);
+    }
     const result = await api.recentProjectsList();
-    if (!result?.ok) return local;
+    if (revision !== recentRevision || !result?.ok) return readRecentProjects();
     const persisted = (result.projects || []).map(entry => ({ ...entry, openedAt: Number(entry.openedAt) || 0 }));
     const merged: RecentProject[] = [];
     for (const entry of [...persisted, ...local].sort((a, b) => b.openedAt - a.openedAt)) if (!merged.some(item => sameRecentProject(item, entry))) merged.push(entry);
     writeRecent({ list: merged });
     return merged.slice(0, MAX);
-  } catch { return local; }
+  } catch { return readRecentProjects(); }
 }
 
 export function forgetRecentProject(target: { root?: string; file?: string }): RecentProject[] {
@@ -136,6 +141,7 @@ export function forgetRecentProject(target: { root?: string; file?: string }): R
 
 export function clearRecentProjects(): void {
   if (typeof localStorage === 'undefined') return;
+  recentRevision++;
   try {
     localStorage.removeItem(KEY);
     void window.codenode?.recentProjectsClear?.().catch(() => {});

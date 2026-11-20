@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { workflowNodeAccent } from '../../lib/workflowNodeAccent';
 import ConversationTaskLink from '../ConversationTaskLink';
 import { useProjectStore } from '../../store/projectStore';
 import { projectNameOf } from '../../lib/recentProjects';
@@ -274,7 +275,10 @@ function PromptComposer() {
       {!selectedNode && <ConversationTaskLink />}
       {pendingDraft && !selectedNode && <div className="composer-project-context">新对话 · {projectNameOf(projectRoot || '当前项目')}</div>}
     <div
-      className={`pp-composer${dragOver ? ' is-dragover' : ''}`}
+      className={`pp-composer${selectedNode ? ' is-node-prompt' : ''}${dragOver ? ' is-dragover' : ''}`}
+      style={selectedNode ? {
+        '--node-composer-accent': workflowNodeAccent(selectedNode.type, selectedNode.data.accent),
+      } as CSSProperties : undefined}
       onDragOver={(e) => {
         const hasFile = Array.from(e.dataTransfer?.items || []).some((it) => it.kind === 'file');
         if (!hasFile) return;

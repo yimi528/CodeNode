@@ -12,13 +12,15 @@ app.whenReady().then(async()=>{
  const win=new BrowserWindow({show:false,width:1500,height:920,webPreferences:{sandbox:true,backgroundThrottling:false,preload:path.join(appRoot,'electron/preload.cjs')}});
  const js=code=>win.webContents.executeJavaScript(code).catch(e=>{throw new Error(String(e)+'\nCODE: '+code)});
  const wait=async(fn,label)=>{const end=Date.now()+12000;while(Date.now()<end){if(await fn())return;await sleep(60);}throw new Error('Timeout: '+label);};
- const click=async selector=>{const point=await js(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...point});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point});await sleep(140);};
+ const center=selector=>js(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);
+ const click=async(selector,modifiers=[])=>{const point=await center(selector);win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,modifiers,...point});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,modifiers,...point});await sleep(140);};
  const key=async(keyCode,modifiers=[])=>{win.webContents.sendInputEvent({type:'keyDown',keyCode,modifiers});win.webContents.sendInputEvent({type:'keyUp',keyCode,modifiers});await sleep(160);};
  try{
   await win.loadFile(path.join(appRoot,'dist/index.html'));await wait(()=>js('!!window.__codenodeProject'),'stores');
   await js('window.__codenodeUi.getState().updatePreferences({autoSaveEnabled:false})');await js(`window.__codenodeProject.getState().loadRoot(${JSON.stringify(project)})`);
   await js('window.__codenodeSession.getState().newCanvas()');await js(`window.__codenodeSession.getState().pushUser('帮我完善这个画布的节点编辑体验。')`);await js(`(()=>{const input=document.querySelector('.pp-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'我还想检查一下撤销操作。');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);await wait(()=>js('!!document.querySelector(".toolbar-vector")'),'toolbar');
   await js('document.querySelector(".toolbar-vector").click()');win.showInactive();win.webContents.focus();await sleep(450);
+  await wait(()=>js("!document.querySelector('.startup-splash')"),'startup animation');
   const id=await js('window.__codenodeStore.getState().selectedId');assert(id);
   const node=`.react-flow__node[data-id="${id}"]`;
   // Start with no outer selection, then enter its editing body using real pointer events.
@@ -51,21 +53,31 @@ app.whenReady().then(async()=>{
   await click(node+' .wf-vector-label');
   assert.equal(await js("!!document.querySelector('#conversation-panel .goal-control-panel')"),false,'goal form does not occupy chat');
   await js("document.querySelector('[aria-label=\"选择 Agent\"]').click()");assert.equal(await js("!!document.querySelector('.agent-switch-settings')"),false,'no duplicate connection settings');await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
-  const chatBefore=await js(`({session:window.__codenodeSession.getState().activeId,draft:document.querySelector('.pp-input').value,messages:window.__codenodeSession.getState().messages.length,side:window.__codenodeUi.getState().sideTab})`);
+  const chatState=()=>js(`({session:window.__codenodeSession.getState().activeId,draft:document.querySelector('.pp-input').value,messages:window.__codenodeSession.getState().messages.length})`);
+  const chatBefore=await chatState();
   const output=process.env.CODENODE_WORKSPACE_UX_SHOTS||path.resolve(__dirname,'../../out/workspace-ux');fs.mkdirSync(output,{recursive:true});
   await js("document.querySelector('[aria-label=\"切换到总览\"]').click()");
-  assert.equal(await js("document.querySelector('.overview-editor-mask').hidden"),true,'empty overview has no visible form');assert.equal(await js("!!document.querySelector('.overview-metrics')"),false,'no empty statistical cards');
+  assert.equal(await js("document.querySelector('.overview-goal-editor').hidden"),true,'empty overview has no visible form');assert.equal(await js("!!document.querySelector('.overview-metrics')"),false,'no empty statistical cards');
   for(const theme of ['light','dark']){win.showInactive();win.focus();await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`);await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');await sleep(350);fs.writeFileSync(path.join(output,'empty-'+theme+'.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());}
-  await js("document.querySelector('.overview-create').click()");assert.equal(await js("document.querySelector('.overview-editor-mask').hidden"),false);assert.equal(await js("document.querySelector('.goal-create-advanced').open"),false,'optional fields collapsed');
+  await js("document.querySelector('.overview-create').click()");assert.equal(await js("!!document.querySelector('.overview-goals .overview-create-panel') && !document.querySelector('.overview-editor-mask')"),true);assert.equal(await js("document.querySelector('.goal-create-advanced').open"),false,'optional fields collapsed');
   await js(`(()=>{const set=(label,value)=>{const e=document.querySelector('[aria-label="'+label+'"]');Object.getOwnPropertyDescriptor(e.tagName==='INPUT'?HTMLInputElement.prototype:HTMLTextAreaElement.prototype,'value').set.call(e,value);e.dispatchEvent(new Event('input',{bubbles:true}));};set('Goal 标题','完善画布编辑体验');set('Goal 目标','让节点编辑、删除和撤销操作清晰可靠。');set('验收条件',${JSON.stringify('节点删除与撤销通过\n对话内容不被管理表单挤占')});})()`);
-  await js("document.querySelector('[aria-label=\"关闭目标编辑\"]').click();document.querySelector('.overview-create').click()");assert.equal(await js("document.querySelector('[aria-label=\"Goal 标题\"]').value"),'完善画布编辑体验','cancel/reopen retains new goal draft');
+  await js("document.querySelector('.overview-add-draft').click()");
+  assert.equal(await js("document.querySelectorAll('.overview-create-panel').length"),2,'creation panels are independent');
+  assert.equal(await js(`(() => {
+    const advanced = document.querySelector('.goal-create-advanced');
+    advanced.open = true;
+    const main = advanced.parentElement.querySelector('label textarea').getBoundingClientRect();
+    return [...advanced.querySelectorAll('input, textarea')].every(field => {
+      const bounds = field.getBoundingClientRect();
+      return Math.abs(bounds.left - main.left) < 1 && Math.abs(bounds.right - main.right) < 1;
+    });
+  })()`),true,'scope and budget fields match the main form width');
+  await js("document.querySelectorAll('.overview-create-panel [aria-label=\"关闭目标编辑\"]')[1].click()");
+  assert.equal(await js("document.querySelector('[aria-label=\"Goal 标题\"]').value"),'完善画布编辑体验','cancel only closes the selected draft');
   await js("document.querySelector('.goal-create-submit').click()");
-  // 5c236ea（turn plans and Goals into editable task graphs）起，创建成功**不再关闭**窗口，
-  // 而是把编辑器切到新 Goal 的详情，便于接着预览任务图、加任务。这条期望写于它之前的
-  // f82946f，之后没跟着更新，属于过期断言；这里改成断言当前契约：
-  // 创建表单消失 + 编辑器进入「目标详情」+ 选中的就是刚建的 Goal + 目标列表里出现该条目。
-  await wait(()=>js("!document.querySelector('.goal-create-form')&&!!document.querySelector('.overview-goal-editor[aria-label=\"目标详情\"]')&&document.querySelector('.overview-goal-list button')"),'created Goal opens its detail');
-  assert.equal(await js("document.querySelector('.overview-goal-editor header h2').textContent"),'完善画布编辑体验','created Goal is selected in the editor');
+  await wait(()=>js("!document.querySelector('.overview-create-panel') && !!document.querySelector('.overview-goal-card')"),'created Goal becomes a card');
+  await js("document.querySelector('.overview-goal-list button').click()");
+  assert.equal(await js("document.querySelector('[aria-label=\"目标名称编辑\"]').value"),'完善画布编辑体验','created Goal is selected in the editor');
   const goalList=await js(`window.codenode.goalList(${JSON.stringify(project)})`);const goal={ok:true,value:goalList.value.goals[0]};assert.equal(goal.value.title,'完善画布编辑体验');assert.equal(goal.value.criteria.length,2,'criteria are separate rows');
   const task=await js(`window.codenode.goalTaskCreate(${JSON.stringify(project)},${JSON.stringify(goal.value.id)},{title:'修正节点删除交互',objective:'区分删除节点与删除内部图形。'})`);assert.equal(task.ok,true);
   await js(`window.codenode.goalTaskUpdate(${JSON.stringify(project)},${JSON.stringify(goal.value.id)},${JSON.stringify(task.value.id)},{status:'blocked'})`);
@@ -82,15 +94,76 @@ app.whenReady().then(async()=>{
   await js(`document.querySelector('[aria-label="关闭目标编辑"]').click()`);
   const surface=()=>js("JSON.stringify([...document.querySelectorAll('.workspace-overview-layer button,.workspace-overview-layer input,.workspace-overview-layer textarea,.workspace-overview-layer select')].map(n=>[n.getAttribute('aria-label'),n.value||'',n.disabled]))");const before=await surface();
   for(const theme of ['light','dark']){
-    win.showInactive();win.focus();await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`);await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');await sleep(350);assert.equal(await surface(),before);assert.deepEqual(await js(`({session:window.__codenodeSession.getState().activeId,draft:document.querySelector('.pp-input').value,messages:window.__codenodeSession.getState().messages.length,side:window.__codenodeUi.getState().sideTab})`),chatBefore,'goal management and themes preserve chat');
+    win.showInactive();win.focus();await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`);await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');await sleep(350);assert.equal(await surface(),before);assert.deepEqual(await chatState(),chatBefore,'goal management and themes preserve chat');
     await sleep(400);const region=undefined;
     const shot=await win.webContents.capturePage(region,{stayHidden:true,stayAwake:true});fs.writeFileSync(path.join(output,theme+'.png'),shot.toPNG());await js("document.querySelector('[aria-label=\"切换到对话\"]').click()");await sleep(300);const conversationShot=await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});fs.writeFileSync(path.join(output,'conversation-'+theme+'.png'),conversationShot.toPNG());await js("document.querySelector('[aria-label=\"切换到总览\"]').click()");win.hide();
   }
   await js("document.querySelector('[aria-label=\"切换到对话\"]').click()");assert.equal(await js("document.querySelector('.workspace-overview-layer').hidden"),true,'switch returns to chat');
   await js("document.querySelector('[aria-label=\"切换到总览\"]').click();document.querySelector('.overview-goal-list button').click();document.querySelector('.goal-task').click()");await wait(()=>js("!!document.querySelector('#conversation-panel .conversation-goal-binding')"),'bound-task hint');await js("document.querySelector('[aria-label=\"解除目标任务绑定\"]').click()");await wait(()=>js("!document.querySelector('.conversation-goal-binding')"),'unbind removes hint');
-  fs.writeFileSync(path.join(output,'acceptance.json'),JSON.stringify({passed:true,recordedAt:new Date().toISOString(),mode:packageRoot?'packaged':'source',...(packageRoot?{asarSha256:require('node:crypto').createHash('sha256').update(rawFs.readFileSync(path.join(appRoot,'..','app.asar'))).digest('hex')}:{}),checks:['native node/shape Delete separation','Backspace/X and undo','multi-selection count','wire deletion','text and goal-control focus protection','separate overview and conversation pages','overview progress and task binding','overview/conversation preserve forms, messages, canvas and draft','same controls across themes','no redundant Agent settings entry']},null,2)+'\n');
   assert.equal(await js(`JSON.parse(localStorage.getItem('codenode.uiPreferences')).workbenchView`),'overview');
-  console.log('WORKSPACE UX: PASS (native pointer/key node vs shape deletion, multi-selection count, undo, text-focus protection, goal drawer/drafts/badge, compact Agent list, both themes)');console.log('PREVIEWS='+output);app.exit(0);
+  win.showInactive();
+  win.webContents.focus();
+  await js(`(() => {
+    const ui = window.__codenodeUi.getState();
+    ui.showCanvas();
+    ui.updatePreferences({conversationOpen: true});
+    ui.setPendingViewport({x: 120, y: 80, zoom: 1});
+    window.__codenodeStore.getState().load([
+      {id: 'task-a', type: 'task', position: {x: 0, y: 0}, data: {label: 'Task A', accent: '#16a798'}},
+      {id: 'stage-b', type: 'stage', position: {x: 220, y: 0}, data: {label: 'Stage B'}}
+    ], [{id: 'link', source: 'task-a', target: 'stage-b'}]);
+  })()`);
+  await wait(()=>js("!!document.querySelector('[data-id=stage-b]') && !!document.querySelector('.conversation-right .pp-composer')"),'canvas and conversation composer');
+  await sleep(450);
+  const taskNode = '.react-flow__node[data-id="task-a"]';
+  const stageNode = '.react-flow__node[data-id="stage-b"]';
+  const borderColor = () => js("getComputedStyle(document.querySelector('.conversation-right .pp-composer')).borderTopColor");
+  await click(taskNode);
+  assert.equal(await borderColor(),'rgb(22, 167, 152)','composer uses the custom task color');
+  await click(stageNode);
+  assert.equal(await borderColor(),'rgb(139, 92, 246)','composer switches to the stage color');
+  await click(taskNode);
+  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Shift',modifiers:['shift']});
+  await sleep(100);
+  const stagePoint = await center(stageNode);
+  const stageRelease = {x:stagePoint.x+2,y:stagePoint.y+1};
+  win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,modifiers:['shift'],...stagePoint});
+  win.webContents.sendInputEvent({type:'mouseMove',modifiers:['shift','leftbuttondown'],...stageRelease});
+  win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,modifiers:['shift'],...stageRelease});
+  await sleep(140);
+  win.webContents.sendInputEvent({type:'keyUp',keyCode:'Shift'});
+  assert.deepEqual(await js('window.__codenodeStore.getState().selectedIds.sort()'),['stage-b','task-a'],'Shift-click retains existing selection with slight pointer movement');
+  assert.deepEqual(await js("window.__codenodeStore.getState().nodes.find(node=>node.id==='stage-b').position"),{x:220,y:0},'slight pointer movement does not drag the node');
+  assert.equal(await js("document.querySelector('.conversation-right .pp-composer').classList.contains('is-node-prompt')"),false,'group selection clears the node color');
+  await key('C',['control']);
+  await key('V',['control']);
+  assert.equal(await js('window.__codenodeStore.getState().nodes.length'),4,'paste duplicates both nodes');
+  assert.equal(await js('window.__codenodeStore.getState().edges.length'),2,'paste includes their connecting edge');
+  await key('Z',['control']);
+  assert.equal(await js('window.__codenodeStore.getState().nodes.length'),2,'paste is a single undo step');
+  assert.equal(await js(`(() => {
+    const input = document.querySelector('.conversation-right textarea');
+    input.focus();
+    return input.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true}));
+  })()`),true,'node clipboard leaves text editing shortcuts available');
+  const start = await center(taskNode);
+  const end = {x:start.x+85,y:start.y+120};
+  win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,modifiers:['alt'],...start});
+  win.webContents.sendInputEvent({type:'mouseMove',modifiers:['alt','leftbuttondown'],...end});
+  await wait(()=>js("!!document.querySelector('.canvas-copy-preview')"),'Alt drag preview');
+  assert.equal(await js('window.__codenodeStore.getState().nodes.length'),2,'Alt drag creates the copy on release');
+  win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,modifiers:['alt'],...end});
+  await wait(()=>js('window.__codenodeStore.getState().nodes.length===3'),'Alt drag drop');
+  const result = await js(`(() => {
+    const { nodes, selectedId } = window.__codenodeStore.getState();
+    const copy = nodes.find(node => node.id === selectedId);
+    const source = nodes.find(node => node.id === 'task-a');
+    const zoom = window.__codenodeUi.getState().viewport.zoom;
+    return {source: source.position, offset: {x: Math.round(copy.position.x * zoom), y: Math.round(copy.position.y * zoom)}};
+  })()`);
+  assert.deepEqual(result,{source:{x:0,y:0},offset:{x:85,y:120}},'Alt drag leaves the original and places the copy where released');
+  fs.writeFileSync(path.join(output,'acceptance.json'),JSON.stringify({passed:true,recordedAt:new Date().toISOString(),mode:packageRoot?'packaged':'source',...(packageRoot?{asarSha256:require('node:crypto').createHash('sha256').update(rawFs.readFileSync(path.join(appRoot,'..','app.asar'))).digest('hex')}:{}),checks:['native node/shape Delete separation','Backspace/X and undo','Shift multi-selection','Alt-drag duplication','node clipboard and connecting edges','node composer accent','wire deletion','text and goal-control focus protection','separate overview and conversation pages','overview progress and task binding','goal draft field alignment','overview/conversation preserve forms, messages, canvas and draft','same controls across themes','no redundant Agent settings entry']},null,2)+'\n');
+  console.log('WORKSPACE UX: PASS (canvas shortcuts, node composer, goal form, undo and editor focus)');console.log('PREVIEWS='+output);app.exit(0);
  }catch(error){console.error(error);app.exit(1);}
 });
 app.on('will-quit',()=>{if(path.dirname(temp)===fs.realpathSync(os.tmpdir())&&path.basename(temp).startsWith('codenode-workspace-ux-'))try{fs.rmSync(temp,{recursive:true,force:true,maxRetries:10,retryDelay:200});}catch{}});

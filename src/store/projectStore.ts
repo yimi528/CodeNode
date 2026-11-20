@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useUiStore } from './uiStore';
 
 export type FileNode = {
   name: string;
@@ -133,6 +134,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   loadRoot: async (root) => {
+    if (get().root !== root) useUiStore.setState({ filePreviewLocation: null });
     set({ root, projectFile: null, loading: true, selected: null, draft: '', dirty: false, conflict: null, searchMatches: [], error: null });
     if (!window.codenode) {
       set({ tree: [], loading: false, error: '需要 Electron 环境' });

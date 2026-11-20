@@ -1,6 +1,40 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import type { PreviewContent } from '../../lib/filePreview';
+import { highlightCode } from '../../lib/highlightCode';
 import { useProjectStore, type SelectedFile } from '../../store/projectStore';
 import { useUiStore } from '../../store/uiStore';
+
+const PdfPreview = lazy(() => import('./PdfPreview'));
+
+function PdfFilePreview({ file }: { file: Extract<PreviewContent, { kind: 'pdf' }> }) {
+  const [showCells, setShowCells] = useState(false);
+  return <>
+    {file.cellText && <div className="fp-actions fp-sheet-views" aria-label="工作簿视图">
+      <button type="button" aria-pressed={!showCells} onClick={() => setShowCells(false)}>打印版式</button>
+      <button type="button" aria-pressed={showCells} onClick={() => setShowCells(true)}>单元格文字</button>
+    </div>}
+    {showCells && file.cellText ? <>
+      {file.cellText.truncated && <div className="pm-preview-note">内容过长，已截断</div>}
+      <pre className="pm-preview-content fp-content fp-document-text">{file.cellText.content}</pre>
+    </> : <Suspense fallback={<div className="pm-preview-empty" role="status">正在加载文档预览…</div>}>
+      <PdfPreview data={file.data} />
+    </Suspense>}
+  </>;
+}
+
+export type PreviewFile = SelectedFile & {
+  bytes?: number;
+  encoding?: string;
+  media?: Exclude<PreviewContent, { kind: 'text' }>;
+};
+
+function ImagePreview({ dataUrl, name }: { dataUrl: string; name: string }) {
+  const [error, setError] = useState(false);
+  return <div className="fp-media">
+    {error ? <div role="alert" className="pm-preview-empty">无法解码此图片</div>
+      : <img src={dataUrl} alt={name} onError={() => setError(true)} />}
+  </div>;
+}
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -28,7 +62,7 @@ export default function PreviewPanel({ onBack, embedded = false }: { onBack: () 
 
 export function FilePreview({ root, selected, dirty = false, onBack, embedded = false }: {
   root: string | null;
-  selected: SelectedFile | null;
+  selected: PreviewFile | null;
   dirty?: boolean;
   onBack?: () => void;
   embedded?: boolean;
@@ -63,6 +97,7 @@ export function FilePreview({ root, selected, dirty = false, onBack, embedded = 
   const lines = selected.content ? selected.content.split(/\r?\n/).length : 0;
   const name = selected.relPath.split('/').filter(Boolean).pop() || selected.relPath;
   const time = fmtTime(selected.mtimeMs);
+  const { media } = selected;
 
   const copyPath = async () => {
     try {
@@ -92,15 +127,23 @@ export function FilePreview({ root, selected, dirty = false, onBack, embedded = 
       </div>
 
       {!isProject && <div className="fp-meta">
-        <span>{fmtSize(new TextEncoder().encode(selected.content).length)}</span>
-        <span>{lines} 行</span>
-        <span>{selected.content.length.toLocaleString()} 字符</span>
+        <span>{fmtSize(selected.bytes ?? new TextEncoder().encode(selected.content).length)}</span>
+        {!media && <><span>{lines} 行</span><span>{selected.content.length.toLocaleString()} 字符</span></>}
+        {(media?.kind === 'document' || (media?.kind === 'pdf' && media.office)) && <span>{name.split('.').pop()?.toUpperCase()}</span>}
+        {selected.encoding && <span>{selected.encoding.toUpperCase()}</span>}
         {time && <span>{time}</span>}
       </div>}
 
       {!isProject && selected.truncated && <div className="pm-preview-note">内容过长，已截断（上限 1MB）</div>}
 
-      {isProject ? <div className="project-document-summary"><strong>CodeNode 工程文件</strong>{!summary ? <p>读取中…</p> : summary.error ? <p role="alert">{summary.error}</p> : <p>{summary.nodes} 节点 · {summary.edges} 连线 · {summary.canvases} 画布</p>}<button onClick={() => useUiStore.getState().setSideTab('agent')}>返回工作台</button></div> : <pre className="pm-preview-content fp-content">{selected.content}</pre>}
+      {isProject ? <div className="project-document-summary"><strong>CodeNode 工程文件</strong>{!summary ? <p>读取中…</p> : summary.error ? <p role="alert">{summary.error}</p> : <p>{summary.nodes} 节点 · {summary.edges} 连线 · {summary.canvases} 画布</p>}<button onClick={() => useUiStore.getState().setSideTab('agent')}>返回工作台</button></div>
+        : media?.kind === 'image' ? <ImagePreview key={selected.relPath} dataUrl={media.dataUrl} name={name} />
+        : media?.kind === 'pdf' ? <PdfFilePreview key={selected.relPath} file={media} />
+        : media?.kind === 'document' ? <>
+          <div className="pm-preview-note">{media.reason}，已显示文档文字{media.truncated && '（内容过长，已截断）'}。</div>
+          <pre className="pm-preview-content fp-content fp-document-text">{media.content}</pre>
+        </>
+        : <pre className="pm-preview-content fp-content" dangerouslySetInnerHTML={{ __html: highlightCode(selected.content) }} />}
     </div>
   );
 }

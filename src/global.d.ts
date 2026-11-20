@@ -184,8 +184,8 @@ interface CodenodeApi {
   readProjectFile: (
     root: string,
     relPath: string,
-    options?: { binary?: boolean }
-  ) => Promise<{ ok: boolean; content?: string; dataUrl?: string; bytes?: number; truncated?: boolean; mtimeMs?: number; error?: string }>;
+    options?: { binary?: boolean; preview?: boolean }
+  ) => Promise<{ ok: boolean; content?: string; dataUrl?: string; bytes?: number; truncated?: boolean; mtimeMs?: number; error?: string; preview?: import('./lib/filePreview').PreviewContent }>;
   writeProjectFile: (
     root: string,
     relPath: string,

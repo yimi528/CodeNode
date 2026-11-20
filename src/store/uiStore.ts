@@ -4,7 +4,7 @@ import { formatResumePlanNotice, type ResumePlanLike } from '../lib/resumePlan';
 import { DEFAULT_THEME, normalizeTheme, THEME_STORAGE_KEY, type Theme } from '../lib/theme';
 
 /** 左侧侧栏的标签页：Agent 对话 / 节点属性 / 项目树 / 文件预览 */
-export type SideTab = 'agent' | 'node' | 'project' | 'preview';
+export type SideTab = 'agent' | 'conversation' | 'node' | 'project' | 'preview';
 
 /** 侧栏宽度边界：下限保证输入控件可用，上限避免把画布挤没 */
 export const SIDE_WIDTH_MIN = 260;
@@ -19,6 +19,7 @@ const initialPreferences = loadUiPreferences();
 interface UiState {
   appPage: 'workbench' | 'plugins' | 'tasks';
   setAppPage: (page: UiState['appPage']) => void;
+  showCanvas: () => void;
   pluginView: 'plugins' | 'skills';
   setPluginView: (view: UiState['pluginView']) => void;
   preferences: UiPreferences;
@@ -44,6 +45,7 @@ interface UiState {
   /** 右侧侧栏（原「检查器」+ 原左侧「项目管理」合并后的唯一面板） */
   sideOpen: boolean;
   sideTab: SideTab;
+  filePreviewLocation: { root: string; relPath: string | null } | null;
   sideWidth: number;
   addMenu: { x: number; y: number } | null;
   lastMouse: { x: number; y: number };
@@ -56,7 +58,7 @@ interface UiState {
   dockOpen: boolean;
   dockTab: 'editor' | 'diff' | 'terminal' | 'runs' | 'checkpoints' | 'extensions' | 'rag';
   editorTarget: { path: string; line: number } | null;
-  /** 启动引导是否完成（恢复上次工程结束）。false 时先显示启动占位，避免门禁页闪现 */
+  /** 启动时的最近工程列表及工作区定位是否已恢复。 */
   booted: boolean;
   /**
    * 需要人工复核的续跑计划（#21）：后端回传的 `plan` 不再被丢掉，在这里留存，
@@ -92,6 +94,10 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null;
 export const useUiStore = create<UiState>((set, get) => ({
   appPage: 'workbench',
   setAppPage: appPage => set({appPage,settingsOpen:false}),
+  showCanvas: () => {
+    get().updatePreferences({ workbenchView: 'conversation' });
+    set({ appPage: 'workbench', sideTab: 'agent', sideOpen: false, settingsOpen: false });
+  },
   pluginView: 'plugins',
   setPluginView: pluginView => set({pluginView,appPage:'plugins',settingsOpen:false}),
   preferences: initialPreferences,
@@ -126,6 +132,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   toggleTheme: () => get().setTheme(get().theme === 'dark' ? 'light' : 'dark'),
   sideOpen: false,
   sideTab: 'agent',
+  filePreviewLocation: null,
   sideWidth: SIDE_WIDTH_DEFAULT,
   addMenu: null,
   lastMouse: { x: 0, y: 0 },

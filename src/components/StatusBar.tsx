@@ -8,6 +8,7 @@ export default function StatusBar() {
   const edgeCount=useGraphStore(s=>s.edges.length);
   const selectedCount=useGraphStore(s=>s.selectedIds.length);
   const toast=useUiStore(s=>s.toast);
+  const conversation=useUiStore(s=>s.sideTab==='conversation' && s.preferences.workbenchView!=='overview');
   const [focus,setFocus]=useState<'text'|'vector'|'canvas'|'panel'>('canvas');
   const viewport=useReactFlow().getViewport();
   useEffect(()=>{
@@ -15,5 +16,9 @@ export default function StatusBar() {
     update();document.addEventListener('focusin',update);document.addEventListener('focusout',update);return()=>{document.removeEventListener('focusin',update);document.removeEventListener('focusout',update);};
   },[]);
   const hint=focus==='text'?'文字编辑中 · Delete / Backspace 删除文字':focus==='vector'?(selectedCount?'画布节点已选中 · 有选中图形时删图形，否则 Delete 删除节点':'节点内编辑 · 点击图形或节点后按 Delete 删除'):focus==='panel'?'点击节点标题或边框后，可用 Delete 删除节点':selectedCount?`已选中 ${selectedCount} 个节点 · Delete / X 删除 · Ctrl+Z 撤销`:'点击节点标题或边框选中 · 中键拖动画布 · Shift+A 添加节点';
-  return <footer className="status-bar"><span>节点 {nodeCount}</span><span>连线 {edgeCount}</span><span>选中 {selectedCount}</span><span>缩放 {Math.round(viewport.zoom*100)}%</span><span className="status-toast" role="status" aria-live="polite" aria-atomic="true">{toast||''}</span><span className="status-hint">{hint}</span></footer>;
+  return <footer className="status-bar">
+    {conversation ? null : <><span>节点 {nodeCount}</span><span>连线 {edgeCount}</span><span>选中 {selectedCount}</span><span>缩放 {Math.round(viewport.zoom*100)}%</span></>}
+    <span className="status-toast" role="status" aria-live="polite" aria-atomic="true">{toast||''}</span>
+    {!conversation && <span className="status-hint">{hint}</span>}
+  </footer>;
 }
