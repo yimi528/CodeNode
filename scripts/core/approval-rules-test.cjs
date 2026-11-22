@@ -120,7 +120,7 @@ sandbox.setDefaultPolicy(policy);
     const ui = fs.readFileSync(path.join(__dirname, "../../src/components/ToolDialog.tsx"), 'utf8');
     check('[E] 界面有「本项目始终允许」按钮并回 always=project', /本项目始终允许/.test(ui) && /always: 'project'/.test(ui));
     const ipc = fs.readFileSync(path.join(__dirname, "../../electron/ipc/agent.cjs"), 'utf8');
-    check('[E] ipc 把 projectRoot 传给桥（否则规则无处落盘）', /makeBridge\(sender, controller\.signal, \{ projectRoot \}\)/.test(ipc));
+    check('[E] ipc 把 projectRoot 传给桥（否则规则无处落盘）', /makeBridge\(sender,\s*controller\.signal,\s*\{\s*projectRoot\s*(?:,[^}]*)?\}\)/.test(ipc));
   }
 
   try {
