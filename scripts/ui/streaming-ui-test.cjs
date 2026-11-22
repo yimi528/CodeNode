@@ -16,6 +16,15 @@ app.on('browser-window-created', (_event, window) => { win = window; window.show
 require(path.join(moduleRoot, 'electron/main.cjs'));
 const { installScriptedModel } = require("../lib/scripted-model.cjs");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function createGate() {
+  let release = () => {};
+  const ready = new Promise(resolve => { release = () => resolve(undefined); });
+  return { ready, release };
+}
+function hasToolResponse(body) {
+  if (typeof body !== 'string') return false;
+  return (JSON.parse(body).messages || []).some(message => message.role === 'tool');
+}
 let stub;
 function cleanup() {
   stub?.restore();
@@ -97,10 +106,9 @@ app.whenReady().then(async () => {
       { content: '已收到选择。' },
     ], { loopLast: false });
     const askFetch = global.fetch;
-    let resumeReply;
-    const replyGate = new Promise(resolve => { resumeReply = resolve; });
+    const replyGate = createGate();
     global.fetch = async (url, init) => {
-      if (JSON.parse(init?.body || '{}').messages?.some(message => message.role === 'tool')) await replyGate;
+      if (hasToolResponse(init?.body)) await replyGate.ready;
       return askFetch(url, init);
     };
     await js(`void (window.__streamingSend=window.__codenodeChat.getState().send('请让我选择一个颜色'))`);
@@ -108,7 +116,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`getComputedStyle(${sidebarStatus}, '::before').borderTopStyle`), 'solid');
     await js(`document.querySelector('.tool-dialog-opt').click()`);
     await wait(`${sidebarStatus}?.dataset.status==='running'`, 'sidebar resumes after selection');
-    resumeReply();
+    replyGate.release();
     await js('window.__streamingSend');
     await wait(`${sidebarStatus}?.dataset.status==='done'`, 'sidebar completes after selection');
     stub.restore(); stub = null;
@@ -188,12 +196,10 @@ app.whenReady().then(async () => {
       { content: '原会话后台任务完成。' },
     ], { loopLast: false });
     const detachedFetch = global.fetch;
-    let releaseQuestion, releaseResult;
-    const questionGate = new Promise(resolve => { releaseQuestion = resolve; });
-    const resultGate = new Promise(resolve => { releaseResult = resolve; });
+    const questionGate = createGate();
+    const resultGate = createGate();
     global.fetch = async (url, init) => {
-      const messages = JSON.parse(init?.body || '{}').messages || [];
-      await (messages.some(message => message.role === 'tool') ? resultGate : questionGate);
+      await (hasToolResponse(init?.body) ? resultGate : questionGate).ready;
       return detachedFetch(url, init);
     };
     await js(`void (window.__detachedSend=window.__codenodeChat.getState().send('测试切换到别的会话'))`);
@@ -203,13 +209,13 @@ app.whenReady().then(async () => {
     assert.equal(await js('window.__codenodeSession.getState().messages.at(-1).content'), '同工程的原有回复');
     await chooseSession('external-chat');
     await wait(`${rowStatus('external-chat')}===undefined && ${rowStatus(sessionId)}==='running'`, 'cross-project chat and read badge');
-    releaseQuestion();
+    questionGate.release();
     await wait(`${rowStatus(sessionId)}==='waiting' && !document.querySelector('.tool-dialog-opt')`, 'background choice only appears on the original row');
     await chooseSession(sessionId);
     await wait(`!!document.querySelector('.tool-dialog-opt') && ${rowStatus(sessionId)}===undefined`, 'reopen original chat and read pending choice');
     await js(`document.querySelector('.tool-dialog-opt').click()`);
     await chooseSession('external-chat');
-    releaseResult();
+    resultGate.release();
     await js('window.__detachedSend');
     await wait(`${rowStatus(sessionId)}==='done'`, 'background completion appears on the original row');
     assert.equal(await js('window.__codenodeSession.getState().messages.at(-1).content'), '另一个工程的原有回复');
