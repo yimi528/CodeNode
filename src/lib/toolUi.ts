@@ -2,6 +2,7 @@ import { useGraphStore } from '../store/graphStore';
 import { useProjectStore } from '../store/projectStore';
 import { useUiStore } from '../store/uiStore';
 import { useToolStore, type ConfirmRequest, type AskRequest } from '../store/toolStore';
+import { ownsActiveView } from '../store/chatStore';
 
 /**
  * 界面动作执行（渲染进程侧接线）。
@@ -95,7 +96,7 @@ export function installToolListener(): () => void {
       const state = useProjectStore.getState();
       const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase();
       const matches = state.root && state.selected && normalize(state.root + '/' + state.selected.relPath) === normalize(String(req.path || ''));
-      api.respondToolRequest(req.id, { content: matches ? state.draft : null });
+      api.respondToolRequest(req.id, { content: matches && (!req.requestId || ownsActiveView(req.requestId)) ? state.draft : null });
       return;
     }
     if (req.type === 'cancel') {
@@ -103,7 +104,7 @@ export function installToolListener(): () => void {
       return;
     }
     if (req.type === 'ui') {
-      const applied = performUiAction(req.action || '', req.args || {});
+      const applied = (!req.requestId || ownsActiveView(req.requestId)) && performUiAction(req.action || '', req.args || {});
       api.respondToolRequest(req.id, { applied });
       return;
     }

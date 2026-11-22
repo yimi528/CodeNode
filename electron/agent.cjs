@@ -62,7 +62,8 @@ const {
 } = agentCompression;
 const {
   DEFAULTS, DEFAULT_MAX_TOKENS, DEFAULT_TURN_TIMEOUT_MS, DEFAULT_STREAM_IDLE_TIMEOUT_MS,
-  DEFAULT_TRUNCATION_NUDGES, configInteger, configNumber, configList,
+  DEFAULT_TRUNCATION_NUDGES, DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_MAX_TOTAL_TOOL_CALLS,
+  configInteger, configNumber, configList,
   parseReasoningEffort, parseReliabilityConfig, parseSandboxConfig, parseLimitsConfig,
 } = require('./agentRuntimeConfig.cjs');
 agentCompression.configure({ chatCompletion, recordCost });
@@ -1006,8 +1007,6 @@ function redactSecrets(value) {
   return require('./redaction.cjs').redact(value);
 }
 
-const MAX_TOOL_ITERATIONS = 12;
-const MAX_TOTAL_TOOL_CALLS = 100;
 const DATA_TRUNCATE_CAP = 120000;
 
 /**
@@ -1320,8 +1319,8 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
     concurrency: (cfg.tools && cfg.tools.toolsParallelConcurrency) || schedulerLib.DEFAULT_CONCURRENCY,
   });
   const limits = (cfg && cfg.limits) || {};
-  const maxToolIterations = limits.maxToolIterations > 0 ? limits.maxToolIterations : MAX_TOOL_ITERATIONS;
-  const maxTotalToolCalls = limits.maxTotalToolCalls > 0 ? limits.maxTotalToolCalls : MAX_TOTAL_TOOL_CALLS;
+  const maxToolIterations = limits.maxToolIterations > 0 ? limits.maxToolIterations : DEFAULT_MAX_TOOL_ITERATIONS;
+  const maxTotalToolCalls = limits.maxTotalToolCalls > 0 ? limits.maxTotalToolCalls : DEFAULT_MAX_TOTAL_TOOL_CALLS;
   // 进度检查层：0 = 关闭（parseConfig 传的是 agent.progress_every，出厂 3；手工构造的 cfg 需要显式给）
   const progressEvery = Number(cfg && cfg.limits && cfg.limits.progressEvery) > 0 ? Math.floor(Number(cfg.limits.progressEvery)) : 0;
   // 只用于进度清单里的「用量 X/Y」显示；与下面预算门用的是同一个来源
@@ -2256,7 +2255,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
       if (finishReason) lastFinishReason = finishReason;
       // 被 max_tokens 截断（finish_reason=length）且没有任何工具调用：不能把半截回答当最终答案，
       // 也不能无限补问 —— 最多补 maxTruncationNudges 次（agent.truncation_nudges，出厂 4），
-      // 其余交给 MAX_TOOL_ITERATIONS 兜底。
+      // 其余交给本轮模型迭代上限兜底。
       // 提示语必须是「从断点接着写」：早先写的是「把回复拆短：只给结论」——那等于让模型
       // 在被截断之后主动丢信息，用户拿到的是越缩越水的半份交付。
       /**

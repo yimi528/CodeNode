@@ -80,6 +80,7 @@ interface ToolRecordDto {
 
 interface ToolRequestDto {
   id: string;
+  requestId?: string;
   type: 'confirm' | 'ask' | 'ui' | 'cancel' | 'editor_read';
   path?: string;
   level?: string;
@@ -578,6 +579,7 @@ interface CodenodeApi {
     codeVerification?: import('./types').CodeVerificationReport;
     requestId?: string;
     kind?: string;
+    continuing?: boolean;
     text?: string;
     toolCalls?: unknown;
     toolResult?: unknown;

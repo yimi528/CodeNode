@@ -15,14 +15,17 @@ import { useUiStore } from '../../store/uiStore';
 import { summarizeResumePlan } from '../../lib/resumePlan';
 import { fireAndReport } from '../../lib/reportError';
 import { useProjectStore } from '../../store/projectStore';
+import { useSessionStore } from '../../store/sessionStore';
 import { useSending } from '../../lib/useSending';
 
 export default function ResumePlanNotice() {
   const notice = useUiStore((s) => s.resumePlanNotice);
+  const root = useProjectStore(s => s.root);
+  const sessionId = useSessionStore(s => s.activeId);
   const send = useChatStore((s) => s.send);
   // 强制续跑 / 按当前状态重试同样走 `send`，所以同样要接忙碌守卫（#7 的续跑按钮同一条要求）
   const busy = useSending();
-  if (!notice) return null;
+  if (!notice || (notice.origin && (notice.origin.root !== root || notice.origin.sessionId !== sessionId))) return null;
 
   const view = summarizeResumePlan(notice.plan, notice.prompt);
   const report = (message: string) => useUiStore.getState().setToast(message);

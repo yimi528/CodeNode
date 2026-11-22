@@ -167,6 +167,7 @@ function PromptComposer() {
   // #7：`sending` 是派生值（inflight.size() > 0），不再是可被并发覆盖的单值全局标志
   const sending = useSending();
   const streaming = useSessionStore((s) => s.streaming);
+  const backgroundRun = useChatStore(s => s.backgroundRun);
   const models = useUsageStore((s) => s.models);
   const modelId = useUsageStore((s) => s.modelId);
   const effort = useUsageStore((s) => s.effort);
@@ -376,7 +377,7 @@ function PromptComposer() {
           ＋
         </button>
 
-        {busy ? (
+        {streaming || (sending && !backgroundRun) ? (
           <>
           <button className="pp-send pp-stop" onClick={() => useChatStore.getState().stop()} aria-label="停止生成" title="停止生成">■</button>
           <div className="pp-steer" title="运行中插话：这句话会在下一轮送进模型，不中断当前运行">
@@ -406,7 +407,7 @@ function PromptComposer() {
             className="pp-send"
             onClick={() => void send()}
             disabled={(!selectedNode && !text.trim() && !attachments.length) || busy}
-            title={selectedNode ? '保存阶段 Prompt (Enter)' : '发送 (Enter)'}
+            title={backgroundRun ? '另一个会话正在运行' : selectedNode ? '保存阶段 Prompt (Enter)' : '发送 (Enter)'}
           >
             {selectedNode ? '保存' : '↑'}
           </button>

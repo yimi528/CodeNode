@@ -5,6 +5,9 @@ const DEFAULT_TURN_TIMEOUT_MS = 600000;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120000;
 const DEFAULT_STREAM_MAX_ATTEMPTS = 2;
 const DEFAULT_TRUNCATION_NUDGES = 4;
+// DeepSeek V4.1 Flash 的官方 Agent 评测每个 Agent 最多运行 500 个模型生成步骤。
+const DEFAULT_MAX_TOOL_ITERATIONS = 500;
+const DEFAULT_MAX_TOTAL_TOOL_CALLS = 1000;
 
 const DEFAULTS = Object.freeze({
   maxTokens: DEFAULT_MAX_TOKENS,
@@ -85,8 +88,8 @@ function parseLimitsConfig(cfg) {
     maxTotalTokens: configInteger(cfg, 'agent.max_total_tokens', 600000, 10000, 4000000),
     maxTotalRetries: configInteger(cfg, 'agent.max_total_retries', 12, 0, 100),
     maxCostUsd: require('./costBudget.cjs').parseCostLimit(cfg['agent.max_cost_usd']),
-    maxToolIterations: configInteger(cfg, 'agent.max_tool_iterations', 12, 1, 200),
-    maxTotalToolCalls: configInteger(cfg, 'agent.max_total_tool_calls', 100, 1, 2000),
+    maxToolIterations: configInteger(cfg, 'agent.max_tool_iterations', DEFAULT_MAX_TOOL_ITERATIONS, 1, DEFAULT_MAX_TOOL_ITERATIONS),
+    maxTotalToolCalls: configInteger(cfg, 'agent.max_total_tool_calls', DEFAULT_MAX_TOTAL_TOOL_CALLS, 1, 2000),
     dataTruncateCap: configInteger(cfg, 'agent.data_truncate_cap', 120000, 2000, 2000000),
   };
 }
@@ -98,6 +101,8 @@ module.exports = {
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   DEFAULT_STREAM_MAX_ATTEMPTS,
   DEFAULT_TRUNCATION_NUDGES,
+  DEFAULT_MAX_TOOL_ITERATIONS,
+  DEFAULT_MAX_TOTAL_TOOL_CALLS,
   configInteger,
   configNumber,
   configList,

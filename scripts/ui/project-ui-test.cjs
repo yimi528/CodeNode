@@ -861,8 +861,12 @@ app.whenReady().then(async () => {
       await waitFor(async () => await win.webContents.executeJavaScript('document.documentElement.dataset.theme==="light"'), '日间主题');
       await sleep(250);
       assert.equal(await win.webContents.executeJavaScript('localStorage.getItem("codenode.theme")'), 'light');
-      const material = await win.webContents.executeJavaScript(`(() => { const panel=getComputedStyle(document.querySelector('.pp-composer')); return {background:panel.backgroundColor,blur:panel.backdropFilter}; })()`);
-      assert.deepEqual(material, { background: 'rgb(78, 78, 78)', blur: 'none' }, '对话输入区应使用不透明纯灰背景');
+      const material = await win.webContents.executeJavaScript(`(() => {
+        const style = selector => getComputedStyle(document.querySelector(selector));
+        const composer = style('.pp-composer');
+        return { navigation: style('.project-navigation').backgroundColor, conversation: style('.conversation-right').backgroundColor, composer: composer.backgroundColor, blur: composer.backdropFilter };
+      })()`);
+      assert.deepEqual(material, { navigation: 'rgb(30, 30, 30)', conversation: 'rgb(30, 30, 30)', composer: 'rgb(48, 48, 48)', blur: 'none' }, '左右面板应使用同一深灰色，输入区使用稍亮的纯灰');
       const dayCapture = await Promise.race([win.webContents.capturePage(),sleep(5000).then(()=>{throw new Error('capture timeout');})]);
       fs.writeFileSync(path.join(__dirname,"../../out/workbench-glass-light.png"),dayCapture.toPNG());
       win.setSize(500,740); await sleep(200);

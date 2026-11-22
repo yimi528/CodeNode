@@ -269,7 +269,7 @@ function statesOf(root, runId) {
 
   // ---- B3 达到上限：LIMIT_REACHED（不再折叠成笼统的 error 语义） ----
   {
-    const root = makeProject('limit');
+    const root = makeProject('limit', ['agent.max_tool_iterations=2']);
     const h = makeHarness();
     // loopLast=true：模型永远返回同一个工具调用（结果命中只读缓存，成本极低）
     const stub = installScriptedModel([{ toolCalls: [{ name: 'read_file', args: { path: 'a.txt' } }] }], { loopLast: true });

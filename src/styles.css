@@ -9,7 +9,7 @@
   --accent-2: #22c55e;
   --workbench-frame: #222222;
   --workbench-canvas: var(--app-background, #303030);
-  --workbench-conversation: #424242;
+  --workbench-panel: #1e1e1e;
   --window-titlebar-height: env(titlebar-area-height, 0px);
   color-scheme: dark;
 }
@@ -4022,7 +4022,17 @@ textarea:focus-visible {
 .conversation-workspace .pp-input { min-height: 44px; max-height: 100px; }
 .workspace-node .workspace-content > .side-panel { position: absolute; left: 0; top: 0; bottom: clamp(220px,32vh,300px); z-index: 20; }
 .project-session-row { display: flex; position: relative; align-items: center; }
-.project-session-row > button:first-child { flex: 1; min-width: 0; padding-right: 30px !important; }
+.project-session-row > button:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 1; min-width: 0; min-height: 36px; padding-right: 30px !important; }
+.project-session-row > button:first-child:disabled { opacity: 1; }
+.project-session-row > button:disabled .project-session-label { opacity: .4; }
+.project-session-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.project-session-status { display: grid; place-items: center; width: 18px; height: 18px; flex: none; color: var(--glass-muted); }
+.project-session-status:not([data-status="running"])::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.project-session-status[data-status="running"] { color: var(--glass-text); }
+.project-session-status[data-status="done"] { color: #2acb68; }
+.project-session-status:is([data-status="waiting"], [data-status="needs_review"]) { color: #f5a342; }
+.project-session-status:is([data-status="waiting"], [data-status="needs_review"])::before { background: transparent; border: 2px solid currentColor; }
+.project-session-status:is([data-status="failed"], [data-status="interrupted"], [data-status="truncated"], [data-status="limit_reached"]) { color: #fa6969; }
 .project-session-row .session-archive { position: absolute; right: 6px; width: 24px; padding: 4px !important; opacity: 0; }
 .project-session-row:hover .session-archive, .project-session-row:focus-within .session-archive { opacity: 1; }
 .glass-theme .global-settings-trigger { margin-top: auto; text-align: left; padding: 12px !important; border: 0; background: transparent; color: var(--glass-muted); }
@@ -4172,7 +4182,7 @@ textarea:focus-visible {
 /* Three columns: projects, canvas, conversation. */
 .workspace-main .workspace-content { flex-direction: row; }
 .workspace-main .workspace-canvas { order: 0; min-height: 0; }
-.workspace-main .conversation-workspace.conversation-right { position: relative; order: 2; width: min(var(--conversation-width),45%); height: 100%; flex: 0 0 auto; padding: 0 14px 14px; background: var(--workbench-conversation); backdrop-filter: none; border-left: 1px solid var(--workbench-frame); }
+.workspace-main .conversation-workspace.conversation-right { position: relative; order: 2; width: min(var(--conversation-width),45%); height: 100%; flex: 0 0 auto; padding: 0 14px 14px; background: var(--workbench-panel); backdrop-filter: none; border-left: 1px solid var(--workbench-frame); }
 :is(.conversation-right, .agent-switch-layer, .hermes-picker-layer, .activity-bar, .project-navigation, .toolbar, .status-bar) {
   --glass-text: #f2f2f2;
   --glass-muted: #c4c4c4;
@@ -4199,13 +4209,13 @@ textarea:focus-visible {
   outline-color: var(--glass-accent);
 }
 .glass-theme.ui-clean .conversation-right .pp-composer {
-  background: #4e4e4e;
+  background: #303030;
   backdrop-filter: none;
   box-shadow: none;
 }
 .conversation-right .pp-controls {
-  --glass-control: #535353;
-  --glass-selected: #595959;
+  --glass-control: #353535;
+  --glass-selected: #3b3b3b;
 }
 .glass-theme .conversation-right :is(.pp-stop, .pp-attach-del) {
   background: var(--glass-surface);
@@ -4682,7 +4692,7 @@ textarea:focus-visible {
 
 /* Project navigation and the main conversation share the workbench. */
 .glass-theme.ui-clean .project-navigation {
-  background: #252525;
+  background: var(--workbench-panel);
   border-right-color: #393939;
 }
 

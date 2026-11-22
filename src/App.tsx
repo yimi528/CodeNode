@@ -13,6 +13,7 @@ import welcomeLogo from '../assets/branding/welcome-logo.png';
 import SidePanel from './components/side/SidePanel';
 import './components/side/nodeInspectorDock.css';
 import ProjectNavigation from './components/ProjectNavigation';
+import { isSending } from './store/chatStore';
 import ConversationPanel from './components/ConversationPanel';
 import FileWorkspace from './components/FileWorkspace';
 import AddMenu from './components/AddMenu';
@@ -100,8 +101,8 @@ export default function App() {
   const { fitView, screenToFlowPosition } = useReactFlow();
   const nodeClipboard = useRef<Graph | null>(null);
 
-  const runProjectAction = useCallback(async (action: () => Promise<void>) => {
-    if (projectActionPending.current || useSessionStore.getState().streaming) return false;
+  const runProjectAction = useCallback(async (action: () => Promise<void>, browseConversations = false) => {
+    if (projectActionPending.current || (!browseConversations && (useSessionStore.getState().streaming || isSending()))) return false;
     if (!window.codenode) {
       setProjectActionError('请在 CodeNode 桌面应用中打开工程。');
       return false;

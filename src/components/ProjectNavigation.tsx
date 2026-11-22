@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Orb } from '@yogesharc/thinking-orbs';
 import { useProjectStore } from '../store/projectStore';
-import { useSessionStore } from '../store/sessionStore';
+import { latestConversationMessage, useSessionStore } from '../store/sessionStore';
+import { openChatSession, ownsActiveView, parkChatProject, restoreVisibleChat, useChatStore } from '../store/chatStore';
+import { useToolStore } from '../store/toolStore';
+import { useSending } from '../lib/useSending';
 import { useUiStore } from '../store/uiStore';
 import { useProjectSaveStore } from '../store/projectSaveStore';
 import { newProject, openProject, openProjectFile, openRecentProject, saveProject } from '../lib/projectActions';
@@ -9,20 +13,60 @@ import { conversationTitle, firstTitleMessage } from '../lib/conversationTitle';
 import type { SessionMsg } from '../types';
 
 type ProjectEntry = Pick<RecentProject, 'root' | 'file' | 'name'>;
-type SessionEntry = { id: string; label?: string; messages?: SessionMsg[]; archived?: boolean };
+const activityLabels = {
+  running: '工作中',
+  waiting: '等待你选择或确认',
+  needs_review: '需要人工复核',
+  done: '已完成',
+  failed: '运行失败',
+  interrupted: '意外中断',
+  truncated: '回答已截断',
+  limit_reached: '达到运行上限',
+  stopped: '已手动停止',
+};
+type SessionActivity = keyof typeof activityLabels;
+type SessionEntry = { id: string; label?: string; messages?: SessionMsg[]; archived?: boolean; activity?: SessionActivity; turnId?: string };
 
-function ProjectSessions({ target, liveSessions, activeId, busy, onSelect, onArchive, onOpenProject }: {
+function latestTurnId(messages?: SessionMsg[]) {
+  return Array.isArray(messages) ? latestConversationMessage(messages)?.turnId || String(messages.length) : undefined;
+}
+
+function sessionActivity(messages?: SessionMsg[]): SessionActivity | undefined {
+  if (!Array.isArray(messages)) return;
+  const last = latestConversationMessage(messages);
+  if (last?.role !== 'assistant') return;
+  switch (last.status) {
+    case 'running': return 'interrupted';
+    case 'done': return messages.some(message => message?.role === 'user') ? 'done' : undefined;
+    case 'needs_review':
+    case 'failed':
+    case 'truncated':
+    case 'limit_reached':
+    case 'stopped': return last.status;
+  }
+}
+
+function ProjectSessions({ target, liveSessions, parkedSessions, activeId, activeActivity, activeTurnId, backgroundRun, selecting, busy, onSelect, onArchive, onOpenProject }: {
   target: string;
   liveSessions: SessionEntry[] | null;
+  parkedSessions?: SessionEntry[];
   activeId?: string | null;
+  activeActivity?: SessionActivity;
+  activeTurnId?: string;
+  backgroundRun?: { sessionId: string; waitId?: string };
+  selecting: boolean;
   busy: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (id: string) => boolean | Promise<boolean>;
   onArchive?: (id: string) => void;
   onOpenProject?: () => void;
 }) {
   const current = liveSessions !== null;
   const [saved, setSaved] = useState<SessionEntry[] | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const seenKey = `codenode.seenChatStatus:${recentPathKey(target)}`;
+  const [seen, setSeen] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem(seenKey) || '{}') || {}; } catch { return {}; }
+  });
   useEffect(() => {
     if (current) return;
     let alive = true;
@@ -33,13 +77,13 @@ function ProjectSessions({ target, liveSessions, activeId, busy, onSelect, onArc
       const sessions = result.data?.canvases?.sessions as SessionEntry[] | undefined;
       if (alive) setSaved(result.ok && Array.isArray(sessions)
         ? sessions.filter(session => typeof session?.id === 'string' && !session.archived)
-          .map(({ id, label, messages }) => ({ id, label: conversationTitle(label, firstTitleMessage(messages)) }))
+          .map(({ id, label, messages }) => ({ id, label: conversationTitle(label, firstTitleMessage(messages)), activity: sessionActivity(messages), turnId: latestTurnId(messages) }))
         : []);
     }).catch(() => { if (alive) setSaved([]); });
     return () => { alive = false; };
   }, [target, current]);
 
-  const entries = (liveSessions ?? saved)?.filter(session => typeof session?.id === 'string' && !session.archived);
+  const entries = (liveSessions ?? parkedSessions ?? saved)?.filter(session => typeof session?.id === 'string' && !session.archived);
   const latest = entries?.slice(-4).reverse();
   const active = entries?.find(session => session.id === activeId);
   if (latest && active && !latest.includes(active)) latest.push(active);
@@ -51,8 +95,28 @@ function ProjectSessions({ target, liveSessions, activeId, busy, onSelect, onArc
     </div>}
     {visible?.map(session => {
       const label = session.label || '未命名对话';
-      return <div key={session.id} className="project-session-row">
-        <button className={session.id === activeId ? 'active' : ''} disabled={busy} aria-current={session.id === activeId ? 'page' : undefined} onClick={() => onSelect(session.id)} title={label}>{label}</button>
+      const isActive = session.id === activeId;
+      const run = backgroundRun?.sessionId === session.id ? backgroundRun : undefined;
+      const activity: SessionActivity | undefined = run ? run.waitId ? 'waiting' : 'running'
+        : isActive ? activeActivity : session.activity ?? sessionActivity(session.messages);
+      const turnId = run?.waitId ?? (isActive ? activeTurnId : session.turnId ?? latestTurnId(session.messages));
+      const marker = activity && activity !== 'running' ? `${activity}:${turnId || ''}` : undefined;
+      const showStatus = activity && (!marker || seen[session.id] !== marker);
+      const statusLabel = activity && activityLabels[activity];
+      return <div key={session.id} className="project-session-row" data-session-id={session.id}>
+        <button className={isActive ? 'active' : ''} disabled={selecting} aria-current={isActive ? 'page' : undefined} aria-description={showStatus ? statusLabel : undefined} onClick={async () => {
+          if (!await onSelect(session.id) || !marker) return;
+          setSeen(previous => {
+            const next = { ...previous, [session.id]: marker };
+            try { localStorage.setItem(seenKey, JSON.stringify(next)); } catch {}
+            return next;
+          });
+        }} title={label}>
+          <span className="project-session-label">{label}</span>
+          {showStatus && <span className="project-session-status" data-status={activity} title={statusLabel} aria-hidden="true">
+            {activity === 'running' && <Orb state="working" variant="gyro" size={18} />}
+          </span>}
+        </button>
         {onArchive && <button className="session-archive" aria-label={`归档 ${session.label || label}`} title="归档聊天" disabled={busy} onClick={() => onArchive(session.id)}>▣</button>}
       </div>;
     })}
@@ -82,12 +146,22 @@ function startCanvas() {
 /** Project/session navigation is independent of the conversation/inspector. */
 export default function ProjectNavigation({ switching, runProjectAction }: {
   switching: boolean;
-  runProjectAction: (action: () => Promise<void>) => Promise<boolean>;
+  runProjectAction: (action: () => Promise<void>, browseConversations?: boolean) => Promise<boolean>;
 }) {
   const root = useProjectStore(s => s.root);
   const file = useProjectStore(s => s.projectFile);
   const sessions = useSessionStore(s => s.sessions);
   const streaming = useSessionStore(s => s.streaming);
+  const sending = useSending();
+  const activeActivity = useSessionStore(s => s.streaming ? 'running' : sessionActivity(s.messages));
+  const activeTurnId = useSessionStore(s => latestTurnId(s.messages));
+  const background = useChatStore(s => s.backgroundRun);
+  const parked = useChatStore(s => s.parkedProjects);
+  const currentTool = useToolStore(s => s.current);
+  const queuedTools = useToolStore(s => s.queue);
+  const tools = [currentTool, ...queuedTools];
+  const waiting = tools.find(request => !!request?.requestId && ownsActiveView(request.requestId));
+  const backgroundWait = background && tools.find(request => request?.requestId === background.requestId);
   const order = useSessionStore(s => s.order);
   const activeId = useSessionStore(s => s.activeId);
   const open = useUiStore(s => s.navigationOpen);
@@ -120,11 +194,12 @@ export default function ProjectNavigation({ switching, runProjectAction }: {
     document.addEventListener('pointerdown', dismiss); document.addEventListener('keydown', dismiss);
     return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', dismiss); };
   }, []);
-  const act = async (operation: () => Promise<void>) => {
-    if (!await runProjectAction(operation)) return;
+  const act = async (operation: () => Promise<void>, browseConversations = false) => {
+    if (!await runProjectAction(operation, browseConversations)) return false;
     const state = useProjectStore.getState();
     const key = state.projectFile || state.root;
     if (key) changeMeta(key, { hidden: false });
+    return true;
   };
   const openOtherProject = async (project: ProjectEntry, sessionId?: string) => {
     const projectState = useProjectStore.getState();
@@ -133,8 +208,13 @@ export default function ProjectNavigation({ switching, runProjectAction }: {
     if (projectState.projectFile && ['dirty', 'saving', 'error'].includes(saveState.status) && !await saveProject()) {
       throw Error('当前项目未能保存，无法切换项目。');
     }
-    if (useSessionStore.getState().streaming) return false;
-    await openRecentProject(project, sessionId);
+    if (sessionId) parkChatProject();
+    const key = recentPathKey(project.file || project.root);
+    try {
+      await openRecentProject(project, sessionId, false, () => useChatStore.getState().parkedProjects[key]?.snapshot);
+    } finally {
+      restoreVisibleChat();
+    }
     const opened = useProjectStore.getState();
     if (!project.file) return recentPathKey(opened.root || '') === recentPathKey(project.root);
     return sameRecentProject({ root: opened.root || '', file: opened.projectFile || undefined }, project);
@@ -164,7 +244,7 @@ export default function ProjectNavigation({ switching, runProjectAction }: {
     return Math.min(index >= 0 ? index : projectOrder.length + candidateKeys.indexOf(key), legacy >= 0 ? legacy : Infinity);
   };
   projects.sort((a,b) => Number(!!meta[b.file || b.root]?.pinned)-Number(!!meta[a.file || a.root]?.pinned) || rank(a)-rank(b));
-  const busy = streaming || switching;
+  const busy = sending || streaming || switching;
   void revision;
   if (!open) return null;
   return <aside ref={panel} className="project-navigation" aria-label="项目与会话" style={{'--navigation-width':width+'px'} as CSSProperties}>
@@ -178,6 +258,7 @@ export default function ProjectNavigation({ switching, runProjectAction }: {
       </div>}
       {projects.map((project, index) => {
         const key = project.file || project.root, current = isCurrent(project);
+        const projectKey = recentPathKey(key);
         const name = meta[key]?.name || (/^workflow\.cnode$/i.test(project.name)
           ? projectNameOf(project.root)
           : project.name.replace(/\.cnode$/i, ''));
@@ -212,15 +293,25 @@ export default function ProjectNavigation({ switching, runProjectAction }: {
           {!folded && <ProjectSessions
             target={key}
             liveSessions={current ? order.map(id => sessions[id]).filter(Boolean) : null}
+            parkedSessions={parked[projectKey]?.snapshot.payload.canvases.sessions}
             activeId={current ? activeId : null}
+            activeActivity={current ? activeActivity === 'running' && waiting ? 'waiting' : activeActivity : undefined}
+            activeTurnId={waiting?.id || activeTurnId}
+            backgroundRun={background?.projectKey === projectKey ? { sessionId: background.sessionId, waitId: backgroundWait?.id } : undefined}
+            selecting={switching}
             busy={busy}
-            onSelect={id => {
+            onSelect={async id => {
               if (current) {
-                useSessionStore.getState().switchSession(id);
+                if (!openChatSession(id)) return false;
                 showConversation();
-              } else void act(async () => {
-                if (await openOtherProject(project, id)) showConversation();
-              });
+                return true;
+              }
+              let opened = false;
+              await act(async () => {
+                opened = await openOtherProject(project, id);
+                if (opened) showConversation();
+              }, true);
+              return opened;
             }}
             onArchive={current ? id => { useSessionStore.getState().setArchived(id, true); void saveProject(); } : undefined}
             onOpenProject={!current ? openProjectEntry : undefined}

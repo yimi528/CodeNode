@@ -215,6 +215,7 @@ function loadConfig() {
     isSending: chat.isSending,
     inflightRequestIds: chat.inflightRequestIds,
     checkSendGuard: chat.checkSendGuard,
+    openChatSession: chat.openChatSession,
     session: session.useSessionStore,
     ui: ui.useUiStore,
     usage: usage.useUsageStore,
@@ -736,6 +737,26 @@ async function testSessionOwnershipRace() {
   second.resolve({ok:true,reply:'NEW FINISH'}); await newRequest;
   check('E6 新请求独立正常完成且没有旧回复', session.getState().messages.some(m=>m.content==='NEW FINISH') && !session.getState().messages.some(m=>m.content==='OLD FINISH') && !registry.isSending());
 
+  freshStores();
+  const origin = session.getState().activeId;
+  session.getState().newConversation();
+  session.getState().startOnCurrent('Browse');
+  const browsing = session.getState().activeId;
+  registry.openChatSession(origin);
+  const background = defer();
+  installApi({ agentChat: input => { payload = input; return background.promise; }, onAgentDelta: fn => { listener = fn; return () => {}; } });
+  const backgroundRequest = chat.getState().send('Update original canvas');
+  registry.openChatSession(browsing);
+  const doc = { root: { nodes: [{ id: 'origin-only', type: 'task', position: { x: 0, y: 0 }, data: { label: 'Original canvas' } }], edges: [] } };
+  listener({ requestId: payload.requestId, kind: 'model', document: doc });
+  listener({ requestId: payload.requestId, kind: 'content', text: 'Background partial' });
+  check('E7 后台画布和增量与当前空白会话隔离', session.getState().activeId === browsing && !session.getState().messages.length && !session.getState().getDocument().root.nodes.length);
+  registry.openChatSession(origin);
+  check('E8 切回原会话能看到后台画布、增量和运行状态', session.getState().streaming && session.getState().getDocument().root.nodes[0]?.id === 'origin-only' && session.getState().messages.at(-1)?.content === 'Background partial');
+  registry.openChatSession(browsing);
+  background.resolve({ ok: true, reply: 'Background done', document: doc });
+  await backgroundRequest;
+  check('E9 完成结果写回原会话，当前会话继续显示自己的画布与消息', session.getState().activeId === browsing && !session.getState().messages.length && session.getState().sessions[origin].messages.at(-1)?.content === 'Background done' && session.getState().sessions[origin].doc.root.nodes[0]?.id === 'origin-only');
 }
 
 async function main() {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useToolStore } from '../store/toolStore';
+import { useChatStore } from '../store/chatStore';
 
 /**
  * Agent 审批 / 提问弹窗。
@@ -13,7 +14,9 @@ import { useToolStore } from '../store/toolStore';
  * 焦点管理的写法要能在 node 里断言（不放 DOM API 在渲染路径上）：处理函数单独导出。
  */
 export default function ToolDialog() {
-  const current = useToolStore((s) => s.current);
+  const request = useToolStore((s) => s.current);
+  const backgroundRequestId = useChatStore(s => s.backgroundRun?.requestId);
+  const current = request?.requestId && request.requestId === backgroundRequestId ? null : request;
   const respond = useToolStore((s) => s.respond);
   const [text, setText] = useState('');
   const dialogRef = useRef<HTMLDivElement | null>(null);

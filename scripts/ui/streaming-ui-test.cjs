@@ -42,7 +42,9 @@ app.whenReady().then(async () => {
     ], 'streaming-fixture');
     await wait('!!window.__codenodeProject', 'project store');
     await js(`window.__codenodeProject.getState().loadRoot(${JSON.stringify(root)})`);
-    await wait('!!document.querySelector(".pp-input")', 'composer');
+    await wait('!!document.querySelector(".pp-input") && !document.querySelector(".startup-splash")', 'visible workbench');
+    await js('window.__codenodeUi.setState({navigationOpen:true})');
+    const sidebarStatus = 'document.querySelector(".project-session-row .active .project-session-status")';
     const reply = '流式显示验证：你好世界 👨‍👩‍👧‍👦 é 🚀。'.repeat(12);
     stub = installScriptedModel([{ content: reply }], { loopLast: false });
     const mockedFetch = global.fetch;
@@ -67,6 +69,7 @@ app.whenReady().then(async () => {
       }) } };
     };
     await js(`void (window.__streamingSend=window.__codenodeChat.getState().send('请用文字说明本次结果，不调用工具'))`);
+    await wait(`${sidebarStatus}?.dataset.status==='running' && !!${sidebarStatus}.querySelector('svg')`, 'sidebar working orb');
     await wait(`window.__codenodeSession.getState().messages.at(-1)?.content.length>24 && document.querySelector('.cs-msg-agent:last-child .cs-msg-text')?.getAttribute('data-revealing')==='true'`, 'incremental arrival');
     const read = () => js(`(()=>{const message=window.__codenodeSession.getState().messages.at(-1);const element=document.querySelector('.cs-msg-agent:last-child .cs-msg-text');return{raw:message.content,shown:element.textContent,status:message.status};})()`);
     const first = await read();
@@ -78,13 +81,36 @@ app.whenReady().then(async () => {
     for (const theme of ['light', 'dark']) {
       await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`); await sleep(100);
       assert.equal(await stable(), before);
+      const panelColors = await js(`['.project-navigation', '.conversation-right', '.pp-composer'].map(selector => getComputedStyle(document.querySelector(selector)).backgroundColor)`);
+      assert.deepEqual(panelColors, ['rgb(30, 30, 30)', 'rgb(30, 30, 30)', 'rgb(48, 48, 48)']);
       const live = await read(); assert.ok(reply.startsWith(live.shown)); assert.ok(live.raw.startsWith(first.raw));
       fs.writeFileSync(path.join(__dirname, '../../out/streaming-' + theme + '.png'), (await win.webContents.capturePage()).toPNG());
     }
     await js('window.__streamingSend');
+    await wait(`${sidebarStatus}?.dataset.status==='done'`, 'sidebar completion');
     await wait(`document.querySelector('.cs-msg-agent:last-child .cs-msg-text')?.textContent===${JSON.stringify(reply)}`, 'drain final text');
     assert.equal((await read()).raw, reply);
     assert.equal((await read()).shown, reply);
+    stub.restore(); stub = null;
+    stub = installScriptedModel([
+      { toolCalls: [{ name: 'ask_user', args: { question: '请选择一个颜色', options: ['蓝色', '黄色'] } }] },
+      { content: '已收到选择。' },
+    ], { loopLast: false });
+    const askFetch = global.fetch;
+    let resumeReply;
+    const replyGate = new Promise(resolve => { resumeReply = resolve; });
+    global.fetch = async (url, init) => {
+      if (JSON.parse(init?.body || '{}').messages?.some(message => message.role === 'tool')) await replyGate;
+      return askFetch(url, init);
+    };
+    await js(`void (window.__streamingSend=window.__codenodeChat.getState().send('请让我选择一个颜色'))`);
+    await wait(`${sidebarStatus}?.dataset.status==='waiting' && !!document.querySelector('.tool-dialog-opt')`, 'sidebar waits for a real Agent choice');
+    assert.equal(await js(`getComputedStyle(${sidebarStatus}, '::before').borderTopStyle`), 'solid');
+    await js(`document.querySelector('.tool-dialog-opt').click()`);
+    await wait(`${sidebarStatus}?.dataset.status==='running'`, 'sidebar resumes after selection');
+    resumeReply();
+    await js('window.__streamingSend');
+    await wait(`${sidebarStatus}?.dataset.status==='done'`, 'sidebar completes after selection');
     stub.restore(); stub = null;
     // Coalesced content_reset plus a replacement must never leak the old tail.
     await js(`window.__codenodeSession.getState().beginTurn();window.__codenodeSession.getState().streamDelta({kind:'content',text:'共同开头'+ '旧'.repeat(200)});`);
@@ -95,6 +121,7 @@ app.whenReady().then(async () => {
     const reset = await read(); assert.equal(reset.raw, replacement); assert.ok(replacement.startsWith(reset.shown)); assert.ok(!reset.shown.includes('旧'));
     await js(`window.__codenodeSession.getState().stopTurn()`); await sleep(50);
     assert.equal((await read()).shown, replacement); assert.equal((await read()).status, 'stopped');
+    assert.equal(await js(`${sidebarStatus}?.dataset.status`), 'stopped');
     await sleep(150); assert.equal((await read()).shown, replacement);
     // Settings persist and disabling typing drains the current queue immediately.
     await js(`window.__codenodeUi.getState().openSettings('general')`);
@@ -108,7 +135,10 @@ app.whenReady().then(async () => {
     await js(`window.__codenodeUi.getState().closeSettings()`);
     // A failed request flushes received text; history switches show full records.
     await js(`window.__codenodeSession.getState().beginTurn();window.__codenodeSession.getState().streamDelta({kind:'content',text:'已收到的部分'.repeat(50)});window.__codenodeSession.getState().failTurn('测试中断')`); await sleep(80);
-    assert.equal((await read()).shown, (await read()).raw); assert.match((await read()).shown, /测试中断/);
+    const failure = await read();
+    assert.ok(failure.shown.startsWith('已收到的部分'.repeat(50)));
+    assert.match(failure.shown, /测试中断/);
+    assert.equal(await js(`${sidebarStatus}?.dataset.status`), 'failed');
     const paragraphs = Array.from({length:120}, (_,index) => '逐字滚动第 ' + index + ' 行').join('\n');
     await js(`window.__codenodeSession.getState().beginTurn();window.__codenodeSession.getState().streamDelta({kind:'content',text:${JSON.stringify(paragraphs)}})`);
     await wait(`(()=>{const body=document.querySelector('.ap-body');return body.scrollHeight>body.clientHeight+100;})()`, 'typing scroll growth');
@@ -122,6 +152,74 @@ app.whenReady().then(async () => {
     await js(`window.__codenodeSession.getState().newCanvas()`); await sleep(60);
     await js(`window.__codenodeSession.getState().switchSession(${JSON.stringify(sessionId)})`); await sleep(80);
     assert.equal((await read()).shown, (await read()).raw);
+    // Browse both another chat and another project while the same reply runs.
+    const otherRoot = path.join(root, 'other-project');
+    fs.mkdirSync(otherRoot);
+    const tabs = await js(`(async () => {
+      const ss = window.__codenodeSession.getState();
+      ss.newConversation(); ss.startOnCurrent('同工程对话'); ss.pushUser('同工程提问');
+      ss.beginTurn(); ss.finishTurn('同工程的原有回复', '', []); ss.syncActiveGraph();
+      const sibling = window.__codenodeSession.getState().activeId;
+      ss.switchSession(${JSON.stringify(sessionId)});
+      const graph = { nodes: [], edges: [] };
+      const origin = await window.codenode.saveProject(${JSON.stringify(root)}, { graph });
+      const other = await window.codenode.saveProject(${JSON.stringify(otherRoot)}, { graph, canvases: { sessions: [{
+        id: 'external-chat', label: '另一个工程的对话', status: 'active', root: graph,
+        messages: [{ role: 'user', content: '另一个工程的提问' }, { role: 'assistant', content: '另一个工程的原有回复', status: 'done' }],
+      }] } });
+      if (!origin.ok || !other.ok) throw Error(JSON.stringify({ origin, other }));
+      localStorage.setItem('codenode.recentProjects', JSON.stringify([
+        { root: ${JSON.stringify(root)}, file: origin.filePath, name: '原工程', openedAt: Date.now() },
+        { root: ${JSON.stringify(otherRoot)}, file: other.filePath, name: '另一个工程', openedAt: Date.now() },
+      ]));
+      window.__codenodeProject.getState().setProjectFile(origin.filePath);
+      return { sibling, originFile: origin.filePath };
+    })()`);
+    const row = id => `document.querySelector(${JSON.stringify(`.project-session-row[data-session-id="${id}"]`)})`;
+    const rowStatus = id => `${row(id)}?.querySelector('.project-session-status')?.dataset.status`;
+    const chooseSession = async id => {
+      await wait(`!!${row(id)}?.querySelector('button:not(:disabled)')`, 'selectable chat ' + id);
+      await js(`${row(id)}.querySelector('button').click()`);
+      await wait(`window.__codenodeSession.getState().activeId===${JSON.stringify(id)}`, 'active chat ' + id);
+    };
+    await wait(`${rowStatus('external-chat')}==='done'`, 'other project saved chat');
+    stub = installScriptedModel([
+      { toolCalls: [{ name: 'ask_user', args: { question: '后台会话需要你的选择', options: ['继续'] } }] },
+      { content: '原会话后台任务完成。' },
+    ], { loopLast: false });
+    const detachedFetch = global.fetch;
+    let releaseQuestion, releaseResult;
+    const questionGate = new Promise(resolve => { releaseQuestion = resolve; });
+    const resultGate = new Promise(resolve => { releaseResult = resolve; });
+    global.fetch = async (url, init) => {
+      const messages = JSON.parse(init?.body || '{}').messages || [];
+      await (messages.some(message => message.role === 'tool') ? resultGate : questionGate);
+      return detachedFetch(url, init);
+    };
+    await js(`void (window.__detachedSend=window.__codenodeChat.getState().send('测试切换到别的会话'))`);
+    await wait(`${rowStatus(sessionId)}==='running'`, 'original chat is working');
+    await chooseSession(tabs.sibling);
+    await wait(`${rowStatus(tabs.sibling)}===undefined && ${rowStatus(sessionId)}==='running'`, 'read sibling badge and keep original spinner');
+    assert.equal(await js('window.__codenodeSession.getState().messages.at(-1).content'), '同工程的原有回复');
+    await chooseSession('external-chat');
+    await wait(`${rowStatus('external-chat')}===undefined && ${rowStatus(sessionId)}==='running'`, 'cross-project chat and read badge');
+    releaseQuestion();
+    await wait(`${rowStatus(sessionId)}==='waiting' && !document.querySelector('.tool-dialog-opt')`, 'background choice only appears on the original row');
+    await chooseSession(sessionId);
+    await wait(`!!document.querySelector('.tool-dialog-opt') && ${rowStatus(sessionId)}===undefined`, 'reopen original chat and read pending choice');
+    await js(`document.querySelector('.tool-dialog-opt').click()`);
+    await chooseSession('external-chat');
+    releaseResult();
+    await js('window.__detachedSend');
+    await wait(`${rowStatus(sessionId)}==='done'`, 'background completion appears on the original row');
+    assert.equal(await js('window.__codenodeSession.getState().messages.at(-1).content'), '另一个工程的原有回复');
+    await wait(`window.codenode.loadProject(${JSON.stringify(tabs.originFile)}).then(result => result.data.canvases.sessions.find(session => session.id===${JSON.stringify(sessionId)})?.messages.at(-1)?.content==='原会话后台任务完成。')`, 'background result saved to the original project');
+    await chooseSession(sessionId);
+    await wait(`${rowStatus(sessionId)}===undefined && window.__codenodeSession.getState().messages.at(-1)?.content==='原会话后台任务完成。'`, 'completed badge cleared when opened');
+    await chooseSession('external-chat');
+    await chooseSession(sessionId);
+    assert.equal(await js(`${rowStatus(sessionId)}`), undefined);
+    stub.restore(); stub = null;
     // Native reduced-motion preference suppresses typing, even when enabled.
     win.webContents.debugger.attach('1.3');
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
@@ -130,7 +228,7 @@ app.whenReady().then(async () => {
     await js(`window.__codenodeSession.getState().beginTurn();window.__codenodeSession.getState().streamDelta({kind:'content',text:${JSON.stringify(reduced)}})`); await sleep(80);
     assert.equal((await read()).shown, reduced);
     win.webContents.debugger.detach();
-    console.log('STREAMING UI: PASS (real delayed SSE/IPC, progressive text, exact final/Unicode, themes/state, reset/stop/failure, persisted display settings, history and reduced motion)');
+    console.log('STREAMING UI: PASS (delayed SSE/IPC, background chat and project switching, read badges, themes, history and reduced motion)');
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 });

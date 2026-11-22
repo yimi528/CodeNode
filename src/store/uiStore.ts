@@ -64,7 +64,7 @@ interface UiState {
    * 需要人工复核的续跑计划（#21）：后端回传的 `plan` 不再被丢掉，在这里留存，
    * 由 AgentPanel 的确认条与 RunsPanel 一起消费 —— 「要求用户复核」必须同时告诉他复核什么。
    */
-  resumePlanNotice: { plan: ResumePlanLike; prompt?: string; at: number } | null;
+  resumePlanNotice: { plan: ResumePlanLike; prompt?: string; at: number; origin?: { sessionId: string | null; root: string | null } } | null;
 
   toggleSide: () => void;
   setSideOpen: (v: boolean) => void;
@@ -86,7 +86,7 @@ interface UiState {
   setEditorTarget: (target: UiState['editorTarget']) => void;
   setBooted: (v: boolean) => void;
   /** 记录「需要人工复核」的续跑计划（同时给 toast/aria-live 一句含工具名的人话提示） */
-  setResumePlanNotice: (plan: ResumePlanLike | null, prompt?: string) => void;
+  setResumePlanNotice: (plan: ResumePlanLike | null, prompt?: string, origin?: NonNullable<UiState['resumePlanNotice']>['origin'], quiet?: boolean) => void;
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -174,15 +174,15 @@ export const useUiStore = create<UiState>((set, get) => ({
   setDockTab: (tab) => tab === 'editor' ? set({sideTab:'project',sideOpen:true,dockOpen:false}) : tab === 'rag' || tab === 'extensions' ? set({ settingsOpen: true, settingsTab: tab }) : set({ dockOpen: true, dockTab: tab }),
   setEditorTarget: (editorTarget) => set({ editorTarget }),
   setBooted: (v) => set({ booted: v }),
-  setResumePlanNotice: (plan, prompt) => {
+  setResumePlanNotice: (plan, prompt, origin, quiet) => {
     if (!plan) {
       set({ resumePlanNotice: null });
       return;
     }
     // `plan` 原样留存 —— 界面要显示 reason / warning / unknownEffects / pendingSteps（#21）
-    const notice = { plan, prompt, at: Date.now() };
+    const notice = { plan, prompt, at: Date.now(), origin };
     set({ resumePlanNotice: notice });
     // 提示里必须带未知副作用的**工具名**，否则「需要人工复核」这句话没有任何可执行信息
-    useUiStore.getState().setToast(formatResumePlanNotice(notice.plan));
+    if (!quiet) useUiStore.getState().setToast(formatResumePlanNotice(notice.plan));
   },
 }));

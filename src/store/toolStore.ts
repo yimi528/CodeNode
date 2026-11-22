@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export type ConfirmRequest = {
   id: string;
+  requestId?: string;
   type: 'confirm';
   level: string;
   what: string;
@@ -10,6 +11,7 @@ export type ConfirmRequest = {
 
 export type AskRequest = {
   id: string;
+  requestId?: string;
   type: 'ask';
   question: string;
   options: string[];

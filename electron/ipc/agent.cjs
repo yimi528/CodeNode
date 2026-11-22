@@ -818,7 +818,7 @@ function register(ctx) {
         const externalId = runStore.normalizeRunId(requestId || 'codex-' + Date.now().toString(36));
         runId = externalId;
         const externalController = new AbortController();
-        const externalBridge = makeBridge(sender, externalController.signal, { projectRoot });
+        const externalBridge = makeBridge(sender, externalController.signal, { projectRoot, requestId });
         const externalModel = new GraphModel(document || undefined);
         const externalRegistry = toolkit.buildDefaultRegistryWithConfig({ ...cfg.tools, projectRoot, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg).enabled, difyEnabled: cfg.dify.enabled });
         const externalContext = new AgentToolContext({ projectRoot, model: externalModel, runId: externalId,
@@ -1583,7 +1583,7 @@ function register(ctx) {
       // 注意：`controller` 与 `activeRequests` 登记已在**意图识别段之前**创建/登记
       // （这样分类请求也能随「停止」取消，见那里的注释）；这里不再重复声明。
       if (registry && registry.listTools().length > 0) {
-        bridge = makeBridge(sender, controller.signal, { projectRoot });
+        bridge = makeBridge(sender, controller.signal, { projectRoot, requestId });
         model = new GraphModel(document || undefined);
         const scalarStore = cfg.scalars && cfg.scalars.enabled !== false && projectRoot ? getScalarStore(projectRoot) : null;
         const undoStack = [];

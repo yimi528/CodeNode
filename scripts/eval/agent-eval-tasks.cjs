@@ -384,18 +384,19 @@ const TASKS = [
   {
     id: 'budget-tool-call-cap',
     evaluation: { track: 'mechanism', family: 'budgets', split: 'development', objective: '工具调用硬上限', limitations: '脚本化输入，不证明模型任务能力', review: 'unreviewed' },
-    title: '预算上限（工具调用数）：达到 MAX_TOTAL_TOOL_CALLS 后收口',
+    title: '预算上限（工具调用数）：达到配置的 100 次后收口',
     category: 'budget',
     required: true,
     realModel: false,
     modelSkipReason: '判据硬绑「真实执行 90–100 次工具调用」（离线脚本化模型可以确定性刷到）；真机版要另立一套按预算缩放的判据，而这条本来就是**工作台硬上限**、脚本化已能确定性覆盖 → 不值当真机花 100 次调用。',
     prompt: '反复读取 data/small.txt 的不同分片，直到我说停。',
     allowTools: ['read_file'],
+    cfgOverride: { limits: { maxTotalToolCalls: 100 } },
     budget: { maxSteps: 14, timeoutMs: 120000, maxToolCalls: 100 },
     fixture: {
       'data/small.txt': Array.from({ length: 40 }, (_, i) => `row-${i + 1}`).join('\n') + '\n',
     },
-    // 每回合 10 个并行调用 → 第 11 回合触发 MAX_TOTAL_TOOL_CALLS=100 收口
+    // 每回合 10 个并行调用，累计达到配置的 100 次后收口。
     script: (() => {
       const rounds = [];
       for (let r = 0; r < 14; r++) {
@@ -436,6 +437,7 @@ const TASKS = [
     modelNote: '真机下模型可能提前收尾 → 只作记录，不作门禁；硬上限覆盖以离线脚本化模型为准。',
     prompt: '持续读取文件直到我说停。',
     allowTools: ['read_file'],
+    cfgOverride: { limits: { maxToolIterations: 12 } },
     budget: { maxSteps: 12, timeoutMs: 120000, maxToolCalls: 20 },
     fixture: { 'data/small.txt': 'row-1\nrow-2\nrow-3\n' },
     script: (() => {
@@ -453,7 +455,7 @@ const TASKS = [
       { type: 'steps-at-most', max: 12 },
       { type: 'delta-kind', kind: 'error', min: 1 },
     ],
-    notes: '声明为非必需任务：它验证的是工作台硬上限（源码常量 MAX_TOOL_ITERATIONS=12），失败不影响必需任务集判定。',
+    notes: '此任务以 12 轮的离线配置验证迭代上限和停止原因。',
   },
 ];
 

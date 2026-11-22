@@ -59,11 +59,12 @@ function makeBridge(sender, signal, options) {
       }
       const timer = setTimeout(() => {
         pending.delete(id);
+        try { sender.send('tools:request', { id, type: 'cancel' }); } catch {}
         resolve(null);
       }, REQUEST_TIMEOUT_MS);
       pending.set(id, { resolve, senderId, timer });
       try {
-        sender.send('tools:request', { id, type, ...payload });
+        sender.send('tools:request', { id, type, ...payload, requestId: bridgeOptions.requestId });
       } catch {
         clearTimeout(timer);
         pending.delete(id);

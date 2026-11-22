@@ -273,9 +273,25 @@ export function captureProjectSnapshot() {
   const project=useProjectStore.getState();
   const fingerprint=JSON.stringify(buildPayload());
   const payload=JSON.parse(fingerprint) as ReturnType<typeof buildPayload>;
-  return {root:project.root,file:project.projectFile,target:project.projectFile||project.root,key:project.root+'|'+project.projectFile,payload,fingerprint};
+  return {root:project.root,file:project.projectFile,target:project.projectFile||project.root,key:project.root+'|'+project.projectFile,activeId:useSessionStore.getState().activeId,payload,fingerprint};
 }
 export type ProjectSnapshot=ReturnType<typeof captureProjectSnapshot>;
+
+export function updateSnapshotSession(snapshot: ProjectSnapshot, session: SessionCanvas, messages: SessionMsg[]): ProjectSnapshot {
+  const active = snapshot.activeId === session.id;
+  const payload = {
+    ...snapshot.payload,
+    graph: active ? session.doc.root : snapshot.payload.graph,
+    canvases: {
+      ...snapshot.payload.canvases,
+      messages: active ? messages : snapshot.payload.canvases.messages,
+      sessions: snapshot.payload.canvases.sessions.map(saved => saved.id === session.id ? {
+        ...saved, messages, summary: session.summary || '', root: session.doc.root, nodeCount: session.nodeCount, status: session.status,
+      } : saved),
+    },
+  };
+  return { ...snapshot, payload, fingerprint: JSON.stringify(payload) };
+}
 const saveQueues=new Map<string,Promise<boolean>>();
 export function persistProjectSnapshot(snapshot:ProjectSnapshot,automatic=false):Promise<boolean> {
   const previous=saveQueues.get(snapshot.key)||Promise.resolve(true);
@@ -363,7 +379,7 @@ export async function restoreLastWorkspace(): Promise<void> {
 /**
  * 打开一条「最近打开」记录：优先加载 .cnode 文件，只有目录时按目录打开。
  */
-export async function openRecentProject(entry: { root: string; file?: string; name?: string }, sessionId?: string, restoring = false): Promise<void> {
+export async function openRecentProject(entry: { root: string; file?: string; name?: string }, sessionId?: string, restoring = false, parked?: () => ProjectSnapshot | undefined): Promise<void> {
   const api = window.codenode;
   if (!api) {
     useUiStore.getState().setToast('需要 Electron 环境');
@@ -372,9 +388,10 @@ export async function openRecentProject(entry: { root: string; file?: string; na
   const target = entry.file || entry.root;
   if (!target) return;
 
-  const requested = sessionId ? await api.loadProject(target) : undefined;
-  const savedSessions = requested?.data?.canvases?.sessions as SessionPayload[] | undefined;
-  if (sessionId && (!requested?.ok || !Array.isArray(savedSessions) ||
+  const inMemory = parked?.();
+  const requested = sessionId && !inMemory ? await api.loadProject(target) : undefined;
+  const savedSessions = (inMemory?.payload.canvases.sessions || requested?.data?.canvases?.sessions) as SessionPayload[] | undefined;
+  if (sessionId && ((!inMemory && !requested?.ok) || !Array.isArray(savedSessions) ||
     !savedSessions.some(session => session?.id === sessionId && !session.archived))) {
     if (!restoring) throw Error('找不到这条对话，请重新展开项目。');
     sessionId = undefined;
@@ -386,6 +403,13 @@ export async function openRecentProject(entry: { root: string; file?: string; na
   if (restoring && st.error) throw Error('无法恢复上次打开的工程：' + st.error);
   if (!st.root) {
     useUiStore.getState().setToast('打开失败：' + (st.error || '目录不可用'));
+    return;
+  }
+
+  const latest = parked?.();
+  if (latest) {
+    useProjectStore.getState().setProjectFile(latest.file);
+    applyLoaded(root, latest.payload, sessionId);
     return;
   }
 
