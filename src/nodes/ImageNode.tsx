@@ -1,3 +1,4 @@
+import { NodeIcon } from './NodeIcon';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useGraphStore } from '../store/graphStore';
@@ -133,7 +134,7 @@ function ImageNode({ id, data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Left} className="wf-handle" />
       <div className="wf-node-title">
-        <span className="wf-image-mark">图</span>
+        <NodeIcon type="image" />
         <span className="wf-node-label" title={d.imagePath || fileName}>
           {fileName}
         </span>

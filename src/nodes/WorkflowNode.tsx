@@ -1,3 +1,5 @@
+import { boundaryLabel } from './presentation';
+import { NodeIcon } from './NodeIcon';
 import { memo, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useGraphStore } from '../store/graphStore';
@@ -49,7 +51,7 @@ function WorkflowNode({ id, data, selected }: NodeProps) {
     <div className={`wf-node wf-node-${nodeType || 'default'} wf-status-${status} ${selected ? 'is-selected' : ''} ${isObject ? 'wf-object-node' : ''}`} style={nodeStyle}>
       {!isStart && <Handle type="target" position={Position.Left} className="wf-handle" />}
       <div className="wf-node-title">
-        <span className="wf-status-dot" style={{ background: STATUS_COLOR[status] }} title={status} />
+        <NodeIcon type={nodeType} />
         <span className="wf-node-label">{d.label}</span>
         {d.memberBadge ? <span className="wf-member-badge" title="所属范围">{d.memberBadge}</span> : null}
       </div>
@@ -67,7 +69,7 @@ function WorkflowNode({ id, data, selected }: NodeProps) {
       ) : null}
       <div className="wf-node-footer">
         <span className="wf-status-text" style={{ color: STATUS_COLOR[status] }}>
-          {STATUS_TEXT[status] || status}
+          {[STATUS_TEXT[status] || status, boundaryLabel(d.boundary)].filter(Boolean).join(' · ')}
         </span>
         {flowOut > 0 && <span className="wf-flow-badge" title={`输入 ${flowIn} 项 · 输出 ${flowOut} 项`}>↦{flowOut}</span>}
       </div>

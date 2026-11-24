@@ -69,7 +69,7 @@ app.whenReady().then(async()=>{try{
     await until(()=>js('!document.querySelector(".goal-task-graph")'),'Goal editor unmounted');
     await js(`(()=>{document.querySelector('[aria-label="关闭目标编辑"]').click();window.__codenodeUi.getState().updatePreferences({workbenchView:'conversation'});})()`);
     assert.equal(await js('!!document.querySelector(".goal-task-graph")'),false,'the Goal graph component is unmounted');
-    const view=()=>js(`JSON.stringify({session:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input').value,model:document.querySelector('.pp-model')?.textContent,side:window.__codenodeUi.getState().sideOpen,tab:window.__codenodeUi.getState().sideTab})`);
+    const view=()=>js(`JSON.stringify({session:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input').value,model:document.querySelector('.model-connection-trigger')?.title,side:window.__codenodeUi.getState().sideOpen,tab:window.__codenodeUi.getState().sideTab})`);
     const stateBefore=await view();
     await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme==='light'?'dark':'light')}})`);await sleep(100);
     assert.equal(await view(),stateBefore,'theme changes preserve session, messages, draft, model and sidebar while execution is waiting');

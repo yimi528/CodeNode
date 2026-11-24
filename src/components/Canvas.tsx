@@ -12,11 +12,21 @@ import {
 import { useGraphStore } from '../store/graphStore';
 import { useUiStore } from '../store/uiStore';
 import { useSessionStore } from '../store/sessionStore';
+import { readMaterial } from '../lib/materialFile';
+import { newNodeId } from '../lib/nodePlacement';
 import { nodeTypes } from '../nodes';
 import { edgeTypes } from '../edges';
 import { childIdsOf, computeChildren, parentIdOf, isDescendantOf } from '../lib/flow';
 import { useSpacePan } from '../hooks/useSpacePan';
-import WorkflowCanvasLayer from './WorkflowCanvasLayer';
+import { isWorkflowStage } from '../lib/workflowRunState';
+import WorkflowCanvasLayer, { CANVAS_GRID_SIZE } from './WorkflowCanvasLayer';
+import CanvasTooltip from './CanvasTooltip';
+import NodeActions from './NodeActions';
+import CanvasActions from './CanvasActions';
+import CanvasQuickActions from './CanvasQuickActions';
+import './canvasControls.css';
+
+const snapGrid: [number, number] = [CANVAS_GRID_SIZE, CANVAS_GRID_SIZE];
 
 function collectHiddenIds(nodes: Node[]): Set<string> {
   const hidden = new Set<string>();
@@ -127,6 +137,11 @@ function lineHitsEdge(dragPts: Pt[], edgePts: Pt[]): Pt | null {
 export default function Canvas() {
   const rasterSupported = typeof document !== 'undefined' && !!document.createElement('canvas').getContext('2d');
   const { spacePressed } = useSpacePan();
+  const [hand, setHand] = useState(false);
+  const [minimap, setMinimap] = useState(false);
+  const [links, setLinks] = useState(true);
+  const [snap, setSnap] = useState(false);
+  const panning = spacePressed || hand;
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
   const onNodesChange = useGraphStore((s) => s.onNodesChange);
@@ -202,7 +217,7 @@ export default function Canvas() {
   const visibleEdges = edges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target));
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const visibleNodeIds = new Set(visibleNodes.map((n) => n.id));
-  const renderableEdges = visibleEdges.filter((edge) => {
+  const renderableEdges = links ? visibleEdges.filter((edge) => {
     const endpointIds = visualEdgeNodeIds(edge, byId, visibleEdges);
     const source = byId.get(endpointIds.source);
     const target = byId.get(endpointIds.target);
@@ -213,7 +228,7 @@ export default function Canvas() {
       source?.type !== 'scope' &&
       target?.type !== 'scope'
     );
-  });
+  }) : [];
 
   const displayEdges = renderableEdges.map((e) => {
     const base = {
@@ -260,8 +275,27 @@ export default function Canvas() {
     <div
       ref={canvasRef}
       className={`canvas-wrap${rasterSupported ? ' canvas-raster-mode' : ''}`}
+      onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
+      onDrop={async event => {
+        const files = Array.from(event.dataTransfer.files);
+        if (!files.length || event.defaultPrevented) return;
+        event.preventDefault();
+        const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const sessions = useSessionStore.getState();
+        if (!sessions.current()) sessions.newCanvas();
+        const owner = useSessionStore.getState().activeId;
+        for (const [i, file] of files.entries()) {
+          try {
+            const material = await readMaterial(file);
+            if (owner !== useSessionStore.getState().activeId) return;
+            useGraphStore.getState().addNode({ id: newNodeId(material.type), type: material.type,
+              position: { x: position.x + 28 * i, y: position.y + 40 * i }, data: { status: 'pending', ...material.data } });
+          } catch (error) { useUiStore.getState().setToast(String(error)); }
+        }
+      }}
+      data-pan-tool={panning || undefined}
       onMouseDown={(e) => {
-        if (e.button === 2 && e.ctrlKey) {
+        if (!panning && links && e.button === 2 && e.ctrlKey && !(e.target instanceof Element && e.target.closest('.canvas-actions, .canvas-quick-actions, .canvas-minimap'))) {
           const rect = e.currentTarget.getBoundingClientRect();
           const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
           const screenPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -322,13 +356,18 @@ export default function Canvas() {
         onNodesChange={onNodesChange as (changes: NodeChange[]) => void}
         onEdgesChange={onEdgesChange as (changes: EdgeChange[]) => void}
         onConnect={onConnect as (conn: Connection) => void}
-        panOnDrag={spacePressed ? true : [1]}
+        panOnDrag={panning ? true : [1]}
         panOnScroll={spacePressed}
         panActivationKeyCode={null}
-        selectionOnDrag
+        selectionOnDrag={!panning}
+        selectionKeyCode={panning ? null : 'Shift'}
+        nodesDraggable={!panning}
+        nodesConnectable={!panning}
+        elementsSelectable={!panning}
+        snapToGrid={snap}
+        snapGrid={snapGrid}
         selectionMode={SelectionMode.Full}
         multiSelectionKeyCode="Control"
-        selectionKeyCode="Shift"
         deleteKeyCode={null}
         onMoveEnd={() => setViewport(getViewport())}
         onNodeDragStart={(e, node) => {
@@ -387,6 +426,7 @@ export default function Canvas() {
         }}
         onEdgeContextMenu={(e, edge: Edge) => {
           e.preventDefault();
+          if (panning) return;
           const st = useGraphStore.getState();
           if (e.ctrlKey && e.shiftKey) {
             // Ctrl+Shift+右键：在连线上创建纯几何中转点
@@ -402,7 +442,7 @@ export default function Canvas() {
         onEdgeMouseLeave={() => setHoveredEdgeId(null)}
         onEdgeClick={(e, edge: Edge) => {
           // Ctrl+Shift 点击连线：新增纯几何中转点
-          if (e.ctrlKey && e.shiftKey) {
+          if (!panning && e.ctrlKey && e.shiftKey) {
             const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
             const wp = ((edge.data as { waypoints?: { x: number; y: number }[] })?.waypoints) || [];
             useGraphStore.getState().updateEdgeData(edge.id, { waypoints: [...wp, { x: Math.round(pos.x), y: Math.round(pos.y) }] });
@@ -415,6 +455,7 @@ export default function Canvas() {
         // 而且它会与「写回 selected 标志」形成 [] → [x] → [] 的往复更新环。
         // 选中改由 onNodeClick / onPaneClick（事件期，非渲染期）同步。
         onNodeClick={(e, node: Node) => {
+          if (panning) return;
           const target=e.target as HTMLElement;
           // Inner editing has its own selection and key handler; Ctrl-click must not deselect its owner.
           if(target.closest?.('.vs-scope'))return;
@@ -433,11 +474,22 @@ export default function Canvas() {
             st.setSelectedIds(cur.includes(node.id) ? cur.filter((id) => id !== node.id) : [...cur, node.id]);
           } else {
             useGraphStore.getState().setSelectedIds([node.id]);
+            const ui = useUiStore.getState();
+            if (!ui.preferences.advancedMode && isWorkflowStage(node.type)) {
+              ui.setSideTab('node');
+            }
           }
+        }}
+        onNodeDoubleClick={(event, node) => {
+          if (panning) return;
+          const ui = useUiStore.getState();
+          if (!ui.preferences.advancedMode || event.altKey || event.shiftKey || event.ctrlKey || event.metaKey || !isWorkflowStage(node.type)) return;
+          useGraphStore.getState().setSelectedIds([node.id]);
+          ui.setSideTab('node');
         }}
         onPaneClick={() => {
           closeAddMenu();
-          useGraphStore.getState().setSelectedIds([]);
+          if (!panning) useGraphStore.getState().setSelectedIds([]);
         }}
         fitView
         // React Flow 默认 minZoom=0.5。现在画布左右被一级侧栏与对话面板占掉，稍宽的流程
@@ -451,9 +503,13 @@ export default function Canvas() {
         }}
       >
       </ReactFlow>
-      {!nodes.length && <div className="canvas-welcome">
-        <p>Shift + A 添加节点</p>
-      </div>}
+      <CanvasActions minimap={minimap} links={links} snap={snap}
+        toggleMinimap={() => setMinimap(active => !active)}
+        toggleLinks={() => setLinks(active => !active)}
+        toggleSnap={() => setSnap(active => !active)} />
+      <NodeActions canvas={canvasRef} />
+      <CanvasTooltip canvas={canvasRef} />
+      <CanvasQuickActions hand={hand} setHand={setHand} />
       {!rasterSupported && cutLine.length > 1 && <svg className="wf-cut-line" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1000 }}>
         <polyline points={cutLine.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#f43f5e" strokeWidth={2} strokeDasharray="6 4" />
       </svg>}

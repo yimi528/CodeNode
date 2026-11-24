@@ -130,7 +130,7 @@ const ROLE_DEFINITIONS = Object.freeze({
       'get_workbench_model', 'workbench_edit', 'write_analysis_md', 'save_project', 'ui_control',
     ]),
     work: Object.freeze([
-      '增删节点 / 连线、调整画布结构并保证 start→end 链路完整',
+      '增删节点 / 连线、调整画布结构并核对任务与资料的依赖',
       '把长方案写进节点 prompt（长文本下沉）',
       '保存工程与分析文档',
     ]),

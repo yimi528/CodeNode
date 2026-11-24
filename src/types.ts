@@ -3,6 +3,7 @@ import type { Node, Edge } from '@xyflow/react';
 export type NodeStatus = 'pending' | 'running' | 'done' | 'failed' | 'blocked';
 
 export type BaseData = {
+  boundary?: string;
   trellis?: { taskPath: string; snapshotId: string; phase: string; role: string };
   label: string;
   subtitle?: string;
@@ -140,6 +141,12 @@ export type AgentAttachment = {
 export type SessionMsg = {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /** Local history bookmark; never changes the model's execution history. */
+  pinned?: boolean;
+  run?: {
+    id: string; startedAt: number; finishedAt?: number; state?: string; reason?: string;
+    costUsd?: number | null; tokens?: number; rolledBackAt?: number;
+  };
   /** Renderer revision: a discarded/restarted stream must clear pending text. */
   contentRevision?: number;
   /** 脱敏前由主进程重新截断；用于人工反馈样本来源，不作为默认模型上下文。 */
@@ -154,6 +161,7 @@ export type SessionMsg = {
   status?: string;
   grounding?: RagGrounding;
   codeVerification?: CodeVerificationReport;
+  taskAcceptance?: TaskAcceptanceReport;
   /** 用户消息携带的附件（仅用户消息会有） */
   attachments?: AgentAttachment[];
   /**
@@ -178,6 +186,20 @@ export type EditingSettings = {
   autoVerify: boolean; blockOnFailure: boolean; lintCommand: string; testCommand: string;
   timeoutSeconds: number; maxVerificationRuns: number;
 };
+export type TaskAcceptanceReport = {
+  status: 'unconfigured' | 'not_run' | 'passed' | 'failed' | 'stale' | 'unknown' | 'cancelled';
+  verified: boolean;
+  contractHash: string | null;
+  reason?: string;
+  scope?: string;
+  checkedAt?: string;
+  fingerprint?: string | null;
+  checks: Array<{ id: string; kind?: string; status: string; phase?: string; path?: string;
+    bytes?: number | null; maxBytes?: number; toolOk?: boolean; exitCode?: number | null;
+    evidenceId?: string; output?: string; truncated?: boolean; reason?: string;
+    cwd?: string; executionMode?: string; execution?: Record<string, unknown> }>;
+};
+
 export type CodeVerificationReport = {
   status: string; verified: boolean; files: string[]; reason?: string; fingerprint?: string; checkedAt?: string; scope?: string;
   checks: { kind: string; status: string; path?: string; command?: string; exitCode?: number | null; reason?: string; output?: string; truncated?: boolean }[];
@@ -235,3 +257,10 @@ export type AgentAcpContent =
   | { type: 'image' | 'audio'; mimeType: string; data: string }
   | { type: 'resource'; resource: { uri: string; mimeType?: string; text?: string; blob?: string } }
   | { type: 'resource_link'; uri: string; name: string; title?: string };
+export type ApprovalMode = 'request' | 'assist' | 'full' | 'custom';
+export interface ComposerOverrides {
+  approvalMode?: ApprovalMode;
+  autoExecuteTools?: boolean;
+  externalAccess?: AgentBackendSettings['sandbox'];
+  externalModel?: string;
+}

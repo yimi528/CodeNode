@@ -19,6 +19,8 @@ const { AgentToolResult } = require('./result.cjs');
 // 跨 Agent 资源租约（多 Agent 信息完整性 P3 的「单一写者」）：资源键的推导也在那边
 const { resourceKeysFor } = require('./leases.cjs');
 // P0-3：动作级复核要不要问模型，先看这个动作的副作用类别（read/write/unknown）
+const actionRoutes = require('./actionRoutes.cjs');
+const { publishedDescriptor } = require('./toolSurfaces.cjs');
 const sideEffectsLib = require('../sideEffects.cjs');
 const descriptorLib = require('./descriptor.cjs');
 const { validateOutput } = require('./outputSchema.cjs');
@@ -133,6 +135,11 @@ function closeInputSchema(schema) {
 
 class AgentToolRegistry {
   constructor(options) {
+    this.mergeToolSurfaces = options?.mergeToolSurfaces === true;
+    this.registeredNames = new Set();
+    this.configAllowed = null;
+    this.configDenied = { tools: new Set(), actions: new Set() };
+    this.toolsEnabled = true;
     this.tools = new Map(); // name -> { spec, descriptor, executor }
     this.allowedTools = options && options.allowedTools ? new Set(options.allowedTools) : null;
     /**
@@ -205,9 +212,9 @@ class AgentToolRegistry {
       this.toolExposure = null;
       this._hiddenTools = null;
     } else {
-      const wanted = new Set(Array.isArray(names) ? names.map((n) => String(n)) : []);
-      this.toolExposure = [...this.tools.keys()].filter((n) => wanted.has(n));
-      this._hiddenTools = new Set([...this.tools.keys()].filter((n) => !wanted.has(n)));
+      const wanted = new Set(this.normalizeModelNames(names));
+      this._hiddenTools = new Set(this.registeredExecutorNames().filter(n => !wanted.has(n)));
+      this.toolExposure = this.exposedNames();
     }
     this._invalidateSchemas();
     return this.exposedNames();
@@ -222,14 +229,12 @@ class AgentToolRegistry {
   exposeNames(names) {
     const add = Array.isArray(names) ? names : [];
     if (!add.length) return this.exposedNames();
-    return this.setExposure([...this.exposedNames(), ...add]);
+    return this.setExposure([...this.exposedExecutorNames(), ...add]);
   }
 
   /** 当前有效暴露名单（注册顺序）；`null` 暴露 = 全部工具 */
   exposedNames() {
-    const hidden = this._hiddenTools;
-    if (!hidden) return [...this.tools.keys()];
-    return [...this.tools.keys()].filter((n) => !hidden.has(n));
+    return this.modelToolNames(this.exposedExecutorNames());
   }
 
   /**
@@ -239,8 +244,7 @@ class AgentToolRegistry {
    */
   isExposed(name) {
     const n = String(name || '');
-    if (!this.tools.has(n)) return false;
-    return !this._hiddenTools || !this._hiddenTools.has(n);
+    return this.exposedNames().includes(n);
   }
 
   /**
@@ -253,21 +257,20 @@ class AgentToolRegistry {
   schemaInfo(names) {
     // 缺省（当前暴露面）走**隐藏集口径**（fail-open：profile 管不到/晚注册的工具天然可见）；
     // 显式给名单时按名单**精确过滤**（成本探针与审计要能单独量某一个面，不受 fail-open 影响）。
-    const wanted = names == null ? null : (Array.isArray(names) ? names.map((n) => String(n)) : []);
-    const list = wanted == null
-      ? this.exposedNames()
-      : [...this.tools.keys()].filter((n) => wanted.includes(n));
-    const key = list.join('\u0000') + '#' + this.schemaRevision;
+    const wanted = names == null ? null : new Set(this.normalizeModelNames(names));
+    const executors = wanted == null ? this.exposedExecutorNames() : this.registeredExecutorNames().filter(n => wanted.has(n));
+    const list = this.modelToolNames(executors);
+    const key = executors.join('\u0000') + '#' + this.schemaRevision + JSON.stringify(this.allowedTools ? [...this.allowedTools] : null);
     const cached = this._schemaCache.get(key);
     if (cached) return cached;
     const tools = list.map((n) => {
-      const t = this.tools.get(n);
+      const spec = this.modelSpec(n, executors);
       return {
         type: 'function',
         function: {
-          name: t.spec.name,
-          description: t.spec.description,
-          parameters: t.spec.inputSchema == null ? { type: 'object', properties: {} } : t.spec.inputSchema,
+          name: spec.name,
+          description: spec.description,
+          parameters: spec.inputSchema == null ? { type: 'object', properties: {} } : spec.inputSchema,
         },
       };
     });
@@ -287,6 +290,7 @@ class AgentToolRegistry {
 
   /** 旧接口：按名单合成保守契约（未声明只读 = 可写） */
   register(name, description, inputSchema, executor) {
+    this.registeredNames.add(name);
     const spec = { name, description, inputSchema: closeInputSchema(inputSchema || null) };
     this.tools.set(name, {
       spec,
@@ -304,6 +308,7 @@ class AgentToolRegistry {
    */
   registerDescriptor(input, executor) {
     const descriptor = descriptorLib.normalizeDescriptor({ ...(input || {}), explicit: true });
+    this.registeredNames.add(descriptor.name);
     descriptor.inputSchema = closeInputSchema(descriptor.inputSchema);
     this.tools.set(descriptor.name, {
       spec: { name: descriptor.name, description: descriptor.description, inputSchema: descriptor.inputSchema },
@@ -319,8 +324,85 @@ class AgentToolRegistry {
     this._invalidateSchemas();
   }
 
+  permitsAction(name, id) {
+    return this.toolsEnabled && !actionRoutes.matches(this.configDenied, name, id) &&
+      (!this.configAllowed || actionRoutes.matches(this.configAllowed, name, id)) &&
+      (!this.allowedTools || this.allowedTools.has(name) ||
+        (!this.registeredNames.has(id) && this.allowedTools.has(id)));
+  }
+
+  permitsTool(name) {
+    return actionRoutes.selectors(name).some(id => this.permitsAction(name, id));
+  }
+
+  usesToolSurface(name) {
+    const actions = actionRoutes.families.get(name)?.actions;
+    // A project extension registered under this name owns its literal address.
+    return this.mergeToolSurfaces && actions &&
+      (!this.registeredNames.has(name) || [...actions.values()].some(route => route.executor === name));
+  }
+
+  modelToolName(name) {
+    const family = actionRoutes.familyOfExecutor(name);
+    return this.usesToolSurface(family) ? family : name;
+  }
+
+  normalizeModelNames(names) {
+    if (!Array.isArray(names)) return [];
+    const registered = this.registeredExecutorNames();
+    return names.map(String).flatMap(name => this.tools.has(name) ? [name] :
+      registered.filter(executor => this.modelToolName(executor) === name));
+  }
+
+  registeredExecutorNames() {
+    return [...this.tools.keys()].filter(name => this.permitsTool(name));
+  }
+
+  exposedExecutorNames() {
+    return this.registeredExecutorNames().filter(name => !this._hiddenTools?.has(name));
+  }
+
+  modelToolNames(executors = this.registeredExecutorNames()) {
+    return [...new Set(executors.map(name => this.modelToolName(name)))];
+  }
+
+  surfaceDescriptor(name, executors) {
+    const descriptors = new Map(executors.filter(executor => this.modelToolName(executor) === name)
+      .map(executor => [executor, this.tools.get(executor).descriptor]));
+    return publishedDescriptor(name, descriptors, (tool, id) => this.permitsAction(tool, id));
+  }
+
+  modelSpec(name, executors) {
+    if (this.usesToolSurface(name)) {
+      const { description, inputSchema } = this.surfaceDescriptor(name, executors);
+      return { name, description, inputSchema };
+    }
+    return actionRoutes.projectSpec(this.tools.get(name).spec, (tool, id) => this.permitsAction(tool, id));
+  }
+
+  exposedTools() {
+    const executors = this.exposedExecutorNames();
+    return this.modelToolNames(executors).map(name => this.modelSpec(name, executors));
+  }
+
+  resolveCall(name, args) {
+    try {
+      const call = actionRoutes.resolve(name, args, this.registeredNames.has(name));
+      if (!call.ids.every(id => this.permitsAction(call.name, id))) {
+        return { ...call, error: AgentToolResult.failure('PERMISSION_DENIED', '当前配置或角色无权使用工具动作：' + call.ids.join(', '), { tool: name }) };
+      }
+      if (!this.tools.has(call.name)) {
+        return { ...call, error: AgentToolResult.failure('FATAL_FAILURE', '未知工具：' + name, { tool: name }) };
+      }
+      return { ...call, error: null };
+    } catch (error) {
+      return { name, args, ids: [], error: AgentToolResult.error(String(error.message), { code: 'INVALID_TOOL_ARGUMENTS', tool: name }) };
+    }
+  }
+
   listTools() {
-    return [...this.tools.values()].map((t) => t.spec);
+    const executors = this.registeredExecutorNames();
+    return this.modelToolNames(executors).map(name => this.modelSpec(name, executors));
   }
 
   /** 单个工具的契约；未注册返回 null */
@@ -341,12 +423,15 @@ class AgentToolRegistry {
 
   descriptorOf(name) {
     const tool = this.tools.get(String(name || ''));
-    return tool ? tool.descriptor : null;
+    if (tool) return tool.descriptor;
+    return this.usesToolSurface(name) ? this.surfaceDescriptor(name, this.registeredExecutorNames()) : null;
   }
 
   /** 全部契约（顺序与 listTools 一致，便于 UI/审计对照） */
   listDescriptors() {
-    return [...this.tools.values()].map((t) => t.descriptor);
+    const executors = this.registeredExecutorNames();
+    return this.modelToolNames(executors).map(name => this.usesToolSurface(name)
+      ? this.surfaceDescriptor(name, executors) : this.descriptorOf(name));
   }
 
   /** UI / 审计用的精简契约视图 */
@@ -362,7 +447,8 @@ class AgentToolRegistry {
   }
 
   contains(name) {
-    return this.tools.has(name);
+    return (this.tools.has(name) && this.permitsTool(name)) ||
+      (!!this.usesToolSurface(name) && this.registeredExecutorNames().some(executor => this.modelToolName(executor) === name));
   }
 
   /**
@@ -397,14 +483,12 @@ class AgentToolRegistry {
   }
 
   async _executeChecked(name, arguments_, context, callInfo) {
-    if (this.allowedTools && !this.allowedTools.has(name)) {
-      // S5：显式失败码 —— 分类化提示才能告诉模型「这是权限问题，别原样重试」
-      return AgentToolResult.failure('PERMISSION_DENIED', '当前子代理角色无权使用工具：' + name, { tool: name });
-    }
+    const call = this.resolveCall(name, arguments_);
+    if (call.error) return call.error;
+    name = call.name;
     const tool = this.tools.get(name);
-    if (!tool) return AgentToolResult.failure('FATAL_FAILURE', '未知工具：' + name, { tool: name });
     const descriptor = tool.descriptor;
-    const args = arguments_ == null ? {} : arguments_;
+    const args = call.args;
     const destructiveCanvas = name === 'workbench_edit' && (Array.isArray(args.operations) && args.operations.length ? args.operations : [args])
       .some(operation => operation && ['delete', 'clear', 'reset'].includes(String(operation.action || '').toLowerCase()));
     const ordinaryAuto = this.confirmWrites === false && descriptor.requiresConfirmation !== 'HIGH' && require('../agentSettings.cjs').canAutoExecute(name, args);
@@ -470,7 +554,8 @@ class AgentToolRegistry {
           const preview = approvalForPreview.preview({
             capability: descriptor.requiredCapability || null,
             tool: name,
-            level: descriptor.requiresConfirmation || 'WRITE',
+            actionIds: call.ids,
+            level: destructiveCanvas ? 'HIGH' : descriptor.requiresConfirmation || 'WRITE',
           });
           ruleAllows = preview.ruleAllows === true;
         }
@@ -539,8 +624,10 @@ class AgentToolRegistry {
     // capability / scope / toolCallId，且有有效期、单次有效 —— 批准一次只够一次调用。
     // 旧 register() 合成的契约（requiresConfirmation=false）不触发，保持既有行为。
     // 意图复核收紧（A2）优先：即使这个工具本身不需要确认，被判定为「授权不明 / 高风险」时也要问用户
+    const explicitRequest = context?.forceApproval === true &&
+      (descriptor.mutatesWorkspace === true || descriptor.requiredCapability === 'network.request');
     const requiresApproval =
-      destructiveCanvas || descriptor.requiresConfirmation === 'HIGH' || intentTighten === true ||
+      explicitRequest || destructiveCanvas || descriptor.requiresConfirmation === 'HIGH' || intentTighten === true ||
       (!!descriptor.requiresConfirmation &&
         (this.confirmWrites === true ? true : ordinaryAuto ? false : descriptor.confirmationEnforced === true));
     if (requiresApproval) {
@@ -569,6 +656,8 @@ class AgentToolRegistry {
         capability: descriptor.requiredCapability || null,
         level: destructiveCanvas ? 'HIGH' : descriptor.requiresConfirmation,
         what: name,
+        actionIds: call.ids,
+        forcePrompt: intentTighten,
         detail: (descriptor.description || '') + intentNote,
         scope,
         toolCallId,

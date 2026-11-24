@@ -5,10 +5,10 @@ import { useProjectStore } from '../../store/projectStore';
 import { useUiStore } from '../../store/uiStore';
 import CodeVerificationCard from './CodeVerificationCard';
 
-export default function FileChangesCard({ message }: { message: SessionMsg }) {
+export default function FileChangesCard({ message, showVerification = true }: { message: SessionMsg; showVerification?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const openFile = useProjectStore(state => state.openFile);
-  const files = summarizeFileChanges(message.tools || [], [...(message.editedFiles || []), ...(message.codeVerification?.files || [])]);
+  const files = summarizeFileChanges(message.tools || [], [...(message.editedFiles || []), ...(message.backendChanges?.files.map(file => file.path) || [])]);
   if (!files.length) return null;
   const open = async (path: string) => { await openFile(path); if (useProjectStore.getState().selected?.relPath === path) useUiStore.getState().openDock('editor'); };
   return <section className="file-changes-card" aria-label="文件变更">
@@ -16,7 +16,7 @@ export default function FileChangesCard({ message }: { message: SessionMsg }) {
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>
       <strong>已编辑 {files.length} 个文件</strong><span>查看变更 {expanded ? '▾' : '▸'}</span>
     </button>
-    {message.codeVerification && <CodeVerificationCard report={message.codeVerification} compact />}
+    {showVerification && message.codeVerification && <CodeVerificationCard report={message.codeVerification} compact />}
     {expanded && message.backendChanges && <div className="file-changes-list"><small>独立文件指纹核对：{message.backendChanges.complete ? '已完成声明范围内的扫描' : '扫描不完整，请补充检查'} · {message.backendChanges.scope}</small>{message.backendChanges.files.map(file => <div key={file.path}><small>{file.path} · {file.kind} · {file.before?.slice(0, 12) || '不存在'} → {file.after?.slice(0, 12) || '不存在'}</small></div>)}</div>}
     {expanded && message.backendDiff && <details><summary>Codex 提供的补丁</summary><pre>{message.backendDiff}</pre></details>}
     {expanded && <div className="file-changes-list">{files.map(file => <div className="file-changes-item" key={file.path}>

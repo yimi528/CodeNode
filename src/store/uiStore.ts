@@ -2,16 +2,22 @@ import { create } from 'zustand';
 import { loadUiPreferences, normalizeUiPreferences, UI_PREFERENCES_KEY, type UiPreferences } from '../lib/uiPreferences';
 import { formatResumePlanNotice, type ResumePlanLike } from '../lib/resumePlan';
 import { DEFAULT_THEME, normalizeTheme, THEME_STORAGE_KEY, type Theme } from '../lib/theme';
+import type { TutorialTopic } from '../lib/tutorialContent';
 
 /** 左侧侧栏的标签页：Agent 对话 / 节点属性 / 项目树 / 文件预览 */
-export type SideTab = 'agent' | 'node' | 'project' | 'preview';
+export type SideTab = 'agent' | 'node' | 'project';
 
 /** 侧栏宽度边界：下限保证输入控件可用，上限避免把画布挤没 */
 export const SIDE_WIDTH_MIN = 260;
 export const SIDE_WIDTH_MAX = 520;
 export const SIDE_WIDTH_DEFAULT = 360;
 function savedTheme(): Theme {
-  try { return normalizeTheme(localStorage.getItem(THEME_STORAGE_KEY)); } catch { return DEFAULT_THEME; }
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    const theme = normalizeTheme(saved);
+    if (saved && theme !== saved) localStorage.setItem(THEME_STORAGE_KEY, theme);
+    return theme;
+  } catch { return DEFAULT_THEME; }
 }
 
 const initialPreferences = loadUiPreferences();
@@ -19,15 +25,26 @@ const initialPreferences = loadUiPreferences();
 interface UiState {
   appPage: 'workbench' | 'plugins' | 'tasks';
   setAppPage: (page: UiState['appPage']) => void;
-  pluginView: 'plugins' | 'skills';
+  stageReplayOpen: boolean;
+  stageReplayTarget: { scope: string; nodeId: string } | null;
+  openStageReplay: (target?: UiState['stageReplayTarget']) => void;
+  closeStageReplay: () => void;
+  pluginView: 'plugins' | 'skills' | 'project';
   setPluginView: (view: UiState['pluginView']) => void;
   preferences: UiPreferences;
   updatePreferences: (patch: Partial<UiPreferences>) => void;
   resetPreferences: () => void;
   settingsOpen: boolean;
-  settingsTab: 'general' | 'layout' | 'agents' | 'execution' | 'trellis' | 'costs' | 'rag' | 'editing' | 'extensions' | 'archived';
+  settingsTab: 'general' | 'layout' | 'project' | 'agents' | 'execution' | 'costs' | 'rag' | 'web' | 'editing' | 'extensions' | 'archived' | 'help';
   openSettings: (tab?: UiState['settingsTab']) => void;
   closeSettings: () => void;
+  tutorialOpen: boolean;
+  tutorialTopic: TutorialTopic;
+  tutorialHintDismissed: boolean;
+  openTutorial: (topic?: TutorialTopic) => void;
+  closeTutorial: () => void;
+  setTutorialTopic: (topic: TutorialTopic) => void;
+  setTutorialHintDismissed: (dismissed: boolean) => void;
   conversationOpen: boolean;
   conversationAutoHidden: boolean;
   conversationWidth: number;
@@ -45,7 +62,7 @@ interface UiState {
   sideOpen: boolean;
   sideTab: SideTab;
   sideWidth: number;
-  addMenu: { x: number; y: number } | null;
+  addMenu: { x: number; y: number; anchor?: 'above' } | null;
   lastMouse: { x: number; y: number };
   toast: string | null;
   viewport: { x: number; y: number; zoom: number };
@@ -69,7 +86,7 @@ interface UiState {
   setSideTab: (tab: SideTab) => void;
   setSideWidth: (w: number) => void;
   setHoverScopeId: (id: string | null) => void;
-  openAddMenu: (x: number, y: number) => void;
+  openAddMenu: (x: number, y: number, anchor?: 'above') => void;
   closeAddMenu: () => void;
   setLastMouse: (x: number, y: number) => void;
   setToast: (msg: string | null) => void;
@@ -91,9 +108,19 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useUiStore = create<UiState>((set, get) => ({
   appPage: 'workbench',
-  setAppPage: appPage => set({appPage,settingsOpen:false}),
+  setAppPage: appPage => set({appPage,settingsOpen:false,tutorialOpen:false}),
+  stageReplayOpen: false,
+  stageReplayTarget: null,
+  openStageReplay: target => set(state => ({
+    appPage: 'workbench',
+    stageReplayOpen: true,
+    stageReplayTarget: target ?? state.stageReplayTarget,
+    sideTab: state.sideTab === 'project' ? 'agent' : state.sideTab,
+    addMenu: null,
+  })),
+  closeStageReplay: () => set({ stageReplayOpen: false }),
   pluginView: 'plugins',
-  setPluginView: pluginView => set({pluginView,appPage:'plugins',settingsOpen:false}),
+  setPluginView: pluginView => set({pluginView,appPage:'plugins',settingsOpen:false,tutorialOpen:false}),
   preferences: initialPreferences,
   updatePreferences: patch => {
     const preferences = normalizeUiPreferences({ ...get().preferences, ...patch });
@@ -104,8 +131,19 @@ export const useUiStore = create<UiState>((set, get) => ({
   resetPreferences: () => get().updatePreferences(normalizeUiPreferences(null)),
   settingsOpen: false,
   settingsTab: 'general',
-  openSettings: (tab = 'general') => tab === 'extensions' ? set({appPage:'plugins',pluginView:'plugins',settingsOpen:false}) : set({ settingsOpen: true, settingsTab: tab }),
+  openSettings: (tab = 'general') => tab === 'extensions' ? set({appPage:'plugins',pluginView:'project',settingsOpen:false}) : set({ settingsOpen: true, settingsTab: tab }),
   closeSettings: () => set({ settingsOpen: false }),
+  tutorialOpen: false,
+  tutorialTopic: 'create',
+  tutorialHintDismissed: (() => { try { return localStorage.getItem('codenode.tutorialHintDismissed') === 'true'; } catch { return false; } })(),
+  openTutorial: (topic = 'create') => set({ tutorialOpen: true, tutorialTopic: topic, settingsOpen: false, addMenu: null }),
+  closeTutorial: () => set({ tutorialOpen: false }),
+  setTutorialTopic: tutorialTopic => set({ tutorialTopic }),
+  setTutorialHintDismissed: tutorialHintDismissed => {
+    try { localStorage.setItem('codenode.tutorialHintDismissed', String(tutorialHintDismissed)); }
+    catch { get().setToast('引导显示已更新，但无法保存到本机'); }
+    set({ tutorialHintDismissed });
+  },
   conversationOpen: initialPreferences.conversationOpen,
   conversationAutoHidden: false,
   conversationWidth: (() => { try { const value = Number(localStorage.getItem('codenode.conversationWidth')); return value >= 320 && value <= 640 ? value : 400; } catch { return 400; } })(),
@@ -143,9 +181,9 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   toggleSide: () => set((s) => ({ sideOpen: !s.sideOpen })),
   setSideOpen: (v) => set({ sideOpen: v }),
-  setSideTab: (tab) => set({ sideOpen: true, sideTab: tab }),
+  setSideTab: (tab) => set({ sideOpen: true, sideTab: tab, stageReplayOpen: false }),
   setSideWidth: (w) => set({ sideWidth: Math.min(SIDE_WIDTH_MAX, Math.max(SIDE_WIDTH_MIN, Math.round(w))) }),  setHoverScopeId: (id) => set({ hoverScopeId: id }),
-  openAddMenu: (x, y) => set({ addMenu: { x, y } }),
+  openAddMenu: (x, y, anchor) => set({ addMenu: { x, y, anchor } }),
   closeAddMenu: () => set({ addMenu: null }),
   setLastMouse: (x, y) => set({ lastMouse: { x, y } }),
   setToast: (msg) => {
@@ -162,9 +200,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   openModelManager: (target) => set({ modelManagerOpen: true, modelConnectionTarget: target || null }),
   closeModelManager: () => set({ modelManagerOpen: false, modelConnectionTarget: null }),
-  openDock: (tab) => tab === 'editor' ? set({sideTab:'project',sideOpen:true,dockOpen:false}) : tab === 'extensions' ? set({appPage:'plugins',pluginView:'plugins',settingsOpen:false}) : tab === 'rag' ? set({ settingsOpen: true, settingsTab: tab }) : set({ dockOpen: true, ...(tab ? { dockTab: tab } : {}) }),
+  openDock: (tab) => tab === 'editor' ? set({sideTab:'project',sideOpen:true,dockOpen:false,stageReplayOpen:false}) : tab === 'extensions' ? set({appPage:'plugins',pluginView:'project',settingsOpen:false}) : tab === 'rag' ? set({ settingsOpen: true, settingsTab: tab }) : set({ dockOpen: true, ...(tab ? { dockTab: tab } : {}) }),
   closeDock: () => set({ dockOpen: false }),
-  setDockTab: (tab) => tab === 'editor' ? set({sideTab:'project',sideOpen:true,dockOpen:false}) : tab === 'rag' || tab === 'extensions' ? set({ settingsOpen: true, settingsTab: tab }) : set({ dockOpen: true, dockTab: tab }),
+  setDockTab: (tab) => tab === 'editor' ? set({sideTab:'project',sideOpen:true,dockOpen:false,stageReplayOpen:false}) : tab === 'rag' || tab === 'extensions' ? set({ settingsOpen: true, settingsTab: tab }) : set({ dockOpen: true, dockTab: tab }),
   setEditorTarget: (editorTarget) => set({ editorTarget }),
   setBooted: (v) => set({ booted: v }),
   setResumePlanNotice: (plan, prompt) => {

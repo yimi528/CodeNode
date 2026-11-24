@@ -1,5 +1,5 @@
 'use strict';
-const ARGV_GUIDE = '执行普通程序优先使用 execute_shell 的 argv 形式，例如 {"mode":"argv","program":"node","args":["test/public.cjs"]}；不要在普通 command 参数中混用管道或分号。复合命令需遵循工具声明的显式 shell 契约。';
+const ARGV_GUIDE = '执行普通程序优先用 terminal 的 argv 形式，例如 {"kind":"run","mode":"argv","program":"node","args":["test/public.cjs"]}；复合命令需使用工具声明的显式 shell 模式。';
 const TOOLS = ['read_file','write_file','edit_file','find_files','search_files','list_directory','execute_shell','poll_job'];
 function apply(cfg, env = process.env) {
   if (env.CODENODE_BENCHMARK_CONTAINER !== '1') throw Error('benchmark profile requires an evaluator-owned container');

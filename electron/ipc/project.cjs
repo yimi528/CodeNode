@@ -56,7 +56,8 @@ async function walkProject(root) {
     let items;
     try {
       items = await fsp.readdir(absDir, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (!relDir) throw error;
       continue;
     }
     for (const it of items) {
@@ -82,7 +83,8 @@ async function walkProject(root) {
 function safeProjectPath(root, relPath) {
   const resolvedRoot = path.resolve(root);
   const full = path.resolve(root, relPath);
-  return full === resolvedRoot || full.startsWith(resolvedRoot + path.sep) ? full : null;
+  const relative = path.relative(resolvedRoot, full);
+  return relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative) ? null : full;
 }
 
 function splitProjectCommand(command) {
@@ -245,6 +247,7 @@ function register(ctx) {
           workspace: dec.workspace,
           manifest: dec.manifest,
           canvases: dec.canvases || null,
+          checkpoints: dec.checkpoints || null,
           warnings: dec.warnings,
         },
       };
@@ -262,7 +265,7 @@ function register(ctx) {
     return { ok: true, root: filePaths[0] };
   });
 
-  ipcMain.handle('project:create', async () => {
+  ipcMain.handle('project:create', async (_event, currentFile) => {
     const { canceled, filePath } = await dialog.showSaveDialog(/** @type {any} */ (getFocusedWindow()), {
       title: '新建 CodeNode 项目',
       defaultPath: '未命名项目.cnode',
@@ -270,6 +273,13 @@ function register(ctx) {
     });
     if (canceled || !filePath) return { ok: false };
     try {
+      if (typeof currentFile === 'string' && currentFile && fs.existsSync(filePath) && fs.existsSync(currentFile)) {
+        const selected = fs.statSync(filePath);
+        const current = fs.statSync(currentFile);
+        if (selected.dev === current.dev && selected.ino === current.ino) {
+          return { ok: false, error: '请选择其他位置，当前工程正在打开。' };
+        }
+      }
       const buf = cnode.encodeCnode({
         graph: { revision: 1, nodes: [], edges: [] },
         workspace: { viewport: { x: 0, y: 0, zoom: 1 } },
@@ -312,9 +322,8 @@ function register(ctx) {
 
   ipcMain.handle('project:read', async (_event, root, relPath, options) => {
     try {
-      const resolvedRoot = path.resolve(root);
-      const full = path.resolve(root, relPath);
-      if (full !== resolvedRoot && !full.startsWith(resolvedRoot + path.sep)) {
+      const full = safeProjectPath(root, relPath);
+      if (!full) {
         return { ok: false, error: '路径越界' };
       }
       // 二进制读取（图像节点用）：只接受图片扩展名，转成 data URL 给渲染进程显示
@@ -419,13 +428,16 @@ function register(ctx) {
         });
         return result.response === 1 && host.ownerAlive();
       },
-      run: async (node, fullGraph, state) => {
+      run: async (node, fullGraph, state, attemptId) => {
         const data = node.data || {};
         const trellisBinding = data.trellis ? require('../trellis/canvas.cjs').resolveBinding(root, data.trellis) : null;
         const prompt = String(data.prompt || '').trim();
         const explicit = prompt.match(/^(?:run:|\$)\s*(.+)$/i);
         const command = explicit && explicit[1] ? explicit[1].trim() : /^(npm|npx|node|git|python3?|py|java|javac|mvn|mvnw|gradle|go|cargo|cmd|powershell|pwsh)\b/i.test(prompt) ? prompt : '';
-        if (['start', 'end', 'file', 'object', 'scope'].includes(node.type || '')) return { ok: true, output: '结构节点已通过' };
+        if (node.type === 'file' || node.type === 'image' || node.type === 'object') {
+          return { ok: true, output: '资料：' + String(data.filePath || data.imagePath || data.objectName || data.label || node.id) };
+        }
+        if (['start', 'end', 'scope', 'vector'].includes(node.type || '')) return { ok: true, output: '结构节点已通过' };
         if (command && !trellisBinding) {
           const response = await runProjectCommand(root, command, 180);
           return { ok: !!response.ok, output: '运行：' + command + '\n' + String(response.output || response.error || '') };
@@ -433,13 +445,32 @@ function register(ctx) {
         if (!prompt || !['task', 'stage', 'tool'].includes(node.type || '')) return { ok: false, output: '无执行内容：该节点需要填写 Prompt 或命令' };
         if (typeof runWorkflowChat !== 'function') return { ok: false, output: 'Agent 工作流执行器未接线' };
         const input = state.selectedInputs[node.id] || [];
+        const upstreamIds = new Set(input.map(item => item.id));
+        const attachments = [];
+        for (const source of fullGraph.nodes) {
+          if (!upstreamIds.has(source.id)) continue;
+          const name = String(source.data.label || source.id);
+          if (source.type === 'file' && typeof source.data.content === 'string' && source.data.content.length) {
+            const mime = 'text/plain';
+            attachments.push({ name, mime, dataUrl: 'data:' + mime + ';base64,' + Buffer.from(source.data.content).toString('base64') });
+          } else if (source.type === 'image' && typeof source.data.dataUrl === 'string') {
+            const mime = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(source.data.dataUrl)?.[1];
+            if (mime) attachments.push({ name, mime, dataUrl: source.data.dataUrl });
+          }
+        }
+        const normalized = require('../attachments.cjs').normalizeAttachments(attachments);
+        if (!normalized.ok) return { ok: false, output: '无法读取上游资料：' + normalized.error };
+        const modeInstruction = trellisBinding ? '' : node.type === 'stage'
+          ? '请在当前 Agent 支持时委派子代理执行，并汇总其结果。'
+          : node.type === 'tool' ? '请根据指令实际调用对应的工具并返回结果。' : '';
         const response = await runWorkflowChat(event, {
           projectRoot: root,
           trellisBinding,
+          attachments: normalized.attachments,
           sessionId: workflowId,
-          prompt: `你正在执行一个画布工作流阶段。请先理解任务，再实际使用可用工具完成它。\n\n阶段：${String(data.label || node.id)}\n任务要求：\n${prompt}\n\n上游阶段交付：\n${input.map((item) => item.id + ': ' + item.output).join('\n') || '无'}\n\n交付名称：${String(data.outputName || data.label || node.id)}\n完成条件：${String(data.completionCondition || '返回执行结果与验证信息')}\n允许或预期写入范围：${String(data.writeScope || '未声明')}\n\n任务完成后，请用通俗中文给用户一份简洁但具体的阶段总结，严格按以下标题组织：\n要解决的问题：说明本阶段要处理什么。\n做了什么：列出实际完成的关键动作和产物。\n解决方法：说明采用了什么思路、工具或步骤，为什么这样处理。\n结果与验证：说明得到什么结果、做过哪些检查及其结果；没有验证就明确写“未验证”。\n遗留事项：说明尚未解决或需要用户确认的内容；没有则写“无”。\n总结只写本轮实际执行和工具结果能够支持的事实；不要把计划说成已完成，不要猜测，也不要堆砌未解释的技术术语。`,
+          prompt: `你正在执行一个画布工作流阶段。请先理解任务，再实际使用可用工具完成它。${modeInstruction}\n\n阶段：${String(data.label || node.id)}\n任务要求：\n${prompt}\n\n上游阶段交付：\n${input.map((item) => item.id + ': ' + item.output).join('\n') || '无'}\n\n交付名称：${String(data.outputName || data.label || node.id)}\n完成条件：${String(data.completionCondition || '返回执行结果与验证信息')}\n允许或预期写入范围：${String(data.writeScope || '未声明')}\n\n任务完成后，请用通俗中文给用户一份简洁但具体的阶段总结，严格按以下标题组织：\n要解决的问题：说明本阶段要处理什么。\n做了什么：列出实际完成的关键动作和产物。\n解决方法：说明采用了什么思路、工具或步骤，为什么这样处理。\n结果与验证：说明得到什么结果、做过哪些检查及其结果；没有验证就明确写“未验证”。\n遗留事项：说明尚未解决或需要用户确认的内容；没有则写“无”。\n总结只写本轮实际执行和工具结果能够支持的事实；不要把计划说成已完成，不要猜测，也不要堆砌未解释的技术术语。`,
           history: [], canvasSummary: JSON.stringify(fullGraph.nodes.map((item) => ({ id: item.id, type: item.type, label: item.data?.label, status: item.data?.status }))),
-          nodeId: node.id, requestId: 'workflow-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+          nodeId: node.id, requestId: 'workflow-' + attemptId,
           document: { root: fullGraph },
         });
         return { ok: !!response.ok && response.aborted !== true, output: 'Agent：' + String(response.reply || response.error || '无返回内容') };
@@ -543,6 +574,7 @@ function register(ctx) {
           workspace: dec.workspace,
           manifest: dec.manifest,
           canvases: dec.canvases || null,
+          checkpoints: dec.checkpoints || null,
           warnings: dec.warnings,
         },
       };

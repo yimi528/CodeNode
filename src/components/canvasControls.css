@@ -1,0 +1,210 @@
+.canvas-wrap {
+  container-type: size;
+}
+
+.canvas-actions {
+  position: absolute;
+  inset: 12px 12px auto;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap-reverse;
+  justify-content: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.canvas-view-strip,
+.canvas-quick-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--menu-surface);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 12%);
+  color: var(--glass-text);
+  pointer-events: auto;
+}
+
+.canvas-view-strip {
+  position: relative;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+
+.canvas-actions .canvas-history-controls,
+.canvas-actions .canvas-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-right: 4px;
+  margin-right: 2px;
+  border-right: 1px solid var(--glass-border);
+}
+
+.canvas-zoom-controls span {
+  min-width: 39px;
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-actions .canvas-icon-button,
+.canvas-quick-actions .canvas-icon-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--glass-text);
+  cursor: pointer;
+}
+
+.canvas-quick-actions .canvas-icon-button {
+  width: 32px;
+  height: 32px;
+}
+
+.canvas-icon-button svg {
+  flex: none;
+}
+
+.canvas-actions .canvas-icon-button:hover:not(:disabled),
+.canvas-quick-actions .canvas-icon-button:hover:not(:disabled) {
+  background: var(--menu-hover);
+}
+
+.canvas-actions .canvas-icon-button[aria-pressed='true'],
+.canvas-quick-actions .canvas-icon-button[aria-pressed='true'] {
+  background: var(--glass-selected);
+  color: var(--glass-accent);
+}
+
+.canvas-actions .canvas-icon-button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.canvas-actions .canvas-action-danger:not(:disabled) {
+  color: var(--menu-danger);
+}
+
+.canvas-icon-button:focus-visible {
+  outline: 2px solid var(--glass-accent);
+  outline-offset: -2px;
+}
+
+.canvas-quick-actions {
+  position: absolute;
+  inset: auto auto 14px 50%;
+  z-index: 4;
+  transform: translateX(-50%);
+  border-radius: 12px;
+}
+
+.canvas-quick-actions .canvas-add-trigger,
+.canvas-quick-actions .canvas-add-trigger:hover:not(:disabled) {
+  margin-right: 4px;
+  background: var(--glass-accent);
+  color: var(--menu-surface);
+}
+
+.canvas-quick-actions .canvas-add-trigger:hover {
+  filter: brightness(1.12);
+}
+
+.glass-theme.ui-clean .canvas-command-menu {
+  position: static;
+}
+
+.glass-theme.ui-clean .canvas-command-menu > .toolbar-menu {
+  right: 0;
+  left: auto;
+  max-width: calc(100cqw - 24px);
+  max-height: min(420px, calc(100cqh - 104px));
+}
+
+.canvas-command-menu .toolbar-menu button svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.canvas-command-menu .toolbar-menu button span {
+  flex: 1;
+}
+
+.canvas-wrap .react-flow__minimap.canvas-minimap {
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: -1;
+  pointer-events: auto;
+  margin: 0;
+  width: 142px;
+  height: 94px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--menu-surface);
+  --xy-minimap-mask-background-color: var(--glass-selected);
+  --xy-minimap-mask-stroke-color: var(--glass-accent);
+  --xy-minimap-mask-stroke-width: 1;
+}
+
+.canvas-wrap .canvas-minimap svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-wrap[data-pan-tool] .react-flow__pane,
+.canvas-wrap[data-pan-tool] .react-flow__node {
+  cursor: grab;
+}
+
+.canvas-wrap[data-pan-tool] .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+.canvas-tool-tip {
+  position: fixed;
+  z-index: 1200;
+  pointer-events: none;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--menu-surface, Canvas);
+  color: var(--glass-text, CanvasText);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 16%);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.canvas-tool-tip strong { display: block; margin-bottom: 2px; }
+
+.canvas-actions .canvas-command-menu > summary,
+.canvas-actions .canvas-run-trigger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  width: auto; height: 28px; padding: 0 7px; font: inherit; font-size: 12px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--glass-text); cursor: pointer;
+}
+.canvas-actions .canvas-run-trigger:hover { background: var(--menu-hover); }
+.node-actions { position: absolute; z-index: 4; }
+.node-actions button {
+  display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
+  border: 0; border-radius: 5px; background: var(--menu-surface); color: var(--glass-text);
+}
+.node-actions > button { width: 28px; height: 26px; border: 1px solid var(--glass-border); }
+.node-action-list {
+  position: absolute; width: 140px; padding: 4px; background: var(--menu-surface);
+  border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); border-radius: 8px;
+}
+.node-action-list button { width: 100%; padding: 7px; justify-content: flex-start; }
+.node-action-list button[data-action='delete'] { color: var(--menu-danger); }
+.node-actions button:is(:hover,:focus-visible) { background: var(--menu-hover); }

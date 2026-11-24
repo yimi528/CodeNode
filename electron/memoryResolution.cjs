@@ -176,12 +176,17 @@ function upsertMemory(entries, input, options = {}) {
       String((prior && prior.id) || '') !== String(options.expectedRecordId || '')) {
     return { ok: false, code: 'MEMORY_CONFLICT', error: '确认期间该记忆已变化，请重新读取并确认' };
   }
-  const duplicate = slot
-    ? prior && String(prior.content).trim() === content &&
-      String(prior.value || '').trim() === value &&
-      String(prior.validFrom || '') === validFrom &&
-      JSON.stringify(Array.isArray(prior.tags) ? prior.tags : []) === JSON.stringify(tags)
-    : list.find((entry) => entry && !memorySlot(entry) && memoryStatus(entry) === 'active' && String(entry.content).trim() === content);
+  let duplicate;
+  if (slot) {
+    if (prior && String(prior.content).trim() === content &&
+        String(prior.value || '').trim() === value &&
+        String(prior.validFrom || '') === validFrom &&
+        JSON.stringify(Array.isArray(prior.tags) ? prior.tags : []) === JSON.stringify(tags)) {
+      duplicate = prior;
+    }
+  } else {
+    duplicate = list.find((entry) => entry && !memorySlot(entry) && memoryStatus(entry) === 'active' && String(entry.content).trim() === content);
+  }
   if (duplicate) {
     return { ok: true, duplicate: true, record: duplicate, entries: list, replacedIds: [] };
   }

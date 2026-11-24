@@ -7,7 +7,7 @@ export function workflowGraph(nodes: Node[], edges: Edge[]) {
   return {
     schemaVersion: 1,
     nodes: nodes.map((node) => {
-      const { status: _status, ...data } = (node.data || {}) as Record<string, unknown>;
+      const { status: _status, boundary: _boundary, ...data } = (node.data || {}) as Record<string, unknown>;
       return { id: node.id, type: node.type || 'task', data };
     }),
     edges: edges.map((edge) => ({ source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle || '', targetHandle: edge.targetHandle || '', data: edge.data || null })),
@@ -24,8 +24,12 @@ export function workflowReviewIds(state: WorkflowStateDto, nodeId: string): stri
   return [...new Set([...state.pending.map((item) => item.id), ...(state.reviews[nodeId] ? [state.reviews[nodeId]] : [])])];
 }
 
+export function isWorkflowStage(type?: string): boolean {
+  return type !== undefined && workflowUiConfig.executionNodeTypes.includes(type);
+}
+
 export function workflowReadiness(nodes:Node[],edges:Edge[]) {
-  const tasks=nodes.filter(node=>workflowUiConfig.executionNodeTypes.includes(node.type||'task'));
+  const tasks=nodes.filter(node=>isWorkflowStage(node.type||'task'));
   const missing=tasks.find(node=>!workflowUiConfig.instructionFields.some(field=>String(node.data?.[field]||'').trim()));
   const ids=new Set(nodes.map(node=>node.id));
   const badEdge=edges.some(edge=>!ids.has(edge.source)||!ids.has(edge.target));

@@ -20,8 +20,8 @@ const ROLE_SKILLS = Object.freeze({
   'explore-structure-first': Object.freeze({
     title: '先结构后细节',
     instructions: Object.freeze([
-      '先用 project_info / scan_project 拿到项目结构与形态，再按需 read_file / search_files。',
-      'TS/JS 符号定位可用 find_definition / find_references / get_callers / get_callees；工具未暴露时先 discover_tools 取回。同名时用 path/line 限定，再 read_file 核实。静态候选和未命中都不能作为实际调用关系或不存在的证明。',
+      '先用 project_overview 的 info 或 scan 了解项目形态，再按需使用 file_ops(kind=read) 或 search_files。',
+      'TS/JS 符号定位可用 symbol_nav（definition / references / callers / callees）；工具未暴露时先 discover_tools 取回。同名时用 path/line 限定，再用 file_ops(kind=read) 核实。静态候选和未命中都不能作为实际调用关系或不存在的证明。',
       '不要凭文件名或经验描述未读到的代码；没读到就写「未确认」。',
     ]),
   }),
@@ -44,8 +44,8 @@ const ROLE_SKILLS = Object.freeze({
   'recon-before-write': Object.freeze({
     title: '先读后写',
     instructions: Object.freeze([
-      '动手写之前必须先 read_file / search_files 看清现有实现与调用点。',
-      '优先用 edit_file 做精确替换，只有新建文件或整体重写才用 write_file。',
+      '动手写之前必须先用 file_ops(kind=read) 或 search_files 看清现有实现与调用点。',
+      '优先用 file_ops(kind=edit) 做精确替换，新建文件或整体重写用 kind=write。',
     ]),
   }),
   'minimal-change': Object.freeze({
@@ -58,8 +58,8 @@ const ROLE_SKILLS = Object.freeze({
   'followup-verify': Object.freeze({
     title: '改完自检',
     instructions: Object.freeze([
-      '每次写入后重读改动位置（read_file），确认落地内容与预期一致。',
-      '能用命令验证就验证（execute_shell 跑测试/构建），把原始输出摘要写进「测试结果」。',
+      '每次写入后用 file_ops(kind=read) 核对改动位置。',
+      '能用命令验证就验证（terminal(kind=run) 跑测试或构建），把原始输出摘要写进「测试结果」。',
     ]),
   }),
 
@@ -82,7 +82,7 @@ const ROLE_SKILLS = Object.freeze({
     title: '不改被测对象',
     instructions: Object.freeze([
       '不得修改项目源码、测试或配置来「让结果变绿」；发现问题只报告。',
-      'execute_shell 仅用于跑测试/检查/构建，不得写盘或改配置。',
+      'terminal(kind=run) 仅用于跑测试、检查或构建，不得写盘或改配置。',
     ]),
   }),
 
@@ -120,7 +120,7 @@ const ROLE_SKILLS = Object.freeze({
   'chain-completeness': Object.freeze({
     title: '链路完整',
     instructions: Object.freeze([
-      '改动后确认存在 start→end 的完整链路；缺入口/出口要补上或明确说明。',
+      '按真实依赖连接任务与资料，核对连线两端。',
       '删除节点前先看它是否被连线引用，避免留下断链。',
     ]),
   }),

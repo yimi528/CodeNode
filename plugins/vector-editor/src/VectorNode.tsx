@@ -7,10 +7,11 @@
  * - 预设配件：组件库一键生成图形，或用左侧工具在纸面上自由绘制。
  * - 保持 Blender 风格：标题栏拖拽、左 target / 右 source 端口、选中描边与主色。
  */
+import { NodeIcon } from '../../../src/nodes/NodeIcon';
 import { memo, useCallback, useEffect, useMemo, useRef, type CSSProperties, type MutableRefObject } from 'react';
 import { Handle, NodeResizer, Position, useStore, useReactFlow, type NodeProps } from '@xyflow/react';
-import { useGraphStore } from '../store/graphStore';
-import type { VectorData } from '../types';
+import { useGraphStore, useUiStore } from './host';
+import type { VectorData } from '../../../src/types';
 import {
   clearActiveVectorNode,
   getVectorStore,
@@ -87,6 +88,7 @@ function useNodeHotkeys(store: VectorStore, active: boolean, nodeId: string) {
       return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
     };
     const onKey = (e: KeyboardEvent) => {
+      if (useUiStore.getState().tutorialOpen) return;
       if ((e.target as HTMLElement | null)?.closest?.('.vs-foreign-edit')) return;
       // 焦点不在本节点内：不处理也不拦截，交给工作台快捷键
       if (!ownsFocus()) return;
@@ -161,7 +163,7 @@ function useNodeHotkeys(store: VectorStore, active: boolean, nodeId: string) {
           s.deleteSelected();
           // A second Delete must not unexpectedly delete the entire owner after its last shape.
           graph.setSelectedIds(graph.selectedIds.filter(id=>id!==nodeId));
-        }else if(!s.editingId&&!s.penPts&&graph.selectedIds.includes(nodeId)){
+        }else if(useUiStore.getState().preferences.advancedMode&&!s.editingId&&!s.penPts&&graph.selectedIds.includes(nodeId)){
           graph.deleteNodes([nodeId]);
         }
         return;
@@ -207,6 +209,7 @@ function useNodeHotkeys(store: VectorStore, active: boolean, nodeId: string) {
 /* ==================== 节点 ==================== */
 
 function VectorNode({ id, data, selected }: NodeProps) {
+  const advanced = useUiStore(s => s.preferences.advancedMode);
   const d = data as unknown as VectorNodeData;
   const store = useMemo(() => getVectorStore(id), [id]);
   const updateNodeData = useGraphStore((s) => s.updateNodeData);
@@ -242,10 +245,10 @@ function VectorNode({ id, data, selected }: NodeProps) {
       data-testid="vector-node"
     >
       <NodeResizer
-        isVisible={selected}
+        isVisible={!!selected && advanced}
         minWidth={560}
         minHeight={380}
-        color={accent}
+        color={`var(--node-glass-selection, ${accent})`}
         keepAspectRatio={false}
         onResizeStart={() => {
           const st = useGraphStore.getState();
@@ -269,8 +272,10 @@ function VectorNode({ id, data, selected }: NodeProps) {
         <VectorNodeHead id={id} data={d} store={store} accent={accent} onPersist={updateNodeData} fitRef={fitRef} onExpand={() => {
           const canvas = document.querySelector('.canvas-wrap')?.getBoundingClientRect();
           if (!canvas) return;
-          useGraphStore.getState().commit();
-          updateNodeData(id, { width: Math.max(560, Math.round(canvas.width - 80)), height: Math.max(380, Math.round(canvas.height - 80)) });
+          if (advanced) {
+            useGraphStore.getState().commit();
+            updateNodeData(id, { width: Math.max(560, Math.round(canvas.width - 80)), height: Math.max(380, Math.round(canvas.height - 80)) });
+          }
           requestAnimationFrame(() => requestAnimationFrame(() => { void fitView({ nodes: [{ id }], padding: 0.06, maxZoom: 1, duration: 150 }); }));
         }} />
         <VectorNodeBody nodeId={id} store={store} stageScale={stageScale} data={d} fitRef={fitRef} />
@@ -339,7 +344,7 @@ function VectorNodeHead({
       </div>
 
       <span className="wf-status-dot" style={{ background: STATUS_COLOR[status] }} title={status} />
-      <span className="wf-node-label wf-vector-label">{data.label || '画布节点'}</span>
+      <NodeIcon type="vector" /><span className="wf-node-label wf-vector-label">{data.label || '画布节点'}</span>
       {mode === 'logic' ? <i className="wf-vector-badge">集合逻辑</i> : null}
 
       <div className="wf-vector-actions nodrag">

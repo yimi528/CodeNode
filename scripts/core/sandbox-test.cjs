@@ -279,6 +279,23 @@ function pidAlive(pid) {
     const noFilesystem = sandbox.externalAgentPolicy({ ...base, capabilities: { ...fakeCaps, backend: 'windows-job', isolation: { ...fakeCaps.isolation, filesystem: false } } },
       { projectRoot, access: 'workspace-write' });
     check('strict 外部 Agent 在无文件系统隔离时 fail-closed', noFilesystem.unsatisfied.includes('filesystem') && noFilesystem.ok === false);
+
+    const bestEffortBase = sandbox.resolvePolicy({ mode: 'best-effort' }, {
+      projectRoot,
+      capabilities: { ...fakeCaps, backend: 'none', isolation: { ...fakeCaps.isolation, lifetime: false, filesystem: false } },
+    });
+    const bestEffortExternal = sandbox.externalAgentPolicy(bestEffortBase, { projectRoot, access: 'workspace-write' });
+    check('best-effort 外部 Agent 在无文件系统隔离时也 fail-closed',
+      bestEffortExternal.unsatisfied.includes('filesystem') && bestEffortExternal.ok === false);
+    let externalThrew = null;
+    try {
+      sandbox.guardedInteractiveSpawn(
+        { file: process.execPath, args: ['-e', '0'], cwd: projectRoot, env: safeEnvironment() },
+        { policy: bestEffortExternal, context },
+      );
+    } catch (error) { externalThrew = error; }
+    check('外部 Agent 不得从 best-effort 降级为未隔离进程',
+      externalThrew?.code === 'SANDBOX_UNAVAILABLE', externalThrew ? String(externalThrew.message) : 'no throw');
   }
 
   // ---- 6. 无后端时 best-effort 降级并留审计 ----

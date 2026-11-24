@@ -25,6 +25,42 @@ async function main(){
     assert.equal(available.available,true,backend+' ACP initialization');assert.equal(available.protocol,'ACP');
   }
   const acpSettings={...config.defaults,backend:'opencode',executable:'fixture',args:['acp'],sandbox:'workspace-write'};
+  const createBackend = require('../../electron/backends/index.cjs').createBackend;
+  assert.deepEqual(createBackend('hermes').driver.command().args, ['acp']);
+  const envFixture = env => ({ StdioRpc: class extends FixtureRpc {
+    constructor(command, args, cwd, options) { super(command,args,cwd,{...options, env}); }
+  } });
+  const authPort = createBackend('opencode', acpSettings, envFixture({FIXTURE_SESSION_AUTH:'1'}));
+  try {
+    const status = await authPort.health({projectRoot:root, checkSession:true});
+    assert.equal(status.available,false);
+    assert.equal(status.sessionReady,false);
+    assert.match(status.error,/需要登录/);
+  } finally { await authPort.close(); }
+  const old = {projectRoot:root, prompt:'Reply to this turn', backendSession:{sessionId:'old-session'},
+    history:[{role:'assistant',content:'Prior exchange'}], confirm:async()=>false};
+  const replay = await new AcpBackend(acpSettings,envFixture({FIXTURE_REPLAY:'1'})).run(old);
+  assert.equal(replay.state,'COMPLETED');
+  assert.equal(replay.content,'ACP_RUNTIME_OK');
+  const legacy = envFixture({FIXTURE_NO_RESTORE:'1'});
+  const continued = await new AcpBackend(acpSettings,legacy).run({...old,allowHistoryContinuation:true});
+  assert.equal(continued.state,'COMPLETED');
+  assert.equal(continued.backendSession.sessionId,'acp-fixture');
+  const cannotResume = await new AcpBackend(acpSettings,legacy).run(old);
+  assert.equal(cannotResume.stopReason,'backend_start_failed');
+
+  if(process.platform!=='win32'){
+    const profileRoot = path.join(root,'profiles');
+    const source = path.join(root,'codex-user');
+    fs.mkdirSync(profileRoot);fs.mkdirSync(source);
+    const nativeConfig=path.join(source,'config.toml');fs.writeFileSync(nativeConfig,'# fixture');
+    const policy={externalAgent:true,agentRuntimeDir:profileRoot,writeRoots:[profileRoot]};
+    const runtime = require('../../electron/backends/runtimeProfile.cjs').runtimeEnvironment;
+    const result=runtime({backend:'codex',executable:'codex-acp'},policy,{CODEX_HOME:source});
+    assert.equal(fs.realpathSync(path.join(result.CODEX_HOME,'config.toml')),fs.realpathSync(nativeConfig));
+    assert.deepEqual(runtime({backend:'codex',executable:'custom-wrapper'},policy,{CODEX_HOME:source}),{});
+    assert.deepEqual(runtime({backend:'codex',executable:'codex-acp'},{...policy,writeRoots:[root]},{CODEX_HOME:source}),{});
+  }
   const deltas=[];const acp=new AcpBackend(acpSettings,{StdioRpc:FixtureRpc});
   const acpResult=await acp.run({projectRoot:root,prompt:'Say hello',onDelta:d=>deltas.push(d),confirm:async()=>true});
   assert.equal(acpResult.state,'COMPLETED');assert.match(acpResult.content,/ACP_RUNTIME_OK/);

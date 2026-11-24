@@ -46,7 +46,7 @@ function check(label, condition, detail) {
 const jsonOut = (patch) =>
   JSON.stringify(Object.assign({ intent: 'code', risk: 'low', authorization: 'high', confidence: 0.9, reason: '用户明确要求改代码' }, patch));
 
-const CANVAS_DETAIL = 'a) 一条完整的节点链路必须有开始节点(start)和结束节点(end)';
+const CANVAS_DETAIL = 'a) 按真实依赖连接任务与资料';
 const PROMPT_ARGS = ['', '', '', '', ''];
 
 /** 只变 canvas 相关入参，其余位置参数固定（与 prompt-layers-test 同款） */

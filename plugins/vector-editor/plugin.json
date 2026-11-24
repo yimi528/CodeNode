@@ -1,0 +1,11 @@
+{
+  "id": "codenode.vector-editor",
+  "name": "矢量编辑器",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "src/vector-editor.ts",
+  "defaultEnabled": false,
+  "nodeTypes": [
+    "vector"
+  ]
+}

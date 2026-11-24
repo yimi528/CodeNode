@@ -1,0 +1,13 @@
+.delivery-card { display:grid; gap:10px; margin-top:14px; padding:12px; border:1px solid var(--glass-border); border-radius:10px; background:var(--glass-control); color:var(--glass-text); font-size:12px; overflow-wrap:anywhere; }
+.delivery-card header,.delivery-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.delivery-card header { justify-content:space-between; }
+.delivery-card header span,.delivery-card p { color:var(--glass-muted); }
+.delivery-card p { margin:0; line-height:1.5; }
+.delivery-card :is(button,textarea) { font:inherit; color:var(--glass-text); background:var(--glass-sheet); border:1px solid var(--glass-border); border-radius:7px; padding:7px 9px; }
+.delivery-card button { cursor:pointer; }
+.delivery-card button:disabled { opacity:.5; cursor:not-allowed; }
+.delivery-card :is(button,textarea):focus-visible { outline:2px solid var(--glass-accent); outline-offset:2px; }
+.delivery-card form,.delivery-card label,.delivery-rollback { display:grid; gap:8px; }
+.delivery-card textarea { width:100%; box-sizing:border-box; resize:vertical; }
+.delivery-card pre { max-height:280px; overflow:auto; white-space:pre-wrap; }
+.delivery-rollback ul { padding-left:20px; margin:0; max-height:200px; overflow:auto; }

@@ -22,6 +22,7 @@ const os = require('os');
 // 核心套件：全部为纯 Node 断言，不弹窗、不联网、可在三平台无显示环境运行。
 const CORE = [
   'test:development-log',
+  'test:console-log',
   'test:trellis',
   'test:trellis-write-canvas',
   'test:trellis-cli',
@@ -73,6 +74,10 @@ const CORE = [
   'test:scalar',
   'test:agent-automatic',
   'test:file-changes-summary',
+  'test:task-delivery',
+  'test:benchmark-profile',
+  'test:conversation-branches',
+  'test:backend-diagnostics',
   'test:vector-choice',
   'test:vector-store',
   'test:agent-reliability',
@@ -186,6 +191,8 @@ const CORE = [
   // 工具审批/边界加固（#8 确认判据归一化 / #10 确认信息面 / #19 shell 输出上限 / #20 前台进程树：
   // 纯 Node 断言 + 静态门禁，离线确定性）
   'test:shell-hardening',
+  'test:terminal-contract',
+  'test:task-acceptance', 'test:desktop-acceptance',
   'test:confirm-payload',
   // 存储加固（#14 日志与恢复只读首尾 / #16 memory 损坏拒绝写 / #15 脱敏 / #13 合并落盘）：
   // 纯 Node 断言；scale 会写约 45MB 临时文件、2-4s
@@ -202,6 +209,10 @@ const CORE = [
   'test:compression-roi',
   'test:output-budget',
   'test:compaction-tail',
+  'test:tool-result-archive',
+  'test:budget-wrapup',
+  'test:no-progress',
+  'test:working-state',
   // 阶段 B / P0-3：确定性路由 + 分类门 + 动作级准入（含「跳过 guardian 不影响静态层」的安全不变量）
   'test:intent-cost-gate',
   // P1-2：记忆/画布/技能/RAG 的统一 token 预算（含「不触发时逐字节不变」的负向判据）
@@ -257,16 +268,19 @@ const CORE = [
 ];
 
 // 需要显示环境（Electron 窗口）或本机浏览器（无头 Edge + CDP）的用例：CI 分开跑。
-const DISPLAY = ['test:message-actions-ui', 'test:simple-settings-ui', 'test:trellis-connect-ui', 'test:trellis-ui', 'test:goal-canvas-ui', 'test:agent-compact-ui', 'test:smoke', 'test:rag-ui', 'test:coding-slim-ui', 'test:coding-settings-ui', 'test:ime-shortcut-ui', 'test:compaction-ui', 'test:plan-ui', 'test:intent-ui', 'test:vector', 'test:event-replay-ui', 'test:project-ui', 'test:workflow-recovery-ui', 'test:model-connection-ui', 'test:workbench-clean-ui', 'test:rag-review-ui'];
+const DISPLAY = ['test:branches-ui', 'test:delivery-ui', 'test:message-actions-ui', 'test:simple-settings-ui', 'test:trellis-connect-ui', 'test:trellis-ui', 'test:goal-canvas-ui', 'test:agent-compact-ui', 'test:smoke', 'test:rag-ui', 'test:coding-slim-ui', 'test:coding-settings-ui', 'test:ime-shortcut-ui', 'test:compaction-ui', 'test:plan-ui', 'test:intent-ui', 'test:vector', 'test:event-replay-ui', 'test:project-ui', 'test:workflow-recovery-ui', 'test:model-connection-ui', 'test:workbench-clean-ui', 'test:rag-review-ui'];
 
 DISPLAY.push('test:node-inspector-ui');
 DISPLAY.push('test:workflow-canvas-ui');
+DISPLAY.push('test:optional-vector-ui');
+DISPLAY.push('test:desktop-acceptance-ui');
 DISPLAY.push('test:token-cost-ui');
 DISPLAY.push('test:scheduling-ui');
 DISPLAY.push('test:backend-ui');
 DISPLAY.push('test:goal-scheduler-ui');
 DISPLAY.push('test:agent-switch-ui');
 DISPLAY.push('test:workspace-ux-ui');
+DISPLAY.push('test:tutorial-ui');
 DISPLAY.push('test:streaming-ui');
 DISPLAY.push('test:bright-theme-ui');
 const argv = process.argv.slice(2);

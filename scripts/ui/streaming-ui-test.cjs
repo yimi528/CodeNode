@@ -72,7 +72,7 @@ app.whenReady().then(async () => {
     const first = await read();
     assert.ok(first.shown.length > 0 && first.shown.length < first.raw.length);
     assert.ok(reply.startsWith(first.shown));
-    const stable = () => js(`JSON.stringify({id:window.__codenodeSession.getState().activeId,draft:document.querySelector('.pp-input').value,model:document.querySelector('.pp-model').textContent,side:window.__codenodeUi.getState().sideTab,navigation:window.__codenodeUi.getState().navigationOpen})`);
+    const stable = () => js(`JSON.stringify({id:window.__codenodeSession.getState().activeId,draft:document.querySelector('.pp-input').value,model:document.querySelector('.model-connection-trigger').title,side:window.__codenodeUi.getState().sideTab,navigation:window.__codenodeUi.getState().navigationOpen})`);
     const before = await stable();
     fs.mkdirSync(path.join(__dirname, "../../out"), { recursive: true });
     for (const theme of ['light', 'dark']) {

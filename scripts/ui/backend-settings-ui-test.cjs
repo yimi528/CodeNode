@@ -110,7 +110,7 @@ app.whenReady().then(async () => {
     assert.equal(evalWait.provider,'agent-eval');assert.equal(evalWait.commitSha,'1234567890abcdef1234567890abcdef12345678');assert.equal(evalWait.datasetVersion,'agent-eval-v1');assert.equal(evalWait.mode,'offline');
     await waitFor(()=>js(`document.querySelector('.goal-control-panel')?.innerText.includes('查询 Agent Eval 报告')`),'Agent Eval check button');
     await win.webContents.executeJavaScript(`const textarea=document.querySelector('.pp-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(textarea,'后端测试草稿');textarea.dispatchEvent(new Event('input',{bubbles:true}))`);
-    const view = () => js(`JSON.stringify({id:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input').value,model:document.querySelector('.pp-model')?.textContent,sideOpen:window.__codenodeUi.getState().sideOpen,sideTab:window.__codenodeUi.getState().sideTab})`);
+    const view = () => js(`JSON.stringify({id:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input').value,model:document.querySelector('.model-connection-trigger')?.title,sideOpen:window.__codenodeUi.getState().sideOpen,sideTab:window.__codenodeUi.getState().sideTab})`);
     const goalSurface = () => js(`JSON.stringify([...document.querySelectorAll('.goal-control-panel input,.goal-control-panel textarea,.goal-control-panel select,.goal-control-panel button,.goal-control-panel summary')].map(n=>[n.tagName,n.getAttribute('aria-label'),n.textContent,n.value||'',n.checked||false,n.disabled]))`);
     await sleep(80); const before = await view(); const goalBefore = await goalSurface(); const themeBefore = await js('window.__codenodeUi.getState().theme');
     for (const theme of ['light', 'dark']) {
@@ -118,7 +118,7 @@ app.whenReady().then(async () => {
       assert.equal(await goalSurface(), goalBefore); assert.equal(await view(), before);
     }
     await js(`window.__codenodeUi.setState({theme:${JSON.stringify(themeBefore)}})`);
-    await js(`document.querySelector('[aria-label="切换到对话"]').click()`);
+    await js(`document.querySelector('[aria-label="切换到画布"]').click()`);
     await js(`window.__codenodeUi.getState().openSettings('agents')`);
     await waitFor(() => js('!!document.querySelector("[aria-label=执行后端]")'), 'backend controls');
     await waitFor(() => js('!document.querySelector("[aria-label=执行后端]").disabled'), 'loaded settings');
@@ -163,6 +163,7 @@ app.whenReady().then(async () => {
     await select('执行后端','builtin');
     await js(`[...document.querySelectorAll('[data-testid=backend-settings] button')].find(b=>b.textContent==='检测当前配置').click()`);
     await waitFor(()=>js(`document.querySelector('[data-testid=backend-settings] [role=status]')?.textContent.includes('CodeNode 可用')`),'check unsaved current configuration');
+    assert.equal(await js("document.querySelector('[aria-label=\"后端诊断\"]')?.innerText.includes('内置执行器')"),true,'structured backend diagnosis accompanies the connection result');
     assert.equal(JSON.parse(fs.readFileSync(path.join(projectRoot,'.codenode/backend.json'),'utf8')).backend,'codex','checking unsaved builtin leaves saved Codex unchanged');
     await js(`window.__codenodeUi.getState().closeSettings()`);
     await js(`window.__codenodeUi.getState().openSettings('agents')`);
@@ -176,7 +177,7 @@ app.whenReady().then(async () => {
     assert.equal(fs.existsSync(path.join(projectRoot, '.codenode/backend.json')), false);
     await js(`window.codenode.backendSave(${JSON.stringify(projectRoot)},'machine',{backend:'builtin',executable:'',args:[],sandbox:'read-only'})`);
     await js(`window.dispatchEvent(new Event('codenode-backend-settings'))`);
-    await waitFor(()=>js(`!document.querySelector('.pp-model')?.textContent.includes('hermes')`),'restored built-in model display');
+    await waitFor(()=>js(`!document.querySelector('.model-connection-trigger')?.title.includes('hermes')`),'restored built-in model display');
     await js(`window.__codenodeUi.getState().closeSettings()`); assert.equal(await view(), before);
     const acpSettings = { backend:'opencode', executable:process.execPath, args:[path.resolve(__dirname,'../fixtures/acp-full.cjs')], sandbox:'workspace-write', model:'m2', acp:{authMethodId:'login',modeId:'code',configValues:{fast:true},codeNodeTools:true} };
     assert.equal((await js(`window.codenode.backendSave(${JSON.stringify(projectRoot)},'project',${JSON.stringify(acpSettings)})`)).ok,true);

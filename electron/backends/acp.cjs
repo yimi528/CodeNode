@@ -45,12 +45,28 @@ class AcpBackend {
       return this.rpc.request(method, { ...params, mcpServers: [] });
     }
   }
+  async newSession(cwd, servers = []) {
+    const mcp = this.settings.backend === 'openclaw' && !servers.length ? {} : { mcpServers: servers };
+    const session = await this.sessionRequest('session/new', { cwd, ...mcp });
+    if (typeof session?.sessionId !== 'string' || !session.sessionId) throw new Error('ACP session/new 未返回会话编号');
+    return session;
+  }
+  async inspectSession(cwd) {
+    const info = await this.newSession(cwd, this.settings.acp?.mcpServers || []);
+    if (this.capabilityInfo.sessionCapabilities?.close) {
+      // This is an empty diagnostic session. A legacy implementation may omit
+      // close even when it declares the capability. The caller closes stdio.
+      await this.rpc.request('session/close', { sessionId: info.sessionId }).catch(() => {});
+    }
+    return { ...info, authMethods: this.authMethods, agentCapabilities: this.capabilityInfo };
+  }
   async connect(cwd, context = {}) {
     if(this.rpc) return {protocolVersion:1,agentCapabilities:this.capabilityInfo,agentInfo:this.agentInfo};
     const { command, args } = this.command();
+    const profile = require('./runtimeProfile.cjs').runtimeEnvironment(this.settings, context.sandboxPolicy, { ...process.env, ...this.deps.env });
     this.rpc = new (this.deps.StdioRpc || StdioRpc)(command, args, cwd, {...this.deps,
       policy:context.sandboxPolicy,context:context.sandboxContext,
-      env:{...this.deps.env,...(this.settings.home?{DSH_HOME:this.settings.home}:{})}});
+      env:{...this.deps.env,...profile,...(this.settings.home?{DSH_HOME:this.settings.home}:{})}});
     this.rpc.on('notification', message => this.notification(message));
     this.rpc.on('request', message => { void this.dispatch(message); });
     this.rpc.on('disconnect', error => this.fail(error));
@@ -83,6 +99,7 @@ class AcpBackend {
     this.input = input; this.cwd = input.projectRoot; this.sessionId = null; this.messages = new Map(); this.tools = new Map(); this.toolCalls = []; this.diffText = ''; this.stopping = false;
     this.reasoning = ''; this.usage = null; this.sessionInfo = {};
     const abort = () => { void this.interrupt(); };
+    let promptDispatched = false;
     input.signal?.addEventListener('abort', abort, { once: true });
     try {
       if (input.signal?.aborted) return { content: '', state: 'CANCELLED', aborted: true, stopReason: 'cancelled' };
@@ -95,19 +112,31 @@ class AcpBackend {
       const mcpServers = [...(this.settings.acp?.mcpServers || []), ...(this.bridge ? [this.bridge.descriptor] : [])];
       for (const server of mcpServers) if (server.type && !this.capabilityInfo.mcpCapabilities?.[server.type]) throw new Error('Agent 未声明 MCP ' + server.type + ' 能力');
       const sessionMcp = this.settings.backend === 'openclaw' && !mcpServers.length ? {} : { mcpServers };
-      if (input.backendSession?.sessionId) {
-        this.sessionId = input.backendSession.sessionId;
-        const canLoad = this.capabilityInfo.loadSession === true;
-        const canResume = !!this.capabilityInfo.sessionCapabilities?.resume;
-        if (canLoad) this.sessionInfo = await this.sessionRequest('session/load', { sessionId: input.backendSession.sessionId, cwd: input.projectRoot, ...sessionMcp });
-        else if (canResume) this.sessionInfo = await this.sessionRequest('session/resume', { sessionId: input.backendSession.sessionId, cwd: input.projectRoot, ...sessionMcp });
-        else throw new Error(this.settings.backend + ' 未声明 ACP 会话恢复能力，不能恢复原执行');
-        this.sessionId = input.backendSession.sessionId;
-      } else {
-        const created = await this.sessionRequest('session/new', { cwd: input.projectRoot, ...sessionMcp });
-        if (!created?.sessionId) throw new Error('ACP session/new 未返回会话编号');
-        this.sessionId = created.sessionId;
-        this.sessionInfo = created;
+      const previousId = input.backendSession?.sessionId;
+      const restoreMethod = this.capabilityInfo.loadSession === true ? 'session/load'
+        : this.capabilityInfo.sessionCapabilities?.resume ? 'session/resume' : null;
+      const canContinueFromHistory = input.allowHistoryContinuation === true && input.history?.length > 0;
+      let resumed = false;
+      if (previousId && restoreMethod) {
+        this.sessionId = previousId;
+        this.replaying = true;
+        try {
+          const params = { sessionId: previousId, cwd: input.projectRoot, ...sessionMcp };
+          this.sessionInfo = await this.sessionRequest(restoreMethod, params) ?? {};
+          resumed = true;
+        } catch (error) {
+          // Rebuild context only for an ordinary chat with a confirmed previous
+          // result. Explicit recovery must retain the original ACP session.
+          const missing = error.code === -32601 || (error.code === -32602 &&
+            /(?:thread|session).*(?:not found|unknown|does not exist)|找不到会话/i.test(error.message));
+          if (!canContinueFromHistory || !missing) throw error;
+        } finally { this.replaying = false; }
+      } else if (previousId && !canContinueFromHistory) {
+        throw new Error(this.settings.backend + ' 未声明 ACP 会话恢复能力，不能恢复原执行');
+      }
+      if (!resumed) {
+        this.sessionInfo = await this.newSession(input.projectRoot, mcpServers);
+        this.sessionId = this.sessionInfo.sessionId;
       }
       this.emit({ kind: 'backend_info', info: redact(this.sessionInfo) });
       if (this.settings.acp?.modeId) await this.control('session/set_mode', { modeId: this.settings.acp.modeId });
@@ -124,10 +153,12 @@ class AcpBackend {
       if (this.stopping || input.signal?.aborted) return { content: '', state: 'CANCELLED', aborted: true, stopReason: 'cancelled' };
       const terminal = new Promise(resolve => { this.settle = resolve; });
       this.emit({ kind: 'state', state: 'RUNNING', previous: null, sequence: 0 });
-      const prior = !input.backendSession && input.history?.length ?
+      const prior = !resumed && input.history?.length ?
         '此前对话（仅作上下文）：\n' + input.history.map(item => item.role + ': ' + item.content).join('\n') + '\n\n' : '';
       const text = prior + String(input.prompt || '') + (input.canvasSummary ? '\n\n当前画布上下文：\n' + input.canvasSummary : '');
-      const result = await this.rpc.request('session/prompt', { sessionId: this.sessionId, prompt: promptContent(input, text, this.capabilityInfo.promptCapabilities || {}) },
+      const prompt = promptContent(input, text, this.capabilityInfo.promptCapabilities || {});
+      promptDispatched = true;
+      const result = await this.rpc.request('session/prompt', { sessionId: this.sessionId, prompt },
         Number(this.settings.turnTimeoutMs) > 0 ? Number(this.settings.turnTimeoutMs) : 10 * 60 * 1000);
       if (this.settle) this.finish(result?.stopReason || 'end_turn');
       return await terminal;
@@ -136,9 +167,9 @@ class AcpBackend {
         ...(error.code != null ? { backendErrorCode: error.code } : {}), ...(error.data != null ? { backendErrorDetails: redact(error.data) } : {}),
         ...(error.method ? { backendErrorMethod: error.method } : {}),
         ...(this.rpc?.stderrTail?.length ? { backendStderr: redact(this.rpc.stderrTail.join('\n')).slice(-4000) } : {}),
-        stopReason: this.sessionId ? 'backend_result_unknown' : 'backend_start_failed' };
+        stopReason: promptDispatched ? 'backend_result_unknown' : 'backend_start_failed' };
     } finally {
-      this.settle = null; clearTimeout(this.timer); input.signal?.removeEventListener('abort', abort);
+      this.replaying = false; this.settle = null; clearTimeout(this.timer); input.signal?.removeEventListener('abort', abort);
       await this.client.close(); await this.bridge?.close(); this.bridge = null;
       await this.rpc?.close(); this.rpc = null;
     }
@@ -201,6 +232,7 @@ class AcpBackend {
     const p = message.params || {};
     if (p.sessionId && p.sessionId !== this.sessionId) return;
     if (message.method === 'session/update') {
+      if (this.replaying) return;
       const update = p.update || {};
       if (['agent_message_chunk', 'agent_thought_chunk', 'user_message_chunk'].includes(update.sessionUpdate)) {
         let block; try { block = contentBlock(update.content); } catch (error) { this.emit({ kind: 'backend_info', info: { error: error.message } }); return; }

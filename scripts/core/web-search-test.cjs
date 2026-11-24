@@ -25,6 +25,7 @@ const toolkit = require("../../electron/tools/toolkit.cjs");
 const sandbox = require("../../electron/sandbox.cjs");
 const { AgentToolContext } = require("../../electron/tools/context.cjs");
 const webSearch = require("../../electron/tools/impl/webSearchTool.cjs");
+const agent = require("../../electron/agent.cjs");
 
 let failures = 0;
 function check(label, condition, detail) {
@@ -108,6 +109,11 @@ function registry(enabled, config) {
     check('[A] backend 非法值 → 回落 searxng（不静默跑一个不存在的后端）', weird.backend === 'searxng', weird.backend);
     const clamped = webSearch.parseWebSearchConfig({ 'web_search.enabled': 'true', 'web_search.endpoint': 'http://x/s', 'web_search.max_results': '999' });
     check('[A] maxResults 钳制到 20', clamped.maxResults === 20, String(clamped.maxResults));
+    const project = path.join(root, 'configured-project');
+    fs.mkdirSync(path.join(project, '.codenode'), { recursive: true });
+    fs.writeFileSync(path.join(project, '.codenode', 'agent.properties'), 'web_search.enabled=true\nweb_search.provider=searxng\nweb_search.endpoint=http://127.0.0.1:8888/search\nweb_search.network_allowed=true\n');
+    const loaded = agent.loadConfig(project).webSearch;
+    check('[A] agent.loadConfig 保留并解析 web_search.*（此前配置会在运行时丢失）', loaded.enabled === true && loaded.endpoint.includes('8888') && loaded.networkAllowed === true, JSON.stringify(loaded));
   }
 
   // ==================== B. 注册与零痕迹 ====================
@@ -155,6 +161,16 @@ function registry(enabled, config) {
     check('[D] 端点模板里的 {query} 被替换（自定义查询串）', resArr.ok === true && resArr.data.results[0].title === 'A1' && mockArr.seen[0].q === 'q2', JSON.stringify(mockArr.seen[0]));
     check('[D] 裸数组形状也能归一化', resArr.data.results[0].url === 'https://b.example/1', JSON.stringify(resArr.data.results));
     await mockArr.stop();
+
+    const tavily = webSearch.buildRequest({ provider: 'tavily', endpoint: 'https://api.tavily.com/search', apiKey: 'tvly', maxResults: 5 }, 'hello', 3);
+    const brave = webSearch.buildRequest({ provider: 'brave', endpoint: 'https://api.search.brave.com/res/v1/web/search', apiKey: 'brave', maxResults: 5 }, 'hello', 4);
+    const serper = webSearch.buildRequest({ provider: 'serper', endpoint: 'https://google.serper.dev/search', apiKey: 'serper', maxResults: 5 }, 'hello', 2);
+    const google = webSearch.buildRequest({ provider: 'google', endpoint: 'https://customsearch.googleapis.com/customsearch/v1', apiKey: 'google', engineId: 'cx-id', maxResults: 5 }, 'hello', 5);
+    check('[D] Tavily 使用 POST JSON 且 Key 不进 URL', tavily.method === 'POST' && JSON.parse(tavily.body).api_key === 'tvly' && !tavily.url.includes('tvly'), JSON.stringify(tavily));
+    check('[D] Brave 使用 X-Subscription-Token', brave.method === 'GET' && brave.headers['x-subscription-token'] === 'brave' && /count=4/.test(brave.url), JSON.stringify(brave));
+    check('[D] Serper 使用 POST + X-API-KEY', serper.method === 'POST' && serper.headers['x-api-key'] === 'serper' && JSON.parse(serper.body).num === 2, JSON.stringify(serper));
+    check('[D] Google 使用 key/cx/q 查询参数', google.method === 'GET' && /key=google/.test(google.url) && /cx=cx-id/.test(google.url) && /q=hello/.test(google.url), google.url);
+    check('[D] Brave/Serper 响应能归一化', webSearch.normalizeResults({ web: { results: [{ title: 'B', url: 'https://b', description: 'BD' }] } }, 2, 'brave')[0].snippet === 'BD' && webSearch.normalizeResults({ organic: [{ title: 'S', link: 'https://s', snippet: 'SS' }] }, 2, 'serper')[0].url === 'https://s');
   }
 
   // ==================== E. 不编造 ====================
@@ -206,6 +222,8 @@ function registry(enabled, config) {
     // 反向：放开策略后 handler 真的会发请求（证明上面不是「无论如何都拒」）
     const allowed = await handler(contextFor(config, policyAllow), { query: 'electron' });
     check('[F] 同一 handler 在允许出网时正常发请求（不是一律拒绝）', allowed.ok === true && mock.seen.length === 1, JSON.stringify({ ok: allowed.ok, seen: mock.seen.length }));
+    const scoped = await reg.execute('web_search', { query: 'scoped' }, contextFor({ ...config, networkAllowed: true }, policyDeny));
+    check('[F] 搜索设置的独立授权只放行 web_search', scoped.ok === true && mock.seen.length === 2, JSON.stringify({ ok: scoped.ok, seen: mock.seen.length }));
     await mock.stop();
   }
 

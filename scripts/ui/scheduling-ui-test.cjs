@@ -57,7 +57,7 @@ app.whenReady().then(async () => {
     await js(`window.__codenodeUi.getState().closeSettings()`);
     await js(`window.__codenodeSession.setState({messages:[{role:'assistant',content:'保留调度前会话',status:'done'}]});window.__codenodeUi.setState({navigationOpen:true,sideOpen:true,sideTab:'agent'}); const input=document.querySelector('.pp-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'scheduling-draft');input.dispatchEvent(new Event('input',{bubbles:true}));`);
     await sleep(80);
-    const state = () => js(`JSON.stringify({id:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input').value,model:document.querySelector('.pp-model').textContent,navigation:window.__codenodeUi.getState().navigationOpen,sideOpen:window.__codenodeUi.getState().sideOpen,sideTab:window.__codenodeUi.getState().sideTab})`);
+    const state = () => js(`JSON.stringify({id:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input').value,model:document.querySelector('.model-connection-trigger').title,navigation:window.__codenodeUi.getState().navigationOpen,sideOpen:window.__codenodeUi.getState().sideOpen,sideTab:window.__codenodeUi.getState().sideTab})`);
     const before = await state();
     await js(`window.__codenodeUi.getState().openSettings('execution')`);
     await wait(`document.querySelector('[aria-label="子任务与模型请求并发上限"]')?.disabled===false`, 'loaded settings');await js(`document.querySelector('.settings-advanced').open=true`);

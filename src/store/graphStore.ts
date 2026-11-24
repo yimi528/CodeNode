@@ -1,3 +1,4 @@
+import { nodeModes, nodePresentation } from '../nodes/presentation';
 import { create } from 'zustand';
 import {
   Node,
@@ -215,10 +216,9 @@ interface GraphState extends GraphLike {
   appendGraph: (graph: Graph) => void;
   deleteNodes: (ids: string[]) => void;
   duplicateNode: (id: string) => void;
+  changeNodeMode: (id: string, type: string, patch?: Record<string, unknown>) => void;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   moveNode: (id: string, position: { x: number; y: number }, options?: { moveChildren?: boolean }) => void;
-  /** 自动横向整理当前画布节点：全部排在同一行，分支并列 */
-  layoutNodes: () => void;
   /** 自动整理（Blender Node Arrange 风格）：按依赖分层、分支并列 */
   arrangeNodes: () => void;
   undo: () => void;
@@ -379,21 +379,21 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       type: 'scope',
       position: { x: minX - pad, y: minY - pad },
       data: {
-        label: '范围',
+        label: '分组',
         status: 'pending',
-        accent: '#8b5cf6',
+        accent: nodePresentation('scope').color,
         fill: '#3b2f6b',
         opacity: 0.16,
         width: Math.max(220, Math.ceil(maxX - minX + pad * 2)),
         height: Math.max(150, Math.ceil(maxY - minY + pad * 2)),
-        childIds: [...ids],
-        members: [...ids],
+        childIds: [],
+        members: [],
         shrink: false,
       },
     });
     let nodes: Node[] = s.nodes.map((n) => ({ ...n, selected: false }));
-    for (const id of ids) nodes = applyParentChange(nodes, id, scopeId);
-    nodes.push(scopeNode);
+    nodes.push({ ...scopeNode, selected: true });
+    for (const node of chosen) nodes = applyParentChange(nodes, node.id, scopeId);
     set({ nodes, selectedId: scopeId, selectedIds: [scopeId], ...withHistory(s) });
   },
 
@@ -550,6 +550,15 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       return { nodes: nodes.map(withZIndex), selectedId: copy.id, selectedIds: [copy.id], ...withHistory(s) };
     }),
 
+  changeNodeMode: (id, type, patch = {}) => set(s => {
+    const node = s.nodes.find(n => n.id === id);
+    const modes = nodeModes(node?.type || '');
+    if (!node || node.data.status === 'running' || !modes || !Object.prototype.hasOwnProperty.call(modes, type)) return s;
+    const nodes = s.nodes.map(n => n.id === id ? { ...n, type, measured: undefined,
+      data: { ...n.data, accent: nodePresentation(type).color, ...patch } } : n);
+    return { nodes, ...withHistory(s) };
+  }),
+
   updateNodeData: (id, patch) =>
     set((s) => ({
       nodes: s.nodes.map((n) =>
@@ -567,33 +576,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       if (current.type === 'scope' && options?.moveChildren !== false) nodes = translateDescendants(nodes, id, dx, dy);
       return { nodes };
     }),
-
-  /**
-   * Agent 生成节点后的自动排版：所有节点排在同一行（不再因碰到边框换行）。
-   * 顺序按图结构 BFS（先依赖前驱、再并列后继分支），使单个节点的多个分支并列相邻。
-   */
-  layoutNodes: () => {
-    const s = get();
-    // 只要存在带成员的 scope，就改用分层自动整理，避免“横排”把成员踢出容器
-    if (s.nodes.some((n) => n.type === 'scope' && childIdsOf(n).length > 0)) {
-      get().arrangeNodes();
-      return;
-    }
-    set(() => {
-      const margin = 24;
-      const gapX = 32;
-      const ordered = graphBreadthOrder(s.nodes, s.edges);
-      let x = margin;
-      const nodes = ordered.map((n) => {
-        const nd = (n.data as Record<string, unknown>) || {};
-        const w = (n.measured?.width as number | undefined) || (typeof nd.width === 'number' ? nd.width : 170);
-        const pos = { x, y: margin };
-        x += w + gapX;
-        return { ...n, position: pos };
-      });
-      return { nodes };
-    });
-  },
 
   /**
    * 自动整理（参考 Blender Node Arrange）：先按「连通分量」分块，
@@ -877,51 +859,6 @@ function connectedComponents(nodes: Node[], edges: Edge[]): Node[][] {
     return b.length - a.length;
   });
   return comps;
-}
-
-/**
- * 图结构的广度优先顺序：从入度为 0 的根出发，逐层展开后继，
- * 使单个节点的多个分支（后继）并列相邻。孤立节点按原顺序补在末尾。
- */
-function graphBreadthOrder(nodes: Node[], edges: Edge[]): Node[] {
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const indeg = new Map<string, number>();
-  const adj = new Map<string, string[]>();
-  for (const n of nodes) {
-    indeg.set(n.id, 0);
-    adj.set(n.id, []);
-  }
-  for (const e of edges) {
-    if (byId.has(e.source) && byId.has(e.target) && e.source !== e.target) {
-      if (!adj.get(e.source)!.includes(e.target)) adj.get(e.source)!.push(e.target);
-      indeg.set(e.target, indeg.get(e.target)! + 1);
-    }
-  }
-  const roots = nodes.filter((n) => indeg.get(n.id) === 0);
-  roots.sort((a, b) => a.position.x - b.position.x);
-  const order: Node[] = [];
-  const visited = new Set<string>();
-  const queue: string[] = roots.map((n) => n.id);
-  for (const id of queue) visited.add(id);
-  while (queue.length) {
-    const id = queue.shift()!;
-    const node = byId.get(id);
-    if (node) order.push(node);
-    const succ = adj.get(id) || [];
-    succ.sort((a, b) => {
-      const na = byId.get(a);
-      const nb = byId.get(b);
-      return (na && nb ? na.position.x - nb.position.x : 0);
-    });
-    for (const t of succ) {
-      if (!visited.has(t)) {
-        visited.add(t);
-        queue.push(t);
-      }
-    }
-  }
-  for (const n of nodes) if (!visited.has(n.id)) order.push(n);
-  return order;
 }
 
 /** 计算每列（rank）内的节点顺序：按前驱列的平均位置（barycenter）排序，减少连线交叉 */

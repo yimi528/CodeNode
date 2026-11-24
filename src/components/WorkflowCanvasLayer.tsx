@@ -1,13 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore, type Edge, type Node } from '@xyflow/react';
 import { useUiStore } from '../store/uiStore';
-import { getVectorStore } from '../vector/vectorStore';
-import type { VecObject } from '../vector/types';
+import { useVectorPlugin } from '../plugins/vectorEditor';
+import { boundaryLabel, nodePresentation } from '../nodes/presentation';
+
+export const CANVAS_GRID_SIZE = 22;
+const SOLID_MATERIAL_QUERY = '(prefers-reduced-transparency: reduce), (prefers-contrast: more)';
 
 type Point = { x: number; y: number };
-type NodeData = { label?: string; status?: string; accent?: string; prompt?: string; goal?: string; subtitle?: string; filePath?: string; imagePath?: string; dataUrl?: string; width?: number; height?: number; fill?: string; opacity?: number; collapsed?: boolean; objectName?: string };
+type NodeData = { boundary?: string; label?: string; status?: string; accent?: string; prompt?: string; goal?: string; subtitle?: string; filePath?: string; imagePath?: string; dataUrl?: string; width?: number; height?: number; fill?: string; opacity?: number; collapsed?: boolean; objectName?: string };
 
-const TYPE_MARK: Record<string, string> = { start: '▶', end: '■', task: '◆', stage: '▦', tool: '⚙', file: 'F', image: '▣', scope: '▣', object: '◇', vector: '▧' };
+const iconPaths = new Map<string, Path2D>();
+
+function iconPath(path: string): Path2D {
+  const cached = iconPaths.get(path);
+  if (cached) return cached;
+  const drawing = new Path2D(path);
+  iconPaths.set(path, drawing);
+  return drawing;
+}
+
 const STATUS_LABEL: Record<string, string> = { pending: '待执行', running: '执行中', done: '已完成', failed: '失败', blocked: '阻塞' };
 
 function size(node: Node): { width: number; height: number } {
@@ -50,64 +62,6 @@ function edgePath(ctx: CanvasRenderingContext2D, points: Point[]): void {
   ctx.lineTo(b.x, b.y);
 }
 
-function vectorPreview(ctx: CanvasRenderingContext2D, nodeId: string, x: number, y: number, width: number, height: number): void {
-  const objects = getVectorStore(nodeId).getState().objects.filter((item) => item.visible);
-  const frame = { x: x + 10, y: y + 36, width: width - 20, height: Math.max(20, height - 72) };
-  ctx.save();
-  ctx.beginPath(); ctx.rect(frame.x, frame.y, frame.width, frame.height); ctx.clip();
-  if (!objects.length) {
-    ctx.fillStyle = '#64748b'; ctx.font = '12px sans-serif'; ctx.fillText('空白绘图 · 点击节点编辑', frame.x + 12, frame.y + 24);
-    ctx.restore(); return;
-  }
-  const bounds = objects.reduce((result, item) => ({
-    x0: Math.min(result.x0, item.x), y0: Math.min(result.y0, item.y),
-    x1: Math.max(result.x1, item.x + item.width), y1: Math.max(result.y1, item.y + item.height),
-  }), { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity });
-  const { x0, y0, x1, y1 } = bounds;
-  const scale = Math.min((frame.width - 36) / Math.max(1, x1 - x0), (frame.height - 36) / Math.max(1, y1 - y0), 2);
-  ctx.translate(frame.x + (frame.width - (x1 - x0) * scale) / 2, frame.y + (frame.height - (y1 - y0) * scale) / 2);
-  ctx.scale(scale, scale); ctx.translate(-x0, -y0);
-  for (const item of objects) {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, Math.min(1, item.opacity / 100));
-    ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
-    ctx.rotate(item.rotation * Math.PI / 180);
-    ctx.translate(-item.width / 2, -item.height / 2);
-    ctx.fillStyle = item.fill === 'none' ? 'transparent' : item.fill;
-    ctx.strokeStyle = item.stroke === 'none' ? 'transparent' : item.stroke;
-    ctx.lineWidth = item.strokeWidth || 1;
-    ctx.setLineDash(item.strokeStyle === 'dashed' ? [8, 5] : item.strokeStyle === 'dotted' ? [2, 4] : []);
-    drawVectorObject(ctx, item);
-    ctx.restore();
-  }
-  ctx.restore();
-}
-
-function drawVectorObject(ctx: CanvasRenderingContext2D, item: VecObject): void {
-  ctx.beginPath();
-  if (item.type === 'ellipse') ctx.ellipse(item.width / 2, item.height / 2, Math.max(1, item.width / 2), Math.max(1, item.height / 2), 0, 0, Math.PI * 2);
-  else if (item.type === 'arrow') { ctx.moveTo(0, item.height / 2); ctx.lineTo(item.width, item.height / 2); ctx.moveTo(item.width - 14, item.height / 2 - 9); ctx.lineTo(item.width, item.height / 2); ctx.lineTo(item.width - 14, item.height / 2 + 9); }
-  else if (item.type === 'bezier' && item.anchors?.length) {
-    const anchors = item.anchors;
-    ctx.moveTo(anchors[0].x, anchors[0].y);
-    for (let i = 1; i < anchors.length; i++) {
-      const previous = anchors[i - 1]; const current = anchors[i];
-      ctx.bezierCurveTo(previous.hOut?.x ?? previous.x, previous.hOut?.y ?? previous.y, current.hIn?.x ?? current.x, current.hIn?.y ?? current.y, current.x, current.y);
-    }
-    if (item.closed) ctx.closePath();
-  } else if (item.type !== 'text') ctx.roundRect(0, 0, item.width, item.height, item.type === 'rounded' ? item.radius : 0);
-  if (item.fill !== 'none' && item.type !== 'arrow' && item.type !== 'text') ctx.fill();
-  if (item.stroke !== 'none' && item.type !== 'text') ctx.stroke();
-  if (item.text) {
-    ctx.fillStyle = item.textColor || '#f8fafc';
-    ctx.font = `${item.fontWeight || 400} ${item.fontSize || 16}px ${item.fontFamily || 'sans-serif'}`;
-    ctx.textAlign = item.textAlign || 'left';
-    const textX = item.textAlign === 'center' ? item.width / 2 : item.textAlign === 'right' ? item.width : 0;
-    ctx.fillText(item.text.split('\n')[0], textX, item.type === 'text' ? (item.fontSize || 16) : item.height / 2 + (item.fontSize || 16) / 3, item.width);
-    ctx.textAlign = 'left';
-  }
-}
-
 export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLine }: { nodes: Node[]; edges: Edge[]; hoveredEdgeId: string | null; cutLine: Point[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [bounds, setBounds] = useState({ width: 1, height: 1 });
@@ -117,8 +71,18 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
   const images = useRef(new Map<string, HTMLImageElement>());
   const [vectorRevision, setVectorRevision] = useState(0);
   const [animationTick, setAnimationTick] = useState(0);
+  const [solidMaterial, setSolidMaterial] = useState(() => window.matchMedia(SOLID_MATERIAL_QUERY).matches);
+  const plugin = useVectorPlugin(s => s.plugin);
+  const enabled = useUiStore(s => s.preferences.vectorEditorEnabled);
   const vectorIds = nodes.filter((node) => node.type === 'vector').map((node) => node.id).join('|');
-  const animating = nodes.some((node) => (node.data as NodeData).status === 'running') || edges.some((edge) => edge.animated);
+  const animating = nodes.some((node) => node.type === 'scope' && (node.data as NodeData).status === 'running') || edges.some((edge) => edge.animated);
+
+  useEffect(() => {
+    const preference = window.matchMedia(SOLID_MATERIAL_QUERY);
+    const update = () => setSolidMaterial(preference.matches);
+    preference.addEventListener('change', update);
+    return () => preference.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     if (!animating || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -127,9 +91,10 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
   }, [animating]);
 
   useEffect(() => {
-    const unsubscribe = vectorIds.split('|').filter(Boolean).map((id) => getVectorStore(id).subscribe(() => setVectorRevision((revision) => revision + 1)));
+    if (!enabled || !plugin) return;
+    const unsubscribe = vectorIds.split('|').filter(Boolean).map((id) => plugin.getVectorStore(id).subscribe(() => setVectorRevision((revision) => revision + 1)));
     return () => unsubscribe.forEach((stop) => stop());
-  }, [vectorIds]);
+  }, [vectorIds, plugin, enabled]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -157,7 +122,16 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
     const foreground = token(style, '--glass-text', '#172033');
     const muted = token(style, '--glass-muted', '#64748b');
     const border = token(style, '--glass-border', '#94a3b8');
-    const edgeColor = token(style, '--edge-color', '#778292');
+    const edgeColor = token(style, '--edge-color', '#777777');
+    const glass = {
+      top: token(style, '--node-glass-top', surface),
+      center: token(style, '--node-glass-center', surface),
+      bottom: token(style, '--node-glass-bottom', surface),
+      rim: token(style, '--node-glass-rim', border),
+      border: token(style, '--node-glass-border', border),
+      selection: token(style, '--node-glass-selection', foreground),
+      shadow: token(style, '--node-glass-shadow', 'transparent'),
+    };
     const statuses: Record<string, string> = {
       running: token(style, '--stage-running', '#f59e0b'),
       done: token(style, '--stage-done', '#22c55e'),
@@ -165,7 +139,7 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
       blocked: token(style, '--stage-blocked', '#8b5cf6'),
     };
     const [tx, ty, zoom] = transform;
-    const gap = 22 * zoom;
+    const gap = CANVAS_GRID_SIZE * zoom;
     if (gap >= 12) {
       ctx.fillStyle = dot;
       ctx.globalAlpha = .38;
@@ -207,21 +181,62 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
       if ((x + width) * zoom + tx < -40 || x * zoom + tx > bounds.width + 40 || (y + height) * zoom + ty < -40 || y * zoom + ty > bounds.height + 40) continue;
       // Rich editors remain live DOM surfaces while selected; Canvas paints their inactive preview.
       if (node.selected && ['vector', 'image', 'scope', 'object'].includes(node.type || '')) continue;
-      const accent = data.accent || '#3b82f6';
-      const statusColor = statuses[data.status || ''] || accent;
+      const accent = data.accent || token(style, '--canvas-node-accent', '#3b82f6');
+      const activeStatus = statuses[data.status || ''];
+      const statusColor = activeStatus || token(style, '--canvas-idle-text', muted);
       const isScope = node.type === 'scope';
+      const radius = isScope ? 11 : 10;
       ctx.save();
-      ctx.fillStyle = isScope ? `${data.fill || '#3b2f6b'}${Math.round((data.opacity ?? .16) * 255).toString(16).padStart(2, '0')}` : surface;
-      ctx.strokeStyle = node.selected ? token(style, '--glass-accent', accent) : hoverScopeId === node.id ? accent : data.status && statuses[data.status] ? statusColor : accent;
-      ctx.lineWidth = node.selected ? 2.5 : 1.4;
-      if (data.status === 'running') { ctx.shadowColor = statusColor; ctx.shadowBlur = 8 + 5 * Math.sin(animationTick * .28); }
-      if (isScope) ctx.setLineDash([7, 5]);
-      ctx.beginPath(); ctx.roundRect(x, y, width, height, isScope ? 11 : 8); ctx.fill(); ctx.stroke(); ctx.setLineDash([]); ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, radius);
       if (isScope) {
-        ctx.fillStyle = foreground; ctx.font = '600 13px sans-serif'; text(ctx, `${data.collapsed ? '▸' : '▾'} ${data.label || '范围'}`, x + 12, y + 24, width - 24);
-        ctx.fillStyle = muted; ctx.font = '11px sans-serif'; text(ctx, data.collapsed ? '已折叠' : '范围节点', x + 12, y + 43, width - 24);
+        ctx.fillStyle = `${data.fill || '#3b2f6b'}${Math.round((data.opacity ?? .16) * 255).toString(16).padStart(2, '0')}`;
+        ctx.setLineDash([7, 5]);
+      } else if (solidMaterial) {
+        ctx.fillStyle = glass.center;
       } else {
-        ctx.fillStyle = accent; ctx.font = '600 14px sans-serif'; text(ctx, TYPE_MARK[node.type || ''] || '◇', x + 12, y + 23, 18);
+        const fill = ctx.createLinearGradient(x, y, x, y + height);
+        fill.addColorStop(0, glass.top);
+        fill.addColorStop(.35, glass.center);
+        fill.addColorStop(1, glass.bottom);
+        ctx.fillStyle = fill;
+        ctx.shadowColor = glass.shadow;
+        ctx.shadowBlur = 7 * ratio * zoom;
+        ctx.shadowOffsetY = 3 * ratio * zoom;
+      }
+      ctx.fill();
+      ctx.shadowOffsetY = 0;
+      ctx.shadowBlur = 0;
+      if (isScope) {
+        ctx.strokeStyle = node.selected
+          ? token(style, '--skin-selection-border', token(style, '--glass-accent', accent))
+          : hoverScopeId === node.id ? accent : activeStatus || accent;
+        ctx.lineWidth = node.selected ? 2.5 : 1.4;
+        if (data.status === 'running' && !solidMaterial) {
+          ctx.shadowColor = statusColor;
+          ctx.shadowBlur = 7 + 3 * Math.sin(animationTick * .28);
+        }
+      } else {
+        const rim = ctx.createLinearGradient(x, y, x, y + height);
+        rim.addColorStop(0, glass.rim);
+        rim.addColorStop(.6, glass.border);
+        ctx.strokeStyle = node.selected ? glass.selection : solidMaterial ? glass.border : rim;
+        ctx.lineWidth = node.selected ? 1.6 : 1;
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
+      const icon = nodePresentation(node.type);
+      ctx.save();
+      ctx.translate(x + 10, y + 8);
+      ctx.scale(.8, .8);
+      ctx.strokeStyle = icon.color; ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.stroke(iconPath(icon.path));
+      ctx.restore();
+      if (isScope) {
+        ctx.fillStyle = foreground; ctx.font = '600 13px sans-serif'; text(ctx, `${data.collapsed ? '▸' : '▾'} ${data.label || '分组'}`, x + 34, y + 24, width - 46);
+        ctx.fillStyle = muted; ctx.font = '11px sans-serif'; text(ctx, data.collapsed ? '已折叠' : '分组', x + 12, y + 43, width - 24);
+      } else {
         ctx.fillStyle = foreground; ctx.font = '600 13px sans-serif'; text(ctx, data.label || node.id, x + 33, y + 23, width - 45);
         const detail = data.goal || data.prompt || data.filePath || data.imagePath || data.objectName || data.subtitle || (node.type === 'vector' ? '点击节点编辑矢量画布' : '');
         ctx.fillStyle = muted; ctx.font = '11px sans-serif'; text(ctx, detail, x + 12, y + Math.min(47, height - 28), width - 24);
@@ -237,10 +252,11 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
             ctx.drawImage(image, box.x + (box.width - image.naturalWidth * scale) / 2, box.y + (box.height - image.naturalHeight * scale) / 2, image.naturalWidth * scale, image.naturalHeight * scale);
           }
         }
-        if (node.type === 'vector') vectorPreview(ctx, node.id, x, y, width, height);
+        if (node.type === 'vector' && enabled && plugin) plugin.vectorPreview(ctx, node.id, x, y, width, height);
         ctx.strokeStyle = border; ctx.lineWidth = .8; ctx.beginPath(); ctx.moveTo(x, y + height - 27); ctx.lineTo(x + width, y + height - 27); ctx.stroke();
         ctx.fillStyle = statusColor; ctx.beginPath(); ctx.arc(x + 13, y + height - 14, 3, 0, Math.PI * 2); ctx.fill();
-        ctx.font = '10px sans-serif'; text(ctx, STATUS_LABEL[data.status || 'pending'] || data.status || '待执行', x + 22, y + height - 10, width - 32);
+        ctx.fillStyle = activeStatus ? foreground : muted;
+        ctx.font = '10px sans-serif'; text(ctx, [STATUS_LABEL[data.status || 'pending'] || data.status, boundaryLabel(data.boundary)].filter(Boolean).join(' · '), x + 22, y + height - 10, width - 32);
         if (node.type !== 'start') { ctx.beginPath(); ctx.arc(x, y + height / 2, 4, 0, Math.PI * 2); ctx.fillStyle = accent; ctx.fill(); }
         if (node.type !== 'end') { ctx.beginPath(); ctx.arc(x + width, y + height / 2, 4, 0, Math.PI * 2); ctx.fillStyle = accent; ctx.fill(); }
       }
@@ -252,7 +268,7 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
       for (const point of cutLine.slice(1)) ctx.lineTo(point.x, point.y);
       ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
     }
-  }, [nodes, edges, bounds, transform, theme, hoverScopeId, hoveredEdgeId, cutLine, vectorRevision, animationTick]);
+  }, [nodes, edges, bounds, transform, theme, hoverScopeId, hoveredEdgeId, cutLine, vectorRevision, animationTick, plugin, enabled, solidMaterial]);
 
   return <canvas ref={ref} className="workflow-canvas-layer" aria-hidden="true" />;
 }

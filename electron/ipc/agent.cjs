@@ -21,6 +21,7 @@ const { randomUUID } = require('crypto');
 const agent = require('../agent.cjs');
 const agentBackends = require('../backends/index.cjs');
 const backendSettings = require('../backends/settings.cjs');
+const composerPolicy = require('../composerPolicy.cjs');
 const externalRuns = require('../backends/runExternal.cjs');
 const goalStore = require('../goalStore.cjs');
 const goalTaskPriority = require('../goalTaskPriority.cjs');
@@ -35,6 +36,7 @@ const modelProtocol = require('../modelProtocol.cjs');
 const runStore = require('../runStore.cjs');
 const eventBus = require('../eventBus.cjs');
 const runCheckpoint = require('../runCheckpoint.cjs');
+const planLib = require('../plan.cjs');
 const runRollback = require('../runRollback.cjs');
 const { createSteerQueue } = require('../steerQueue.cjs');
 const { SideEffectLedger, createGuard } = require('../sideEffects.cjs');
@@ -50,7 +52,7 @@ const userMemoryStore = require('../userMemory.cjs');
 // 意图识别 / 授权判定（照 Codex guardian 分类器，见 electron/intent.cjs 顶部注释）
 const intentLib = require('../intent.cjs');
 const taskRouter = require('../taskRouter.cjs');
-const { parseWebSearchConfig } = require('../tools/impl/webSearchTool.cjs');
+const { parseWebSearchConfig } = require('../tools/impl/webSearchTool.cjs'), webSearchSettings = require('../webSearchSettings.cjs');
 // schema 的 token 量测（工具面事件的留痕口径，与 compaction 预检同一把尺）
 const compactionLib = require('../compaction.cjs');
 // 动态上下文段落的统一 token 预算（审计 §4 P1-2）
@@ -69,8 +71,10 @@ function workspaceHash(projectRoot) {
 }
 
 /** web_search 后端配置（每次按当前 cfg 解析；未启用 → 工具不注册、也不注入配置） */
-function webSearchConfig(cfg) {
-  const parsed = parseWebSearchConfig(cfg);
+function webSearchConfig(cfg, userDataPath) {
+  const parsed = userDataPath
+    ? webSearchSettings.runtimeSettings(userDataPath, cfg)
+    : (cfg.webSearch || parseWebSearchConfig(cfg));
   if (parsed.problems.length) {
     // 配了但配错：**不静默当没配** —— 工具不注册，并把原因写进日志（否则用户会以为搜不了是模型的问题）
     try {
@@ -218,10 +222,7 @@ function register(ctx) {
 
   ipcMain.handle('agent:config', async (_event, projectRoot, sessionId, conversationId) => {
     const cfg = agent.loadConfig(projectRoot);
-    const backend = backendSettings.read(projectRoot, userDataDir());
-    const priorBackend=projectRoot&&sessionId?externalRuns.previousSession(projectRoot,String(sessionId),{conversationId}):null;
-    const binding=backendSettings.conversationBinding(projectRoot,conversationId||sessionId);
-    if(binding)backend.sessionSettings=binding.settings;else if(priorBackend?.session?.adapterSettings)backend.sessionSettings=priorBackend.session.adapterSettings;
+    const backend = backendSettings.readForSession(projectRoot, userDataDir(), sessionId, conversationId);
     const soul = agent.parseSoul(agent.loadSoul(cfg, projectRoot));
     const store = modelStore.readUsableModels(userDataDir(), cfg);
     return {
@@ -230,18 +231,19 @@ function register(ctx) {
       model: cfg.model,
       soul,
       toolsEnabled: cfg.tools.toolsEnabled,
+      fullAccessLocked: composerPolicy.locked(cfg.sandbox),
       autoExecuteTools: cfg.tools.toolsConfirmWrites === false,
       scheduling: cfg.scheduling,
       costSettings: cfg.costSettings,
       subagentRoles: require('../tools/roles.cjs').roleCatalog().map(role => ({ name: role.name, label: role.label })),
       ragEnabled: cfg.rag.enabled,
       rag: ragSettings.publicSettings(cfg.rag, cfg.grounding),
+      webSearch: webSearchSettings.publicSettings(userDataDir(), cfg),
       editing: cfg.editing,
       models: modelStore.toPublicModels(store.models),
       activeModelId: store.activeId,
     };
   });
-
 
   const withGoalRoot = (projectRoot, action) => {
     try { if (!projectRoot || !fs.statSync(projectRoot).isDirectory()) return { ok: false, error: '请先选择项目' }; return { ok: true, value: action(path.resolve(projectRoot)) }; }
@@ -526,20 +528,17 @@ function register(ctx) {
 
   ipcMain.handle('agent:tools', async (_event, projectRoot) => {
     const cfg = agent.loadConfig(projectRoot);
-    const registry = toolkit.buildDefaultRegistryWithConfig({ ...cfg.tools, projectRoot, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg).enabled, difyEnabled: cfg.dify.enabled });
+    const registry = toolkit.buildDefaultRegistryWithConfig({ ...cfg.tools, projectRoot, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg, userDataDir()).enabled, difyEnabled: cfg.dify.enabled });
     const subagentManager = new SubagentManager({ agent, toolkit, cfg, registry });
     subagentManager.register(registry);
-    toolkit.filterByConfig(registry, { ...cfg.tools, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg).enabled, difyEnabled: cfg.dify.enabled });
-    return {
-      enabled: cfg.tools.toolsEnabled,
-      tools: registry.listTools().map((spec) => ({
+    toolkit.filterByConfig(registry, { ...cfg.tools, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg, userDataDir()).enabled, difyEnabled: cfg.dify.enabled });
+    return { enabled: cfg.tools.toolsEnabled, executorNames: registry.registeredExecutorNames(),
+      tools: registry.listDescriptors().map((spec) => ({
         name: spec.name,
         description: spec.description,
         parameters: spec.inputSchema,
         // 契约摘要：只读/幂等/是否改工作区/要不要确认/需要的能力/超时/缓存与并行策略
-        descriptor: registry.descriptorOf(spec.name)
-          ? descriptorLib.describeDescriptor(registry.descriptorOf(spec.name))
-          : null,
+        descriptor: descriptorLib.describeDescriptor(spec),
       })),
     };
   });
@@ -590,7 +589,7 @@ function register(ctx) {
 
   ipcMain.handle('agent:plan-read', async (_event, projectRoot, sessionId) => {
     if (!projectRoot || !sessionId) return { ok: false, error: '缺少项目或会话编号', plan: null };
-    return { ok: true, plan: require('../plan.cjs').readSessionPlan(projectRoot, sessionId) };
+    return { ok: true, plan: planLib.readSessionPlan(projectRoot, sessionId) };
   });
 
   ipcMain.handle('agent:resume-start', async (_event, projectRoot, runId, replacementRunId) => {
@@ -760,7 +759,8 @@ function register(ctx) {
       }
     };
     try {
-      const cfg = agent.loadConfig(projectRoot);
+      const cfg = require('../desktopAcceptance.cjs').configure(agent.loadConfig(projectRoot), projectRoot, payload?.acceptance, resumeRunId);
+      const composerOverrides = composerPolicy.turnOptions(payload);
       runCfg = cfg;
       const answerFeedback=require('../feedbackStore.cjs').contextText(projectRoot,memoryConversationId||'');
       const workflowTrellis = payload?.[WORKFLOW_TRELLIS] || require('../trellis/canvas.cjs').resumeBinding(projectRoot, resumeRunId);
@@ -793,12 +793,15 @@ function register(ctx) {
         const externalController = new AbortController();
         const externalBridge = makeBridge(sender, externalController.signal, { projectRoot });
         const externalModel = new GraphModel(document || undefined);
-        const externalRegistry = toolkit.buildDefaultRegistryWithConfig({ ...cfg.tools, projectRoot, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg).enabled, difyEnabled: cfg.dify.enabled });
+        const priorSettings = (restoredBackend || sessionBackend)?.session?.adapterSettings || savedBackend.settings;
+        const nextSettings = backendSettings.applyComposerOverrides(priorSettings, composerOverrides);
+        const externalRegistry = toolkit.buildDefaultRegistryWithConfig({ ...cfg.tools, toolsConfirmWrites: composerOverrides?.autoExecuteTools == null ? cfg.tools.toolsConfirmWrites : !composerOverrides.autoExecuteTools, projectRoot, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg, userDataDir()).enabled, difyEnabled: cfg.dify.enabled });
         const externalContext = new AgentToolContext({ projectRoot, model: externalModel, runId: externalId,
           signal: externalController.signal, sandbox: sandboxPolicy, role: 'supervisor',
-          readOnly: savedBackend.settings.sandbox === 'read-only' || !!goalWriteScope?.length,
+          readOnly: nextSettings.sandbox === 'read-only' || !!goalWriteScope?.length,
+          forceApproval: composerOverrides?.approvalMode === 'request', autoExecuteTools: composerOverrides?.approvalMode === 'assist',
           confirm: externalBridge.confirm, askUser: externalBridge.askUser, ui: externalBridge.ui,
-          editingConfig: cfg.editing, ragConfig: cfg.rag, webSearchConfig: webSearchConfig(cfg),
+          editingConfig: cfg.editing, ragConfig: cfg.rag, webSearchConfig: webSearchConfig(cfg, userDataDir()),
           scalarStore: cfg.scalars?.enabled !== false && projectRoot ? getScalarStore(projectRoot) : null,
           conversationHistory: () => payload.history || [],
           mutateWorkbench: async fn => { fn(externalModel); bumpCanvasRevision(externalModel); sendDelta({ kind: 'model', document: externalModel.doc }); return true; },
@@ -809,8 +812,8 @@ function register(ctx) {
         try {
           applyGoalContext();
           const externalResult = await externalRuns.runExternal({ ...payload, prompt: String(prompt || '') + (trellisSnapshot ? trellis.assertReady(trellisSnapshot).text : '') + answerFeedback, trellisSnapshot, requestId: externalId, cfg,
-            settings: savedBackend.settings, backendEpoch:binding?.epoch||null,sandboxPolicy, signal: externalController.signal,
-            goalContextRevision, goalAcceptanceRevision,
+            settings: savedBackend.settings, adapterSettingsOverride: nextSettings === priorSettings ? undefined : nextSettings, backendEpoch:binding?.epoch||null,sandboxPolicy, signal: externalController.signal,
+            approvalMode: composerOverrides?.approvalMode, goalContextRevision, goalAcceptanceRevision,
             toolRegistry: externalRegistry, toolContext: externalContext,
             readEditorText: async file => { const result = await externalBridge.request('editor_read', {
               path: file, relPath: path.relative(sandbox.canonicalPath(projectRoot), sandbox.canonicalPath(file)).replace(/\\/g, '/')
@@ -824,7 +827,8 @@ function register(ctx) {
           externalBridge.cleanup(); activeRequests.delete(externalId);
         }
       }
-      // 优先按 modelId 从 models.json 读取该模型的接入配置（apiBase/apiKey/model）
+      if (composerOverrides?.approvalMode === 'full') throw new Error('内置工具仅支持项目范围，无法启用完全访问权限');
+      if (typeof composerOverrides?.autoExecuteTools === 'boolean') cfg.tools = { ...cfg.tools, toolsConfirmWrites: !composerOverrides.autoExecuteTools };
       const baseCfg = agent.loadConfig(null);
       cfg.resolveRoleModel = (role, parent) => require('../costSettings.cjs').childConfig(parent, role, cfg.costSettings,
         id => modelStore.findModel(userDataDir(), baseCfg, id));
@@ -1096,7 +1100,7 @@ function register(ctx) {
           enabled: (cfg.subagent && cfg.subagent.leases) !== false,
           ttlMs: (cfg.subagent && cfg.subagent.leaseTtlMs) || 120000,
         });
-        registry = toolkit.buildDefaultRegistryWithConfig({ ...cfg.tools, role: executionRole || 'supervisor', projectRoot, ragEnabled: cfg.rag.enabled && !!projectRoot, leases, webSearchEnabled: webSearchConfig(cfg).enabled, difyEnabled: cfg.dify.enabled });
+        registry = toolkit.buildDefaultRegistryWithConfig({ ...cfg.tools, role: executionRole || 'supervisor', projectRoot, ragEnabled: cfg.rag.enabled && !!projectRoot, leases, webSearchEnabled: webSearchConfig(cfg, userDataDir()).enabled, difyEnabled: cfg.dify.enabled });
       }
       let subagentManager = null;
       if (registry) {
@@ -1117,7 +1121,7 @@ function register(ctx) {
          * `agent.tool_profile=off` 时压根不注册 → 请求体与没有这个功能**逐字节一致**。
          */
         if (cfg.tools.toolProfile !== 'off') toolkit.registerDiscoverTool(registry);
-        toolkit.filterByConfig(registry, { ...cfg.tools, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg).enabled, difyEnabled: cfg.dify.enabled });
+        toolkit.filterByConfig(registry, { ...cfg.tools, ragEnabled: cfg.rag.enabled && !!projectRoot, webSearchEnabled: webSearchConfig(cfg, userDataDir()).enabled, difyEnabled: cfg.dify.enabled });
       }
       // 会话覆盖要在上下文组装前判定；预处理模型调用也必须响应「停止」。
       const controller = new AbortController();
@@ -1367,23 +1371,25 @@ function register(ctx) {
           mode: cfg.prompt && cfg.prompt.canvasRules,
           intentHint: intentPolicy ? intentPolicy.routeHint : null,
         });
+        const existingPlan = resumePlan?.taskPlan || planLib.readSessionPlan(projectRoot, cfg.planSessionId);
         const decision = toolkit.profiles.resolveToolProfiles({
           canvas: layers.canvas,
           prompt,
           mode: cfg.tools.toolProfile,
+          hasActivePlan: !!(existingPlan?.items?.length && !planLib.isTerminalPlan(existingPlan)),
           // 续跑：沿原 run 记下的面（读不到就退回全量面）—— 同一 run 的工具面只增不减
           resuming: !!resumePlan,
           resumeProfiles: resumePlan ? lastToolFaceProfiles(projectRoot, resumePlan.runId) : null,
         });
-        const registered = registry.listTools().map((t) => t.name);
+        const availableCount = registry.modelToolNames().length;
         if (decision.source === 'off' || decision.source === 'resume-full') {
           // 不裁剪：配置关了，或续跑但读不到原 run 的面（「不知道原来有什么」→ 宁可多带）
-          toolFace = { applied: false, reason: decision.reason, profiles: [], exposed: registered.length, hidden: 0 };
+          toolFace = { applied: false, reason: decision.reason, profiles: [], exposed: availableCount, hidden: 0 };
         } else if (!registry.contains('discover_tools')) {
           // 取回入口被 tools.allowed/deny 挡掉 → **整体放弃裁剪**（fail-open 回旧的全量面）
-          toolFace = { applied: false, reason: 'no-discover-tool', profiles: decision.profiles, exposed: registered.length, hidden: 0 };
+          toolFace = { applied: false, reason: 'no-discover-tool', profiles: decision.profiles, exposed: availableCount, hidden: 0 };
         } else {
-          const names = toolkit.profiles.namesForProfiles(decision.profiles, registered);
+          const names = toolkit.profiles.namesForProfiles(decision.profiles, registry.registeredExecutorNames());
           registry.setExposure(names);
           const info = registry.schemaInfo();
           toolFace = {
@@ -1391,8 +1397,8 @@ function register(ctx) {
             profiles: decision.profiles,
             reason: decision.reason,
             source: decision.source,
-            exposed: names.length,
-            hidden: registered.length - names.length,
+            exposed: info.count,
+            hidden: availableCount - info.count,
             chars: info.chars,
             hash: info.hash,
             tokens: compactionLib.estimateTokens([], info.tools),
@@ -1400,9 +1406,8 @@ function register(ctx) {
         }
         runStore.appendEvent(projectRoot, runId, 'tool_face', toolFace);
       }
-      // 工具引导（名称 + 一句话）只列**实际暴露**的工具：提示词里列着模型看不到的工具 = 悬空指令。
-      // 未裁剪（toolExposure === null）时它与 listTools() 等价 —— 与改动前逐字节一致。
-      const toolGuide = agent.buildToolGuide(registry ? registry.listTools().filter((t) => registry.isExposed(t.name)) : []);
+      const exposedTools = registry?.exposedTools() || [];
+      const toolGuide = agent.buildToolGuide(exposedTools);
       // 注入给模型的画布摘要用**预算裁剪后**的那一份（分类/工具侧仍用完整摘要：它们不是提示词固定税）
       let systemContent = agent.buildSystemPrompt(soul, canvasSummaryForPrompt, toolGuide, memoryText, skillsText, {
         prompt,
@@ -1416,11 +1421,12 @@ function register(ctx) {
         intentHint: intentPolicy ? intentPolicy.routeHint : null,
         // 工具面同源：按暴露面收敛运行规则（null = 未裁剪 → 规则一个不动，逐字节一致）
         exposedTools: registry ? registry.toolExposure : null,
+        exposedExecutors: registry?.exposedExecutorNames(),
         // 「真的裁剪过」才追加 discover_tools 那条规则（暴露全部工具 ≠ 没裁剪，二者提示词必须一致）
         toolFaceTrimmed: !!(toolFace && toolFace.applied),
       }) + promptContext.trellisText + answerFeedback;
       if (executionRole) systemContent = require('../subagentPrompt.cjs').buildSubagentPrompt({ role: executionRole, objective: prompt }, {
-        role: executionRole, tools: registry ? registry.listTools().filter(tool => registry.isExposed(tool.name)) : [],
+        role: executionRole, tools: exposedTools,
         trellisContext: trellis.assertReady(trellisSnapshot, executionRole),
       });
       const messages = resumePlan
@@ -1570,16 +1576,13 @@ function register(ctx) {
           sourceMessageId: requestId || '',
           planSessionId: cfg.planSessionId || '',
           planOwnerExists: (taskId) => !!(subagentManager && subagentManager.hasTask(taskId)),
-          role: executionRole || 'supervisor',
+          role: executionRole || 'supervisor', forceApproval: composerOverrides?.approvalMode === 'request',
           readOnly: executionRole ? require('../tools/roles.cjs').isReadOnlyRole(executionRole) : false,
           signal: controller.signal,
           scalarStore,
           // 文件遍历类工具（scan_project / find_files / search_files）走 worker 线程：
           // 同步遍历会把主进程卡住，且单次同步 fs 调用不可中断（tools.fs_worker 可关）
           fsWorker: cfg.tools ? cfg.tools.toolsFsWorker !== false : true,
-          // 注意：这里必须传策略对象本身。曾写成 `sandbox: () => sandboxPolicy`，而 context.sandbox()
-          // 会把注入值原样返回 → currentPolicy() 拿到函数、mode/capabilities 全为 undefined →
-          // 隔离静默降级（Windows 的 Job Object 限额不生效；macOS/Linux 退化成无隔离 spawn；strict 不再 fail-closed）。
           sandbox: sandboxPolicy,
           sideEffectGuard,
           checkpoint: checkpointSink,
@@ -1588,7 +1591,7 @@ function register(ctx) {
           // 动作级复核（A2）：副作用动作执行前再判一次；只在判定收紧时把「本不需要确认」变成「要确认」
           intentReview,
           // web_search 后端配置：未启用时工具已被卸载，这里是「配了才用得上」的那份配置
-          webSearchConfig: webSearchConfig(cfg),
+          webSearchConfig: webSearchConfig(cfg, userDataDir()),
           confirm: (level, what, detail, meta) => bridge.confirm(level, what, detail, meta),
           autoExecuteTools: cfg.tools.toolsConfirmWrites === false,
           askUser: (question, options) => bridge.askUser(question, options),
@@ -1755,7 +1758,7 @@ function register(ctx) {
         usage: result.usage || null,
         grounding: result.grounding || null,
         error: result.error || null,
-        codeVerification: result.codeVerification || null,
+        codeVerification: result.codeVerification || null, taskAcceptance: result.taskAcceptance || null,
         streamRestarts: result.streamRestarts || 0,
       });
       if (goalAdmission) settleGoalTask(terminalState === 'COMPLETED' && !result.error ? 'completed' : terminalState === 'CANCELLED' ? 'cancelled' : 'failed', result);
@@ -1777,7 +1780,7 @@ function register(ctx) {
       const out = {
         ok: !result.error,
         reply: result.content,
-        codeVerification: result.codeVerification || null,
+        codeVerification: result.codeVerification || null, taskAcceptance: result.taskAcceptance || null,
         reasoning: result.reasoning,
         toolCalls: result.toolCalls,
         usage: result.usage,

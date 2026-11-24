@@ -23,7 +23,7 @@ name: CodeNode
 ```json
 {
   "version": 1,
-  "turns": 1,
+  "turns": 6,
   "reflectedAt": 0,
   "samples": [
     {
@@ -31,6 +31,36 @@ name: CodeNode
       "turn": 1,
       "user": "你好，请问你是谁啊",
       "assistant": "你好，我是 CodeNode，一个工具型编程 Agent。\n\n我能帮你做的事：\n- 探索/分析项目结构与源码（扫描、检索、读文件）\n- 编写与修改代码、执行构建和测试命令\n- 静态代码审查、排查问题\n- 把任务拆成计划并跟踪执行\n\n当前画布是空的，也没有绑定具体项目任务。你想让我做什么？"
+    },
+    {
+      "id": "0553010c-f86d-4605-a35e-08be869fac4d",
+      "turn": 2,
+      "user": "把 a.txt 读出来",
+      "assistant": "完成"
+    },
+    {
+      "id": "bfe98425-9478-4093-8980-8929cc513716",
+      "turn": 3,
+      "user": "把 a.txt 读出来",
+      "assistant": "完成"
+    },
+    {
+      "id": "5c6d6f0b-1736-4cc2-abc3-8a4c1c2caeb0",
+      "turn": 4,
+      "user": "把 a.txt 读出来",
+      "assistant": "完成"
+    },
+    {
+      "id": "b7596194-693c-4aca-b0d7-4b9533adb428",
+      "turn": 5,
+      "user": "把 a.txt 读出来",
+      "assistant": "完成"
+    },
+    {
+      "id": "667f59a3-13e1-4017-82af-fea226696ba9",
+      "turn": 6,
+      "user": "把 a.txt 读出来",
+      "assistant": "完成"
     }
   ],
   "traits": {}

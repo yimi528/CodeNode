@@ -12,13 +12,9 @@ import { NODE_TEMPLATES } from '../nodes';
 import { useGraphStore } from '../store/graphStore';
 import { useSessionStore } from '../store/sessionStore';
 import { useUiStore } from '../store/uiStore';
-import type { VectorData } from '../types';
 
 /** 只依赖 ReactFlow 的三个视口方法，避免把整个实例类型带进调用点 */
 export type ViewportApi = Pick<ReactFlowInstance, 'screenToFlowPosition' | 'getViewport' | 'setViewport'>;
-
-/** 画布节点默认尺寸（模板未声明时兜底） */
-const DEFAULT_CANVAS_SIZE = { width: 1040, height: 640 };
 
 /** 放置后自动取景的 zoom 上限：节点太大，超过这个倍率就收一档 */
 const REVEAL_MAX_ZOOM = 0.55;
@@ -55,21 +51,35 @@ export function revealPlacedNode(api: ViewportApi, width: number, height: number
   api.setViewport({ x: rect.width / 2 - center.x * targetZoom, y: rect.height / 2 - center.y * targetZoom, zoom: targetZoom }, { duration: options.duration ?? 240 });
 }
 
+export function placeWorkflowNode(
+  api: Pick<ViewportApi, 'screenToFlowPosition'>,
+  type: Exclude<keyof typeof NODE_TEMPLATES, 'vector'>,
+  point?: { x: number; y: number },
+): string {
+  const sessions = useSessionStore.getState();
+  if (!sessions.current()) sessions.newCanvas();
+  const { left, top, width, height } = canvasScreenRect();
+  const center = api.screenToFlowPosition(point ?? { x: left + width / 2, y: top + height / 2 });
+  const id = newNodeId(type);
+  const dimensions = type === 'scope' ? NODE_TEMPLATES.scope : type === 'image' ? { width: 320, height: 224 } : { width: 176, height: 108 };
+  const position = point ? center : { x: center.x - dimensions.width / 2, y: center.y - dimensions.height / 2 };
+  useGraphStore.getState().addNode({ id, type, position, data: { ...NODE_TEMPLATES[type] } });
+  return id;
+}
+
 /**
  * 新增一个画布节点：可视区中心放置 → 选中（addNode 自带）→ 提示 → 自动取景。
  * 工具栏按钮与「Shift+A → 画布节点」共用；返回新节点 id。
  */
 export function placeCanvasNode(api: ViewportApi, options: { rect?: DOMRect; focusDelay?: number } = {}): string {
   if (!useSessionStore.getState().current()) useSessionStore.getState().newCanvas();
-  const template = NODE_TEMPLATES.vector;
-  const data = template.data as VectorData;
-  const width = data.width ?? DEFAULT_CANVAS_SIZE.width;
-  const height = data.height ?? DEFAULT_CANVAS_SIZE.height;
+  const data = NODE_TEMPLATES.vector;
+  const { width, height } = data;
   const rect = options.rect ?? canvasScreenRect();
   const id = newNodeId('vector');
 
   useGraphStore.getState().addNode({ id, type: 'vector', position: centeredFlowPosition(api, width, height, rect), data: { ...data } });
-  useUiStore.getState().setToast('已添加画布节点');
+  useUiStore.getState().setToast('已添加草图');
 
   // 新增节点后 ReactFlow 才测得出尺寸，取景放到下一帧之后
   const focus = () => revealPlacedNode(api, width, height, rect);

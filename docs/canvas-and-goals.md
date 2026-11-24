@@ -6,6 +6,12 @@ The canvas is a real workflow engine, not a sketch pad: execution state is persi
 
 ## The canvas
 
+Use Shift+A or the toolbar to add nodes. The canvas supports editing, moving, connecting, deleting and arranging nodes directly.
+
+The [vector drawing plugin](../plugins/vector-editor/README.md) is enabled by default. Manage it under Settings → Appearance → Vector editor. Turning it off leaves drawings intact.
+
+Settings → Appearance → `帮助与教程` permanently provides the tutorial and shortcut reference. Lessons cover creating, editing and connecting nodes, canvas navigation and embedded drawing tools. Search finds lessons and shortcuts by action or key. Exercises use isolated examples; returning preserves the graph, conversation and input draft, and tutorial key presses do not modify the background canvas. Drawing shortcuts apply inside the embedded canvas node. Keyboard combinations display Ctrl or ⌘ for the current platform; mouse combinations retain Ctrl.
+
 ![CodeNode workflow canvas](screenshots/codenode-canvas.png)
 
 - The visible graph layer uses Canvas 2D; node selection, dragging, connection hit-testing, zooming and keyboard operations stay on a transparent interaction layer.

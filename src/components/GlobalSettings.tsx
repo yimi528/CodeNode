@@ -9,7 +9,9 @@ import BackendSettingsPanel from './BackendSettingsPanel';
 import SchedulingSettingsPanel from './SchedulingSettingsPanel';
 import outputUi from '../../config/ui.output.json';
 import CostSettingsPanel from './CostSettingsPanel';
-import TrellisCliSettings from './TrellisCliSettings';
+import ProjectIntegrationSettings from './ProjectIntegrationSettings';
+import VectorPluginCard from '../plugins/VectorPluginCard';
+import WebSearchSettingsPanel from './WebSearchSettingsPanel';
 import { THEMES, THEME_HINTS, THEME_LABELS, type Theme } from '../lib/theme';
 
 
@@ -35,7 +37,7 @@ export default function GlobalSettings() {
   if (!open) return null;
   return <div className="settings-mask" onClick={close}><section className="global-settings" role="dialog" aria-modal="true" aria-label="全局设置" onClick={event => event.stopPropagation()}>
     <header><strong>设置</strong><button className="settings-close" aria-label="关闭设置" onClick={close}>×</button></header>
-    <div className="settings-layout"><nav aria-label="设置分类">{([['general','常规'],['layout','界面'],['agents','Agent 连接'],['execution','执行'],['trellis','Trellis'],['costs','成本与模型'],['rag','检索'],['editing','安全编辑'],['archived','已归档聊天']] as const).map(([id,label]) => <button key={id} aria-pressed={tab === id} onClick={() => openSettings(id)}>{label}</button>)}</nav>
+    <div className="settings-layout"><nav aria-label="设置分类">{([['general','常规'],['layout','界面'],['project','项目设置'],['agents','Agent 连接'],['execution','执行'],['costs','成本与模型'],['rag','检索'],['editing','安全编辑'],['archived','已归档聊天']] as const).map(([id,label]) => <button key={id} aria-pressed={tab === id} onClick={() => openSettings(id)}>{label}</button>)}</nav>
     <div className="settings-content" key={tab}>
       {tab === 'general' && <><h2>常规</h2>
         <section className="settings-group"><label className="settings-row" htmlFor="settings-theme"><span>主题<small className="settings-theme-hint">{THEME_HINTS[theme]}</small></span>
@@ -59,15 +61,22 @@ export default function GlobalSettings() {
       <label className="settings-row"><span>菜单宽度</span><input aria-label="菜单宽度" type="range" min="200" max="360" value={preferences.menuWidth} onChange={e => updatePreferences({menuWidth:Number(e.target.value)})}/><output>{preferences.menuWidth}px</output></label>
       <label className="settings-row"><span>菜单行高</span><input aria-label="菜单行高" type="range" min="28" max="44" value={preferences.menuRowHeight} onChange={e => updatePreferences({menuRowHeight:Number(e.target.value)})}/><output>{preferences.menuRowHeight}px</output></label>
       {([['showShortcuts','显示快捷键提示'],['showGroupLabels','显示分组标题'],['hideDisabledActions','隐藏不可用操作']] as const).map(([key,label]) => <label className="settings-row" key={key}><span>{label}</span><input type="checkbox" checked={preferences[key]} onChange={e => updatePreferences({[key]:e.target.checked})}/></label>)}
-      <fieldset className="settings-menu-actions"><legend>菜单中显示的操作</legend>{CANVAS_ACTIONS.map(action => <label key={action.id}><input type="checkbox" checked={preferences.visibleActions.includes(action.id)} onChange={e => updatePreferences({visibleActions:e.target.checked ? [...preferences.visibleActions,action.id] : preferences.visibleActions.filter(id => id !== action.id)})}/>{action.label}</label>)}</fieldset>
-</details><div className="settings-reset"><button onClick={resetPreferences}>恢复默认偏好</button></div></>}
+      <fieldset className="settings-menu-actions"><legend>工具栏和菜单中显示的操作</legend>{CANVAS_ACTIONS.map(action => <label key={action.id}><input type="checkbox" checked={preferences.visibleActions.includes(action.id)} onChange={e => updatePreferences({visibleActions:e.target.checked ? [...preferences.visibleActions,action.id] : preferences.visibleActions.filter(id => id !== action.id)})}/>{action.label}</label>)}</fieldset>
+</details><details className="settings-advanced settings-group"><summary>矢量编辑器</summary><VectorPluginCard /></details><div className="settings-reset"><button onClick={() => openSettings('help')}>帮助与教程</button><button onClick={resetPreferences}>恢复默认偏好</button></div></>}
       {tab === 'agents' && <><div className="settings-page-title"><h2>Agent 连接</h2><button onClick={()=>useUiStore.getState().openModelManager()}>管理模型</button></div><BackendSettingsPanel /></>}
       {tab === 'execution' && <><h2>执行</h2><AgentExecutionSettings /><details className="settings-advanced settings-group"><summary>并发与任务额度</summary><SchedulingSettingsPanel /></details></>}
-      {tab === 'trellis' && <><h2>Trellis</h2><TrellisCliSettings /></>}
-      {tab === 'rag' && <><h2>检索</h2><p className="settings-scope">应用于当前项目</p><RagSettingsPanel /></>}
+      {tab === 'project' && <ProjectIntegrationSettings />}
+      {tab === 'rag' && <><h2>检索</h2><p className="settings-scope">应用于当前项目</p><RagSettingsPanel /><div className="settings-reset"><button onClick={() => openSettings('web')}>联网搜索</button></div></>}
+      {tab === 'web' && <><h2>联网搜索</h2><WebSearchSettingsPanel /></>}
       {tab === 'editing' && <><h2>安全编辑与校验</h2><EditingSettingsPanel /></>}
       {tab === 'costs' && <><h2>成本与模型</h2><CostSettingsPanel /></>}
       {tab === 'archived' && <ArchivedChatsSettings/>}
+      {tab === 'help' && <><h2>帮助与教程</h2><p className="settings-scope">直接提出任务，或查阅高级编排与插件操作。</p>
+        <section className="settings-group">
+          <div className="settings-row"><span>使用教程<small className="settings-theme-hint">创建、编辑与连接节点，学习画布和绘图工具。</small></span><button onClick={() => useUiStore.getState().openTutorial('create')}>打开使用教程</button></div>
+          <div className="settings-row"><span>快捷键速查<small className="settings-theme-hint">按场景分类，支持搜索操作名称与按键。</small></span><button onClick={() => useUiStore.getState().openTutorial('shortcuts')}>打开快捷键速查</button></div>
+        </section>
+      </>}
     </div></div>
   </section></div>;
 }

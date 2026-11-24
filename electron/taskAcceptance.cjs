@@ -130,6 +130,12 @@ class TaskAcceptance {
     if (!this.context || !this.options.tools?.registry) throw Error('任务验收需要工具执行上下文');
     if (this.options.cfg?.costRunId) require('./runStore.cjs').appendEvent(this.context.projectRoot(), this.options.cfg.costRunId, 'task_acceptance_contract', this.frozen);
     for (const rule of this.frozen.contract.checks) if (rule.reproduce) {
+      if (this.options.cfg?.acceptanceResume) {
+        const saved = this.options.cfg.acceptanceBaselines?.find(item => item.id === rule.id);
+        if (saved && this.options.cfg.costRunId) require('./runStore.cjs').appendEvent(this.context.projectRoot(), this.options.cfg.costRunId, 'task_acceptance_check', { evidence: {...clone(saved), reusedFrom: this.options.cfg.acceptanceResumeRunId} });
+        this.baselines.set(rule.id, saved ? clone(saved) : { id: rule.id, kind: 'command', phase: 'before', status: 'unknown', reason: '原运行缺少修改前复现证据；不能用修改后的文件重新制造基线' });
+        continue;
+      }
       const before = snapshot(this.context, rule.inputs), result = await this.execute(rule, 'before', signal, 0), after = snapshot(this.context, rule.inputs);
       if (!before.complete || !after.complete || before.fingerprint !== after.fingerprint) { result.status = 'unknown'; result.reason = '复现基线的输入版本不完整或在执行期间变化'; }
       this.baselines.set(rule.id, result);

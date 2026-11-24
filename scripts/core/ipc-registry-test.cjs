@@ -15,9 +15,11 @@ const os = require('os');
 const path = require('path');
 
 const EXPECTED = {
+  'branches.cjs': ['branches:list','branches:checkpoint','branches:fork','branches:context','branches:compare','branches:preview-adopt','branches:adopt','branches:archive'],
   'backend.cjs': ['agent:backend-save', 'agent:backend-status', 'agent:backend-control'],
   'models.cjs': ['models:list', 'models:save', 'models:delete', 'models:active', 'models:discover', 'models:connect'],
   'metrics.cjs': ['agent:metrics'],
+  'webSearch.cjs': ['agent:web-search-check', 'agent:web-search-save'],
   'project.cjs': [
     'graph:save', 'graph:open',
     'project:choose', 'project:create', 'project:recent-list', 'project:recent-remember', 'project:recent-forget', 'project:recent-clear', 'project:list', 'project:read', 'project:write', 'project:search',
@@ -74,7 +76,7 @@ function main() {
 
   // 与 main.cjs 之外的源码对账：所有 ipcMain.handle/on 的通道都得在某个模块的注册里出现
   const sources = files.map((f) => fs.readFileSync(path.join(IPC_DIR, f), 'utf8')).join('\n');
-  const declared = new Set((sources.match(/(?:ipcMain\.(?:handle|on)|handleGoal)\('([^']+)'/g) || []).map((m) => m.replace(/.*'([^']+)'/, '$1')));
+  const declared = new Set((sources.match(/(?:ipcMain\.(?:handle|on)|handleGoal|handle)\('([^']+)'/g) || []).map((m) => m.replace(/.*'([^']+)'/, '$1')));
   assert.strictEqual(declared.size, registeredTotal, `模块里声明的通道数(${declared.size})与实际注册数(${registeredTotal})不一致`);
 
   console.log(`IPC REGISTRY TEST: PASS  ${files.length} 个模块 / ${registeredTotal} 个通道`);

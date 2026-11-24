@@ -78,6 +78,21 @@ async function main() {
   assert.strictEqual(cvNode.data.accent, '#22d3ee', '画布节点应使用专属主色');
   assert.strictEqual(model.stats().canvases, 1, '画布节点应计入 canvases 统计');
 
+  model.doc.root = { nodes: [], edges: [] };
+  const streamlined = await exec({ operations: [
+    { action: 'create', id: 'photo', name: '截图', type: 'image', relativePath: 'screen.png' },
+    { action: 'create', id: 'review', name: '检查截图', type: 'task' },
+    { action: 'connect', sourceId: 'photo', targetId: 'review' },
+    { action: 'create', id: 'notes', name: '结果', type: 'sketch' },
+    { action: 'create', id: 'review-group', name: '截图检查', type: 'group', members: ['photo', 'review'] },
+  ] });
+  assert.equal(streamlined.ok, true, streamlined.text);
+  assert.doesNotMatch(streamlined.text, /链路提示|补建/);
+  assert.equal(model.byId('photo').data.imagePath, 'screen.png');
+  assert.equal(model.byId('notes').type, 'vector');
+  assert.equal(model.byId('review-group').type, 'scope');
+  assert.ok(model.edges().some(edge => edge.source === 'photo' && edge.target === 'review'));
+
   console.log('WORKBENCH MODEL TEST: PASS');
 }
 

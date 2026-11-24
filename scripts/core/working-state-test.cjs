@@ -1,0 +1,43 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const { update, PREFIX } = require('../../electron/workingState.cjs');
+const plan = require('../../electron/plan.cjs');
+const { fingerprint, createVersions } = require('../../electron/tools/workspaceCache.cjs');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codenode-working-state-'));
+(async () => {
+  const normalized = plan.normalizePlan([{ step: '最小复现', acceptanceCriteria: '复现具体反例', status: 'in_progress', hypothesis: '边界条件少处理一项' }]);
+  if (normalized.ok === false) throw Error(normalized.error);
+  const messages = [{ role: 'user', content: '修复边界错误，保留接口' }];
+  const records = [{ name: 'edit_file', args: '{"path":"app.js"}', callId: 'edit-1', ok: true, data: { path: 'app.js', sha256: 'new' } },
+    { name: 'execute_shell', callId: 'test-1', ok: true, data: { command: 'npm test', exitCode: 1, output: 'boundary test fails' } }];
+  const state = update({ enabled: true, root, runId: 'run-1', messages, records, plan: normalized, verification: { status: 'failed', verified: false } });
+  assert.equal(state.hypothesis.text, '边界条件少处理一项'); assert.equal(state.verification.verified, false);
+  assert.equal(state.checks[0].exitCode, 1); assert.deepEqual(state.changes, ['app.js']);
+  assert.ok(fs.existsSync(path.join(root, '.codenode/runs/run-1.working-state.json')));
+  const recovered = JSON.parse(JSON.stringify(messages));
+  const historical = update({ enabled: true, root, runId: 'run-2', messages: recovered, records: [] });
+  assert.equal(historical.checks[0].historical, true); assert.equal(historical.verification.verified, false);
+  assert.equal(recovered.filter(m => m.content.startsWith(PREFIX)).length, 1);
+  const largeMessages = [{ role: 'user', content: '原始任务'.repeat(1000) }];
+  const many = Array.from({ length: 20 }, (_, i) => ({ name: 'execute_shell', args: '{}', callId: 'c'+i, ok: true,
+    data: { path: 'p'.repeat(200)+i, command: 'cmd'.repeat(200), output: 'o'.repeat(1000), exitCode: 1 } }));
+  update({ enabled: true, root, runId: 'large', messages: largeMessages, records: many });
+  const checkpointer = require('../../electron/runCheckpoint.cjs');
+  checkpointer.saveMessages(root, 'state-real-checkpoint', largeMessages);
+  const realMessages = checkpointer.lastMessages(checkpointer.readCheckpoints(root, 'state-real-checkpoint'));
+  const savedState = realMessages.find(m => m.content.startsWith(PREFIX));
+  assert.ok(savedState.content.length < 6000);
+  assert.equal(JSON.parse(savedState.content.slice(PREFIX.length).split('\n工作规则：')[0]).truncated, true);
+  const unchanged = JSON.stringify(recovered); update({ enabled: false, messages: recovered, records: [] }); assert.equal(JSON.stringify(recovered), unchanged);
+  fs.writeFileSync(path.join(root, 'data.txt'), 'OLD'); const first = await fingerprint(root);
+  const stat = fs.statSync(path.join(root, 'data.txt')); fs.writeFileSync(path.join(root, 'data.txt'), 'NEW'); fs.utimesSync(path.join(root, 'data.txt'), stat.atime, stat.mtime);
+  assert.notEqual(await fingerprint(root), first);
+  const versions = createVersions(root, true);
+  assert.equal(await versions.valid('search_files', {}, { version: first }, await fingerprint(root)), false);
+  assert.equal(await versions.valid('list_directory', {}, {}, null), false);
+  const cancelled = new AbortController(); cancelled.abort(); await assert.rejects(fingerprint(root, cancelled.signal), { name: 'AbortError' });
+  console.log('WORKING STATE / WORKSPACE VERSIONS: PASS (hypothesis, evidence, persistence, restored checks, external bytes, cancellation)');
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => fs.rmSync(root, { recursive: true, force: true }));

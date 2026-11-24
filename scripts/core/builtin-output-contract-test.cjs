@@ -23,8 +23,10 @@ async function main() {
   const manager = new SubagentManager({ cfg: {}, registry, runId: 'output-inventory' });
   manager.register(registry);
   const actual = registry.listDescriptors();
-  assert.deepEqual(actual.map((d) => d.name).sort(), Object.keys(schemas).sort());
-  assert.equal(actual.length, 43, 'New built-ins require a named executable output contract');
+  const published = [...new Set(Object.keys(schemas).map(name => registry.modelToolName(name)))];
+  assert.deepEqual(actual.map(d => d.name).sort(), published.sort());
+  for (const legacy of ['find_files', 'list_directory']) assert.ok(registry.descriptorOf(legacy).outputSchema);
+  assert.equal(actual.length, 19, 'New built-ins require a named executable output contract');
   for (const descriptor of actual) {
     assert.notEqual(descriptor.outputSchema, null, descriptor.name);
     assert.notEqual(validateOutput([], descriptor.outputSchema), null, descriptor.name + ' must not accept arbitrary data');
@@ -41,7 +43,7 @@ async function main() {
     module.register(direct);
     for (const descriptor of direct.listDescriptors()) assert.notEqual(descriptor.outputSchema, null, descriptor.name);
   }
-  console.log('PASS 43 built-in output contracts are registered, executable, and reject missing/wrong payloads');
+  console.log('PASS 24 published built-in output contracts are registered, executable, and reject missing/wrong payloads');
 
   const policy = sandbox.resolvePolicy({ mode: 'off' }, { projectRoot: root, userDataDir: root });
   sandbox.setDefaultPolicy(policy);
@@ -55,7 +57,8 @@ async function main() {
   /** @type {Array<[string, any]>} */
   const samples = [
     ['read_file', { path: 'source.js' }], ['read_file', { path: 'source.js', analyze: true }],
-    ['find_files', { pattern: '**/*' }], ['search_files', { pattern: 'contract' }], ['list_directory', {}],
+    ['find_files', { pattern: '**/*' }], ['list_files', { kind:'glob', pattern:'**/*' }],
+    ['list_files', { kind:'dir' }], ['search_files', { pattern: 'contract' }], ['list_directory', {}],
     ['scan_project', {}], ['project_info', {}], ['analyze_project', {}],
     ['write_file', { path: 'written.txt', content: 'before', backup: false }],
     ['edit_file', { path: 'written.txt', oldText: 'before', newText: 'after' }],

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useUiStore } from '../store/uiStore';
 
 function isInteractive(target: EventTarget | null): boolean {
   return target instanceof Element && !!target.closest(
@@ -18,6 +19,7 @@ export function useSpacePan() {
     };
     const reset = () => setPressed(false);
     const down = (event: KeyboardEvent) => {
+      if (useUiStore.getState().tutorialOpen) { reset(); return; }
       const target = event.composedPath()[0] || event.target;
       if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
           event.isComposing || event.keyCode === 229 ||

@@ -14,9 +14,9 @@ const SOURCE = path.join(ROOT, 'assets', 'branding', 'codenode-icon.png');
 const OUTPUT_DIR = path.join(ROOT, 'build');
 const OUTPUT = path.join(OUTPUT_DIR, 'icon.ico');
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
-/** 只出 PNG、不进 ICO 的尺寸（ICO 规范上限 256）：electron-builder 的 Linux 目标要求 ≥256 的 PNG，
- *  512 是官方推荐值，源图 1254px 足够，不必放大。 */
-const PNG_SIZES = [512];
+/** 只出 PNG、不进 ICO 的尺寸（ICO 规范上限 256）：Linux 使用 512px，macOS 使用
+ *  1024px 作为 electron-builder 生成应用 ICNS 的品牌源图。 */
+const PNG_SIZES = [512, 1024];
 /** 统一按 1024 渲染再下采样，保证 512 这类较大尺寸也清晰（DOM 里 <img> 的渲染尺寸即采样的源尺寸）。 */
 const RENDER_SIZE = 1024;
 // 源图 + 本脚本的指纹：图标渲染依赖平台（Windows/macOS/Linux 的缩放与抗锯齿不同），

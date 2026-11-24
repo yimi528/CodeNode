@@ -39,6 +39,52 @@ async function main() {
   second.cleanup();
   assert.ok(!(await next));
   assert.strictEqual(ipcMain.listenerCount('tools:response'), 0);
+  // Exercise the same registry → approval service → renderer bridge path as the desktop.
+  const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'codenode-action-approval-'));
+  const store = require('../../electron/approvalRules.cjs');
+  const registry = require('../../electron/tools/toolkit.cjs').buildDefaultRegistryWithConfig({toolsConfirmWrites:true});
+  const prompts = [];
+  const effects = [];
+  let answer = {ok:true, always:'project'};
+  const approvingSender = {id:3, isDestroyed:()=>false, send: (_channel, payload) => {
+    prompts.push(payload);
+    ipcMain.emit('tools:response', {sender:{id:3}}, {id:payload.id, result:answer});
+  }};
+  const live = module.exports.makeBridge(approvingSender, null, {projectRoot:root});
+  const openContext = () => new AgentToolContext({ projectRoot:root, confirm:live.confirm,
+    ui: async action => { effects.push(action); return true; }, saveProject:async () => path.join(root,'a.cnode') });
+  try {
+    const ctx = openContext();
+    const execute = (name, args, context = ctx) => registry.execute(name, args, context);
+    assert.equal((await execute('ui_control', {action:'focus', nodeId:'a'})).ok, true);
+    assert.deepEqual(prompts[0].rememberActions, ['get_workbench_model.focus']);
+    assert.equal((await execute('get_workbench_model', {view:'focus',nodeId:'b'})).ok, true);
+    assert.equal(prompts.length, 1, 'same action immediately reuses the saved rule');
+    assert.equal((await execute('get_workbench_model', {view:'zoom',zoom:1})).ok, true);
+    assert.equal(prompts.length, 2, 'sibling with same capability and level still asks');
+    assert.equal((await execute('ui_control', {action:'zoom',zoom:1}, openContext())).ok, true);
+    assert.equal(prompts.length, 2, 'new spelling first, then legacy spelling after reopening');
+    answer = {ok:false, always:'project'};
+    assert.equal((await execute('get_workbench_model',{view:'pan',x:1,y:2})).ok, false);
+    assert.deepEqual(effects, ['focus','focus','zoom','zoom']);
+    assert.deepEqual(store.readRules(root).rules.map(r=>r.action), ['get_workbench_model.focus','get_workbench_model.zoom']);
+
+    fs.writeFileSync(store.rulesFile(root), JSON.stringify({version:1,rules:[
+      {id:'old-save',tool:'save_project',capability:'project.save',level:'WRITE'}
+    ]}));
+    assert.equal((await execute('save_project',{})).ok, true);
+    assert.equal((await execute('workbench_edit',{kind:'save_project'})).ok, true);
+    assert.equal(prompts.length, 3);
+    assert.equal((await execute('workbench_edit',{action:'create',name:'node'})).ok, false);
+    assert.equal((await execute('ui_control',{action:'focus',nodeId:'a'})).ok, false, 'removed rule no longer applies');
+    assert.equal(prompts.length, 5);
+    assert.equal(await live.confirm('HIGH','execute_shell','command'), false);
+    assert.deepEqual(Array.from(prompts.at(-1).rememberActions), []);
+    assert.equal(store.readRules(root).rules.length, 1);
+  } finally {
+    live.cleanup();
+    fs.rmSync(root,{recursive:true,force:true});
+  }
   console.log('BRIDGE CANCELLATION: PASS');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

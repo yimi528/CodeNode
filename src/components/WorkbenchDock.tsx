@@ -1,3 +1,4 @@
+import { nodePresentation } from '../nodes/presentation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IntentBadge } from './IntentBadge';
 import { workflowReadiness } from '../lib/workflowRunState';
@@ -163,6 +164,7 @@ function TerminalPanel() {
 }
 
 function RunsPanel() {
+  const showFlow = useUiStore(s => s.preferences.visibleActions.includes('flow'));
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
   const updateNodeData = useGraphStore((s) => s.updateNodeData);
@@ -421,7 +423,7 @@ function RunsPanel() {
     const [toolsResult, cfg] = await Promise.all([api.agentTools(root), api.agentConfig(root)]);
     const availableModels = [cfg.model, ...(cfg.models || []).flatMap((model) => [model.id, model.label, model.model])];
     const missing = missingTemplateDeps(deps, {
-      tools: (toolsResult.tools || []).map((tool) => tool.name),
+      tools: [...(toolsResult.executorNames || []), ...(toolsResult.tools || []).map((tool) => tool.name)],
       models: availableModels,
       tree: useProjectStore.getState().tree,
     });
@@ -521,6 +523,7 @@ function RunsPanel() {
       <div className="dock-run-toolbar"><div><strong>连续执行</strong><span className="dock-file-meta">按连线拓扑顺序运行；失败或停止后可继续未完成节点</span></div><div><button onClick={() => { cancel.current = true; }} disabled={!running}>停止</button>
       {/* #7：「全部停止」出口 —— 并发下必须能一次停干净所有在跑的请求（含被覆盖的那条控制权） */}
       <button className="dock-danger" onClick={stopEverything} disabled={!sending}>全部停止 Agent</button>
+      {showFlow && <button disabled={!nodes.length} onClick={() => { runFlow(); useUiStore.getState().setToast('数据流已计算'); }}>计算数据流</button>}
       <button onClick={() => void inspectTemplate()} disabled={running || !root}>导入模板</button>
       <button onClick={() => void exportTemplate()} disabled={running || !nodes.length}>导出模板</button>
       <button className="dock-primary" onClick={() => void start()} disabled={running || !readiness.ready}>{running ? '执行中…' : resumeAvailable ? '继续执行' : '开始执行'}</button></div></div>
@@ -670,7 +673,7 @@ function RunsPanel() {
         <span>隔离 {metrics.sandbox?.backend || 'none'}{metrics.sandbox?.degraded?.length ? '（降级：' + metrics.sandbox.degraded.join('/') + '）' : ''}</span>
         {metrics.alerts?.length ? <span className="dock-metrics-alert">{metrics.alerts[metrics.alerts.length - 1].message}</span> : null}
       </div>}
-      <div className="dock-run-list">{items.map((item) => <div className={`dock-run-item ${item.status}`} key={item.id}><span className="dock-run-dot" /><div className="dock-run-main"><div><strong>{item.label}</strong><span className="dock-run-type">{item.type}</span><span className="dock-run-status">{item.status}</span>{item.attempts ? <span className="dock-run-type">尝试 {item.attempts} 次</span> : null}</div>{item.input && <details><summary>消费的上游结果</summary><pre>{item.input}</pre></details>}{item.failure && <div className="task-trace-warning">{item.failure}</div>}{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
+      <div className="dock-run-list">{items.map((item) => <div className={`dock-run-item ${item.status}`} key={item.id}><span className="dock-run-dot" /><div className="dock-run-main"><div><strong>{item.label}</strong><span className="dock-run-type">{nodePresentation(item.type).label}</span><span className="dock-run-status">{item.status}</span>{item.attempts ? <span className="dock-run-type">尝试 {item.attempts} 次</span> : null}</div>{item.input && <details><summary>消费的上游结果</summary><pre>{item.input}</pre></details>}{item.failure && <div className="task-trace-warning">{item.failure}</div>}{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
       <RunReplayPanel />
     </div>
   );

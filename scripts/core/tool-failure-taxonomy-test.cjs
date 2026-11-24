@@ -122,7 +122,7 @@ const policy = sandbox.resolvePolicy({ mode: 'off' }, { projectRoot: root, userD
 sandbox.setDefaultPolicy(policy);
 
 function makeRegistry() {
-  const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false, toolsAllowed: ['read_file'] });
+  const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false, toolsAllowed: ['read_file', 'fail_permission', 'fail_unknown', 'fail_argument'] });
   registry.register('fail_permission', '测试替身：权限失败', { type: 'object', properties: {} }, async () =>
     AgentToolResult.failure('PERMISSION_DENIED', '只读上下文不允许执行会修改工作区的工具：write_file', { tool: 'fail_permission' }));
   registry.register('fail_unknown', '测试替身：未登记的失败码', { type: 'object', properties: {} }, async () =>

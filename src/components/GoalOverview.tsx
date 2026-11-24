@@ -38,6 +38,18 @@ export default function GoalOverview(){
  </section>;
 }
 export function WorkbenchViewSwitcher(){
- const {preferences,updatePreferences}=useUiStore();
- return <nav className="workbench-view-switch" aria-label="工作台视图"><button aria-current={preferences.workbenchView==='overview'?'page':undefined} aria-label="切换到总览" onClick={()=>updatePreferences({workbenchView:'overview'})}>总览</button><button aria-current={preferences.workbenchView==='conversation'?'page':undefined} aria-label="切换到对话" onClick={()=>updatePreferences({workbenchView:'conversation'})}>对话</button></nav>;
+ const workbenchView = useUiStore(s => s.preferences.workbenchView);
+ const editing = useUiStore(s => s.sideTab === 'project');
+ const replay = useUiStore(s => s.stageReplayOpen) && !editing;
+ const selectView = (view: 'overview' | 'conversation') => {
+   const ui = useUiStore.getState();
+   if (editing) ui.setSideTab('agent');
+   ui.closeStageReplay();
+   ui.updatePreferences({ workbenchView: view });
+ };
+ return <nav className="workbench-view-switch" aria-label="工作台视图">
+   <button type="button" aria-current={!editing && !replay && workbenchView === 'overview' ? 'page' : undefined} aria-label="切换到总览" onClick={() => selectView('overview')}>总览</button>
+   <button type="button" aria-current={!editing && !replay && workbenchView === 'conversation' ? 'page' : undefined} aria-label="切换到画布" onClick={() => selectView('conversation')}>画布</button>
+   <button type="button" aria-current={replay ? 'page' : undefined} onClick={() => useUiStore.getState().openStageReplay()}>3D 回放</button>
+ </nav>;
 }

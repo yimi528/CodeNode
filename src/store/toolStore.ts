@@ -6,6 +6,7 @@ export type ConfirmRequest = {
   level: string;
   what: string;
   detail: string;
+  rememberActions?: string[];
 };
 
 export type AskRequest = {

@@ -436,6 +436,8 @@ class SideEffectLedger {
         path: record.statePath,
         tool: record.tool,
         phase: record.phase,
+        ok: record.ok,
+        committedAt: record.committedAt,
         actor: record.actor || null,
         firstIntentAt: record.firstIntentAt || record.lastIntentAt || record.committedAt || null,
         postStateDigest: record.postStateDigest || null,

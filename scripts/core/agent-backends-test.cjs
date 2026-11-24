@@ -33,7 +33,8 @@ class FixtureRpc extends StdioRpc {
   }
 }
 const selected = { ...settings.config.defaults, backend: 'codex', executable: process.execPath, sandbox: 'workspace-write' };
-const create = () => new BackendPort('codex',selected,new AcpBackend(selected,{StdioRpc:FixtureRpc}));
+const create = (backend = 'codex', config = selected) =>
+  new BackendPort(backend, config, new AcpBackend(config, { StdioRpc: FixtureRpc }));
 const cfg = { editing: { autoVerify: true, blockOnFailure: true, lintCommand: 'node -e "process.exit(0)"', testCommand: 'node math.test.cjs' } };
 function waitFor(predicate, message, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
@@ -53,6 +54,26 @@ async function main() {
   assert.equal(network.env.HTTPS_PROXY, 'http://127.0.0.1:7890/');
   assert.equal(network.proxySource, 'windows-system');
   assert.match(network.env.NO_PROXY, /localhost/); assert.match(network.env.NO_PROXY, /\.example.local/);
+  const macProxy = require('../../electron/backends/network.cjs').parseMacProxy(`<dictionary> {
+  HTTPEnable : 0
+  HTTPProxy : old.local
+  HTTPPort : 8888
+  HTTPSEnable : 1
+  HTTPSProxy : 127.0.0.1
+  HTTPSPort : 7890
+  ExceptionsList : <array> {
+    0 : localhost,*.example.local
+  }
+  __SCOPED__ : <dictionary> {
+    HTTPSEnable : 0
+    HTTPSProxy : ignored
+  }
+}`);
+  const macNetwork = await launchEnvironment({platform:'darwin', env:{}, readProxy:async()=>macProxy});
+  assert.equal(macNetwork.env.HTTPS_PROXY,'http://127.0.0.1:7890/');
+  assert.equal(macNetwork.env.HTTP_PROXY,undefined);
+  assert.match(macNetwork.env.NO_PROXY,/\.example\.local/);
+  assert.equal(macNetwork.proxySource,'macos-system');
   const inherited = await launchEnvironment({ platform: 'win32', env: { HTTPS_PROXY: 'http://explicit:8080', NO_PROXY: 'private.local' }, readProxy: async () => { throw new Error('must not read system'); } });
   assert.equal(inherited.env.HTTPS_PROXY, 'http://explicit:8080'); assert.equal(inherited.env.NO_PROXY, 'private.local');
   const separate = await launchEnvironment({ platform: 'win32', env: {}, readProxy: async () => ({ enabled: 1, server: 'http=127.0.0.1:8080;https=127.0.0.1:8443' }) });
@@ -184,6 +205,51 @@ async function main() {
   const blocked = await external.runExternal({ ...common, requestId: 'blocked', prompt: 'resume-edit', resumeRunId: 'disconnected', resumeForce: true, confirm: async () => true }, { createBackend: create });
   assert.equal(blocked.ok, false); assert.match(blocked.error, /仍在运行/);
   console.log('BACKEND TEST STAGE: disconnect and duplicate guard');
+  const composerPolicy = require('../../electron/composerPolicy.cjs');
+  const override = approvalMode => composerPolicy.turnOptions({ composerOverrides: { approvalMode } });
+  assert.equal(override('request').autoExecuteTools, false);
+  assert.equal(override('assist').autoExecuteTools, true);
+  assert.deepEqual(override('custom'), { approvalMode: 'custom' });
+  assert.equal(composerPolicy.canAssistWrite('assist', 'docs/notes.md'), true);
+  for (const rel of ['../escape.md', '.codenode/rules.md', 'AGENTS.md', 'src/main.js']) {
+    assert.equal(composerPolicy.canAssistWrite('assist', rel), false);
+  }
+  assert.equal(composerPolicy.canAssistWrite('request', 'docs/notes.md'), false);
+  const full = { ...common, sessionId: 'full-test', requestId: 'full-denied', approvalMode: 'full', prompt: 'resume-edit' };
+  const deniedFull = await external.runExternal(full, {createBackend: create, authorizeFullAccess: async () => false});
+  assert.equal(deniedFull.state, 'CANCELLED');
+  assert.equal(runStore.readRun(root, full.requestId).length, 0);
+  let prompts = 0;
+  const authorize = async () => { prompts++; return true; };
+  for (const restricted of [{ goalId: 'goal-test' }, { sandboxPolicy: { ...sandboxPolicy, mode: 'strict' } }]) {
+    const refused = await external.runExternal({ ...full, ...restricted }, {createBackend:create, authorizeFullAccess:authorize});
+    assert.equal(refused.ok, false);
+  }
+  assert.equal(prompts, 0);
+  const granted = await external.runExternal({ ...full, requestId:'full-authorized', confirm:async()=>false },
+    {createBackend:create, authorizeFullAccess:authorize});
+  assert.equal(granted.ok, true);
+  assert.equal(prompts, 1);
+  const isolation = runStore.readRun(root, 'full-authorized').find(event => event.type === 'backend_info' && event.info?.externalAgentIsolation)?.info.externalAgentIsolation;
+  assert.equal(isolation?.approvalMode, 'full');
+  assert.equal(isolation?.osSandboxEnforcedByCodeNode, false);
+  assert.equal(isolation?.filesystemIsolation, false);
+  assert.equal(sandboxPolicy.mode, 'best-effort');
+  const existingMath = fs.readFileSync(path.join(root, 'math.cjs'), 'utf8');
+  const composerSession = { ...common, sessionId: 'composer-session', confirm: async () => false };
+  const initialTurn = await external.runExternal({
+    ...composerSession, requestId: 'composer-first', prompt: 'resume-edit',
+  }, { createBackend: create });
+  assert.equal(initialTurn.ok, true);
+  const readOnlyTurn = await external.runExternal({
+    ...composerSession, requestId: 'composer-readonly', prompt: 'resume-edit',
+    adapterSettingsOverride: { ...selected, sandbox: 'read-only' },
+    confirm: async () => { assert.fail('Read-only selection must deny the permission request without prompting'); },
+  }, { createBackend: create });
+  assert.equal(readOnlyTurn.ok, true, readOnlyTurn.error || readOnlyTurn.stopReason || readOnlyTurn.plan?.reason);
+  assert.equal(external.sessionFromRun(root, 'composer-first').session.adapterSettings.sandbox, 'workspace-write');
+  assert.equal(external.sessionFromRun(root, 'composer-readonly').session.adapterSettings.sandbox, 'read-only');
+  assert.equal(fs.readFileSync(path.join(root, 'math.cjs'), 'utf8'), existingMath);
   const before = capture(root); fs.writeFileSync(path.join(root, 'new.txt'), 'new'); fs.unlinkSync(path.join(root, 'math.cjs'));
   const files = compare(before, capture(root)).files;
   assert(files.some(f => f.path === 'new.txt' && f.kind === 'added'));

@@ -58,6 +58,7 @@ ModuleAny._resolveFilename = function patchedResolve(request, parent, isMain, op
 
 const originalCompile = ModuleAny.prototype._compile;
 ModuleAny.prototype._compile = function patchedCompile(content, filename) {
+  if (/\.(png|jpg|jpeg|svg|webp)$/.test(filename)) return originalCompile.call(this, 'module.exports = '+JSON.stringify(filename), filename);
   if (filename.endsWith('.css')) return originalCompile.call(this, '', filename);
   if (filename.endsWith('.ts') || filename.endsWith('.tsx')) {
     const out = ts.transpileModule(content, { compilerOptions: COMPILER_OPTIONS, fileName: filename });
@@ -125,8 +126,12 @@ function stubZustand() {
   };
 }
 
+const getViewport = () => ({ x: 0, y: 0, zoom: 1 });
 const stubModules = {
-  '@xyflow/react': { useReactFlow: () => ({ getViewport: () => ({ x: 0, y: 0, zoom: 1 }), fitView: () => {} }) },
+  '@xyflow/react': {
+    useViewport: getViewport,
+    useReactFlow: () => ({ getViewport, fitView: () => {} }),
+  },
   zustand: stubZustand(),
   'zustand/react': stubZustand(),
   'react-dom/server': require(path.join(PROJECT, 'node_modules', 'react-dom', 'server')),
@@ -655,6 +660,13 @@ async function testAccessibilityMarkup() {
   check('D3c 弹窗有可访问名（aria-labelledby 指向标题）', /aria-labelledby="[^"]+"/.test(dialogHtml) && /Agent 请求确认/.test(dialogHtml));
   check('D3d 弹窗有可访问描述（aria-describedby）', /aria-describedby="[^"]+"/.test(dialogHtml) && /写入 \.env/.test(dialogHtml));
   check('D3e 初始焦点可定位（tabIndex=-1 容器 + 首个可聚焦按钮）', /tabindex="-1"/.test(dialogHtml) && /<button/.test(dialogHtml));
+  check('D3 项目持久授权仅在有动作范围时显示', !dialogHtml.includes('本项目始终允许'));
+  toolStoreMod.useToolStore.setState({ current: { id: 'req-2', type: 'confirm', what: 'ui_control', detail: '', level: 'WRITE',
+    rememberActions: ['get_workbench_model.focus'] } });
+  prepareForRender();
+  const scopedDialog = renderReact(React.createElement(ToolDialogMod.default));
+  check('D3 持久授权展示实际动作', scopedDialog.includes('本项目始终允许') && scopedDialog.includes('get_workbench_model.focus'));
+
   const focusablesFn = ToolDialogMod.focusables;
   const fakeItems = [{ focus: () => {} }, { focus: () => {} }];
   const fakeNode = {
@@ -737,9 +749,18 @@ async function testSessionOwnershipRace() {
 
 }
 
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let watchdog;
+
 async function main() {
   installApi();
   loadConfig();
+  // 从用例开始计时，避免同步转译模块消耗异步挂起检测的时限。
+  watchdog = setTimeout(() => {
+    console.error('FRONTEND INCREMENTAL TEST: FAIL —— 用例超时未结束（有大挂起）');
+    process.exit(1);
+  }, 30000);
+
   await testInflightRegistry();
   await testSendGuardAndConcurrency();
   await testSessionOwnershipRace();
@@ -760,10 +781,6 @@ async function main() {
 // keep-alive + 看门狗：被变异破坏的实现可能留下永不 settle 的 Promise，
 // 没有这一段 node 会「事件循环空了就 exit 0」，让变异测试误判为「用例仍然绿」。
 const keepAlive = setInterval(() => {}, 1000);
-const watchdog = setTimeout(() => {
-  console.error('FRONTEND INCREMENTAL TEST: FAIL —— 用例超时未结束（有大挂起）');
-  process.exit(1);
-}, 30000);
 
 main()
   .catch((e) => {

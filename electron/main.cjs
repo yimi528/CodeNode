@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -38,43 +38,8 @@ if (process.platform === 'win32') {
   } catch {}
 }
 
-/**
- * 控制台日志面板：把主进程的 console.log/info/warn/error 同时写入
- * <exe 目录>/logs/console.log。打包后的便携版 exe 没有附着控制台，配合
- * “CodeNode 控制台.cmd”启动器（桌面快捷方式指向它）即可在独立的 cmd 面板实时查看日志。
- */
-function setupConsoleLog() {
-  try {
-    const dir = path.join(path.dirname(process.execPath), 'logs');
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, 'console.log');
-    const stamp = () => '[' + new Date().toISOString() + '] ';
-    const toStr = (a) => {
-      if (typeof a === 'string') return a;
-      if (a instanceof Error) return String(a && a.stack ? a.stack : a);
-      try {
-        return JSON.stringify(a);
-      } catch {
-        return String(a);
-      }
-    };
-    const write = (args) => {
-      try {
-        fs.appendFileSync(file, stamp() + args.map(toStr).join(' ') + '\n', 'utf-8');
-      } catch {}
-    };
-    const hook = (original) =>
-      function (...args) {
-        write(args);
-        if (original) original.apply(console, args);
-      };
-    console.log = hook(console.log);
-    console.info = hook(console.info);
-    console.warn = hook(console.warn);
-    console.error = hook(console.error);
-  } catch {}
-}
-setupConsoleLog();
+// macOS 日志写入用户数据目录，避免运行后破坏 .app 签名；Windows 保留便携版日志位置。
+require('./consoleLog.cjs').setupConsoleLog({ userDataDir: app.getPath('userData') });
 
 const agent = require('./agent.cjs');
 const runStore = require('./runStore.cjs');
@@ -91,6 +56,8 @@ require('./ipc/models.cjs').register({ ...ipcContext, agent });
 require('./ipc/metrics.cjs').register({ ...ipcContext, agent, sandbox, runStore });
 const agentRuntime=agentIpc.register(ipcContext);
 require('./ipc/backend.cjs').register({ ...ipcContext, agent, sandbox, activeRequests:agentIpc.activeRequests });
+require('./ipc/branches.cjs').register({ ...ipcContext, agent, sandbox, activeRequests:agentIpc.activeRequests });
+require('./ipc/webSearch.cjs').register({ ...ipcContext, agent, activeRequests:agentIpc.activeRequests });
 app.on('before-quit',()=>agentRuntime.close());
 app.on('quit',()=>agentRuntime.close());
 require('./ipc/project.cjs').register({ ...ipcContext, dialog, getFocusedWindow: () => BrowserWindow.getFocusedWindow(), sandbox,
@@ -126,6 +93,20 @@ function isInternalUrl(url) {
 /** @type {Set<string>} 渲染层不使用的权限一律不在集合里（默认全量拒绝） */
 const ALLOWED_PERMISSIONS = new Set([]);
 
+ipcMain.handle('app:start-dictation', event => {
+  const focusedWindow = BrowserWindow.getFocusedWindow();
+  if (focusedWindow?.webContents !== event.sender || event.senderFrame !== event.sender.mainFrame || !isInternalUrl(event.senderFrame?.url)) {
+    return { ok: false, error: '请先聚焦对话输入框' };
+  }
+  if (process.platform === 'darwin') {
+    Menu.sendActionToFirstResponder('startDictation:');
+    return { ok: true };
+  }
+  return { ok: false, error: process.platform === 'win32' ? '按 Win + H 开始系统语音输入' : '请使用系统语音输入工具' };
+});
+
+const WINDOW_FRAME_COLOR = '#222222';
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -135,9 +116,13 @@ function createWindow() {
     minWidth: 720,
     minHeight: 560,
     title: 'CodeNode',
+    ...(process.platform === 'win32' ? {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { height: 46, color: WINDOW_FRAME_COLOR, symbolColor: '#f2f2f2' },
+    } : {}),
     // 主界面一律不透明：窗口不开 transparent，保留 DWM 外阴影。
     // 三套主题（日间／夜间／无色玻璃）都只改页面内的配色变量，不碰窗口本身。
-    backgroundColor: '#14161a',
+    backgroundColor: WINDOW_FRAME_COLOR,
     icon: resolveAppIcon(),
     autoHideMenuBar: true,
     webPreferences: {
@@ -191,7 +176,7 @@ function createWindow() {
                 { id:'n2', type:'task', position:{x:200,y:0}, data:{label:'任务',status:'pending'} },
                 { id:'n3', type:'end', position:{x:400,y:0}, data:{label:'结束',status:'pending'} }
               ], [ { id:'e1', source:'n1', target:'n2' }, { id:'e2', source:'n2', target:'n3' } ]);
-              g.layoutNodes();
+              g.arrangeNodes();
               await new Promise((r)=>setTimeout(r,200));
               const s = st.getState();
               const xs = s.nodes.map(n=>Math.round(n.position.x)).sort((a,b)=>a-b);
@@ -470,7 +455,7 @@ function createWindow() {
               for(let i=1;i<=15;i++){
                 graph.addNode({ id:'w'+i, type:'task', position:{x:40,y:40}, data:{label:'节点'+i,status:'pending'} });
               }
-              graph.layoutNodes();
+              graph.arrangeNodes();
               await new Promise((r)=>setTimeout(r,150));
               const nodes = window.__codenodeStore.getState().nodes;
               const xs = nodes.map(n=>Math.round(n.position.x)).sort((a,b)=>a-b);

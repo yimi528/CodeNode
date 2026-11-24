@@ -221,12 +221,13 @@ async function main() {
   if((args.benchmark || process.env.CODENODE_EVAL_CONTEXT==='1'&&process.env.CODENODE_BENCHMARK_CONTAINER==='1') && process.env.CODENODE_BENCHMARK_FAULT) require('../electron/benchmarkProfile.cjs').installFault(registry,JSON.parse(process.env.CODENODE_BENCHMARK_FAULT),event=>emit(args,{kind:'event',delta:event}));
   const taskRoute = require('../electron/taskRouter.cjs').routeTask({ prompt, canvas: false });
   if (cfg.modelRouting?.routes?.[taskRoute.task]) cfg.modelTaskType = taskRoute.task;
-  const registeredTools = registry.listTools().map((tool) => tool.name);
+  const registeredTools = registry.registeredExecutorNames();
+  const availableCount = registry.modelToolNames().length;
   let toolFace = {
     applied: false,
     reason: profileDecision.reason,
     profiles: profileDecision.profiles,
-    exposed: registeredTools.length,
+    exposed: availableCount,
     hidden: 0,
   };
   if (profileDecision.source !== 'off' && registry.contains('discover_tools')) {
@@ -238,8 +239,8 @@ async function main() {
       profiles: profileDecision.profiles,
       reason: profileDecision.reason,
       source: profileDecision.source,
-      exposed: exposedNames.length,
-      hidden: registeredTools.length - exposedNames.length,
+      exposed: schema.count,
+      hidden: availableCount - schema.count,
       chars: schema.chars,
       hash: schema.hash,
       tokens: compaction.estimateTokens([], schema.tools),
@@ -294,7 +295,7 @@ async function main() {
     truncateSkillsIndex: agent.truncateSkillsIndex,
   });
   const soul = agent.parseSoul(args.benchmark ? 'name: CodeNode' : agent.loadSoul(cfg, projectRoot));
-  const toolGuide = agent.buildToolGuide(registry.listTools().filter((tool) => registry.isExposed(tool.name)));
+  const toolGuide = agent.buildToolGuide(registry.exposedTools());
   let systemContent = agent.buildSystemPrompt(
     soul,
     promptContext.canvasSummaryForPrompt,
@@ -309,6 +310,7 @@ async function main() {
       sessionMemoryText: promptContext.sessionMemoryText,
       canvasMode: cfg.prompt && cfg.prompt.canvasRules,
       exposedTools: registry.toolExposure,
+      exposedExecutors: registry.exposedExecutorNames(),
       toolFaceTrimmed: toolFace.applied,
     },
   );

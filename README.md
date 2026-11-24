@@ -4,8 +4,10 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
+[Documentation index](docs/README.md)
+
 [![CI](https://github.com/yimi528/CodeNode/actions/workflows/ci.yml/badge.svg)](https://github.com/yimi528/CodeNode/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
@@ -69,6 +71,20 @@ One agent loop, one run boundary, one execution chain: chat, the canvas and Goal
 
 Internals: [run safety and recovery](docs/run-recovery.md) · [multi-agent collaboration](docs/multi-agent.md) · [canvas, workflows and goals](docs/canvas-and-goals.md).
 
+## Agent evaluation
+
+The 2026-11-01 offline regression run used `agent-eval-v2`: **14 scenarios × 3 trials, all 42 trials passed**. Observed pass@1, pass@3 and pass^3 were 100%. Scenarios cover editing and test execution, retrieval citations, tool boundaries, cancellation, recovery, budgets and workflow changes.
+
+Model responses and tool choices were scripted; tools, files, commands and run events executed for real. These results verify the framework under the tested scenarios. They do not measure autonomous model performance or establish a ranking against other agents. No live-model evaluation was performed in this run.
+
+```bash
+npm run eval:agent:repeat -- --trials=3
+```
+
+Each run saves per-trial transcripts, workspace outcomes and assertions. See [methodology, results and limitations](docs/agent-evals-anthropic.zh-CN.md) (Chinese), following [Anthropic's agent evaluation guide](https://www.anthropic.com/research/demystifying-evals-for-ai-agents).
+
+**Live-model run, 2026-11-02:** a frozen CodeNode source snapshot with `deepseek-chat` passed **32/33 trials across 11 tasks** under the existing assertions (96.97%); 10/11 tasks passed all three trials. The overall gate failed. Review found a wrong frequency-counting answer that the long-text grader accepted, so these figures measure assertion pass rates, not general answer accuracy. See the [live report and grading limitations](docs/eval-reports/deepseek-live-2026-11-02.md) (Chinese).
+
 ## Development and verification
 
 ```powershell
@@ -94,4 +110,4 @@ Open risks and their evidence-based completion criteria are tracked in [docs/kno
 
 ## License
 
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE)

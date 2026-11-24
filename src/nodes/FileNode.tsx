@@ -1,3 +1,4 @@
+import { NodeIcon } from './NodeIcon';
 import { memo, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { FileData } from '../types';
@@ -12,12 +13,12 @@ function FileNode({ data, selected }: NodeProps) {
     <div className={`wf-node wf-file wf-node-file wf-status-${status} ${selected ? 'is-selected' : ''}`} style={{ borderColor: `${accent}b8`, '--wf-accent': accent } as CSSProperties}>
       <Handle type="target" position={Position.Left} className="wf-handle" />
       <div className="wf-node-title">
-        <span className="wf-file-icon">F</span>
+        <NodeIcon type="file" />
         <span className="wf-node-label">{name}</span>
         {d.memberBadge ? <span className="wf-member-badge" title="所属范围">{d.memberBadge}</span> : null}
       </div>
       <div className="wf-node-sub" title={d.filePath || ''}>
-        {d.filePath || '未选择文件'}
+        {d.filePath || (d.content !== undefined ? '已导入文件' : '未选择文件')}
       </div>
       <div className="wf-node-footer">
         <span className="wf-status-text">{status}</span>

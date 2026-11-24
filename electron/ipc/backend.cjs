@@ -21,7 +21,8 @@ function register(ctx) {
       const basePolicy = sandbox.resolvePolicy(cfg.sandbox, { projectRoot: runtimeRoot, userDataDir: userDataDir() });
       const sandboxPolicy = sandbox.externalAgentPolicy(basePolicy, { projectRoot: runtimeRoot, access: checkedSettings.sandbox });
       const backend = agentBackends.createBackend(checkedSettings.backend, checkedSettings);
-      return { ok: true, ...saved, checkedSettings, capabilities: await backend.health({ projectRoot: runtimeRoot, sandboxPolicy }).finally(() => backend.close()) };
+      const capabilities = await backend.health({ projectRoot: runtimeRoot, sandboxPolicy, checkSession: true, signal: AbortSignal.timeout(65000) }).finally(() => backend.close());
+      return { ok: true, ...saved, checkedSettings, capabilities, diagnostics: require('../backends/diagnostics.cjs').describe(checkedSettings, capabilities, runtimeRoot) };
     } catch (error) { return { ok: false, error: error.message }; }
   });
   ipcMain.handle('agent:backend-control', async (_event, projectRoot, input, method, params) => {

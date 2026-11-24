@@ -140,7 +140,27 @@ function transact(root, workflowId, request = {}) {
   try {
     const file = workflowFile(root, workflowId);
     const graph = graphInfo(request.graph);
-    if (request.action === 'read') return { ok: true, state: snapshot(read(file, workflowId), graph) };
+    if (request.action === 'read') {
+      const data = read(file, workflowId);
+      const state = snapshot(data, graph);
+      const inspectNode = typeof request.inspectNodeId === 'string' && request.inspectNodeId;
+      if (!inspectNode && request.inspectTimeline !== true) return { ok: true, state };
+      const latest = new Map(data.records.map(record => [record.nodeId, record]));
+      const relevant = attempt => attempt && latest.get(attempt.nodeId) === attempt &&
+        attempt.cycle === data.cycle && attempt.graphDigest === graph.digest &&
+        attempt.inputDigest === state.inputs[attempt.nodeId] && !state.skipped.includes(attempt.nodeId) &&
+        (attempt.phase === 'done' || attempt.phase === 'failed');
+      const { readStageEvidence } = require('./workflowEvidence.cjs');
+      const evidenceFor = attempt => readStageEvidence(root, workflowId, attempt, state.selectedInputs[attempt.nodeId]);
+      if (request.inspectTimeline === true) {
+        const stages = new Set(graph.nodes.filter(node => ['stage', 'task', 'tool'].includes(node.type)).map(node => node.id));
+        const stageTimeline = data.records.filter(attempt => stages.has(attempt.nodeId) && relevant(attempt))
+          .map(attempt => ({ nodeId: attempt.nodeId, evidence: evidenceFor(attempt) }));
+        return { ok: true, state, stageTimeline };
+      }
+      const attempt = latest.get(inspectNode);
+      return { ok: true, state, stageEvidence: relevant(attempt) ? evidenceFor(attempt) : null };
+    }
     return withFileLock(file, () => {
       const data = read(file, workflowId);
       const view = snapshot(data, graph);
@@ -238,7 +258,7 @@ async function execute(root, workflowId, request, host) {
     if (!prepared.ok || !prepared.attemptId) return prepared;
     let outcome;
     try {
-      outcome = await host.run(node, graph, current.state);
+      outcome = await host.run(node, graph, current.state, prepared.attemptId);
       if (!outcome || typeof outcome.output !== 'string' || typeof outcome.ok !== 'boolean') fail('工作流执行器返回无效结果');
     } catch (error) {
       outcome = { ok: false, output: String((error && error.message) || error) };

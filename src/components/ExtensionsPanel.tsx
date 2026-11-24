@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useProjectStore } from '../store/projectStore';
+import PluginMarketplace from './PluginMarketplace';
+import { useUiStore } from '../store/uiStore';
 import ExtensionConnectForm from './ExtensionConnectForm';
 import viewConfig from '../../config/ui.extensions.json';
 
@@ -10,7 +12,7 @@ function summaryOf(text: string): string {
   const first = text.split(/[。；\n]/)[0].trim();
   return first.length > viewConfig.summaryLength ? first.slice(0,viewConfig.summaryLength) + '…' : first;
 }
-export default function ExtensionsPanel({view='all',selectedName='',onItemsChange}:{view?:'all'|'plugins'|'skills';selectedName?:string;onItemsChange?:(items:ProjectExtensionDto[])=>void}) {
+export default function ExtensionsPanel({view='all',selectedName='',onItemsChange}:{view?:'all'|'plugins'|'skills'|'market';selectedName?:string;onItemsChange?:(items:ProjectExtensionDto[])=>void}) {
   const root = useProjectStore(state => state.root);
   const [items,setItems] = useState<ProjectExtensionDto[]>([]);
   const [loading,setLoading] = useState(true);
@@ -41,8 +43,10 @@ export default function ExtensionsPanel({view='all',selectedName='',onItemsChang
   const catalogItems=useMemo(()=>items.filter(item=>view==='skills'?categoryOf(item)==='skill':view==='plugins'?categoryOf(item)!=='skill':true),[items,view]);
   const filtered = useMemo(() => catalogItems.filter(item => (category === 'all' || categoryOf(item) === category) &&
     [item.name,item.description,item.kind,item.source].some(value => (value || '').toLowerCase().includes(query.trim().toLowerCase()))), [catalogItems,category,query]);
+  if (view === 'market') return <PluginMarketplace key={root} root={root} items={items} loading={loading} error={error}
+    refresh={() => setRevision(value => value + 1)} manage={() => useUiStore.getState().setPluginView('project')}/>;
   return <section className="extensions-panel" aria-label="插件与工具">
-    <header className="extensions-heading"><div><h2>{view==='skills'?'技能':'插件'}</h2><p>{view==='skills'?'为 Agent 添加可复用的工作指令':'连接项目工具，让 Agent 在你的工作流程中协同工作'}</p></div><div className="extensions-heading-actions">
+    <header className="extensions-heading"><div><h2>{view==='skills'?'技能':'项目工具'}</h2><p>{view==='skills'?'为 Agent 添加可复用的工作指令':'连接项目工具，让 Agent 在你的工作流程中协同工作'}</p></div><div className="extensions-heading-actions">
       {!connecting && <div className="extensions-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg><input type="search" aria-label="搜索扩展与工具" placeholder="搜索插件与工具" value={query} onChange={event=>setQuery(event.target.value)}/></div>}
       <button type="button" className="extensions-refresh" title="刷新插件与工具" aria-label="刷新插件与工具" disabled={loading} onClick={()=>setRevision(value=>value+1)}>↻</button>
       <button type="button" className="extensions-add" disabled={!root || connecting} onClick={()=>{setConnectKind(view==='skills'?'skills':'command');setConnecting(true);setNotice('')}}>添加 ＋</button>

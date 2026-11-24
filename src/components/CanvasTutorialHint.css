@@ -1,0 +1,12 @@
+.canvas-tutorial-position { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; z-index: 4; pointer-events: none; }
+.canvas-tutorial-hint { position: relative; pointer-events: auto; width: min(360px,100%); box-sizing: border-box; padding: 30px 28px 26px; border: 1px solid var(--border); border-radius: 14px; background: var(--glass-sheet); color: var(--glass-text); box-shadow: 0 4px 18px #00000008; backdrop-filter: blur(18px); }
+.canvas-tutorial-hint h2 { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 17px; font-weight: 600; line-height: 1.5; }
+.canvas-tutorial-hint h2 svg { flex: none; }
+.canvas-tutorial-hint p { margin: 18px 0 23px; font-size: 13px; color: var(--glass-muted); line-height: 1.8; }
+.canvas-tutorial-hint button { font: inherit; cursor: pointer; }
+.canvas-tutorial-hint .tutorial-hint-close { position: absolute; top: 7px; right: 8px; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--glass-muted); font-size: 23px; line-height: 1; }
+.canvas-tutorial-hint .tutorial-hint-open { display: inline-flex; align-items: center; gap: 15px; padding: 9px 15px; border: 0; border-radius: 7px; background: var(--glass-text); color: var(--glass-base); font-size: 13px; }
+.canvas-tutorial-hint .tutorial-hint-open:hover:not(:disabled) { background: var(--glass-text); color: var(--glass-base); opacity: .85; }
+.canvas-tutorial-hint .tutorial-hint-close:hover:not(:disabled) { background: var(--glass-selected); color: var(--glass-text); }
+.canvas-tutorial-hint button:focus-visible { outline: 2px solid var(--glass-accent); outline-offset: 4px; }
+@media(max-width:480px) { .canvas-tutorial-hint { padding: 26px 18px 20px; } .canvas-tutorial-hint h2 { gap: 8px; font-size: 15px; } }

@@ -11,7 +11,7 @@ async function persistCandidates(candidates, options = {}) {
       results.push({ key: candidate && candidate.key || '', status: 'ambiguous' });
       continue;
     }
-    if (!registry || !context || !registry.contains('remember') || !registry.isExposed('remember')) {
+    if (!registry || !context || !registry.contains('remember') || !(registry.exposedExecutorNames ? registry.exposedExecutorNames().includes('remember') : registry.isExposed('remember'))) {
       results.push({ key: candidate.key, status: 'unavailable' });
       continue;
     }

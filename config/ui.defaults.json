@@ -11,18 +11,21 @@
   "menuActions": [
     {
       "id": "properties",
+      "description": "打开或收起属性面板，查看和修改选中节点的设置。",
       "group": "节点",
       "label": "节点属性",
       "requires": "selection"
     },
     {
       "id": "workflow",
+      "description": "打开运行面板，先预览执行范围，再开始工作流。",
       "group": "工作流",
       "label": "运行工作流",
       "requires": "workflow"
     },
     {
       "id": "duplicate",
+      "description": "在画布上创建选中节点的副本。",
       "group": "节点",
       "label": "复制节点",
       "shortcut": "Ctrl+D",
@@ -30,6 +33,7 @@
     },
     {
       "id": "delete",
+      "description": "移除选中节点及与它相连的线。",
       "group": "节点",
       "label": "删除节点",
       "shortcut": "Del",
@@ -37,14 +41,8 @@
       "danger": true
     },
     {
-      "id": "layout",
-      "group": "布局",
-      "label": "横向排列",
-      "shortcut": "Ctrl+L",
-      "requires": "nodes"
-    },
-    {
       "id": "arrange",
+      "description": "按依赖关系分层排列节点，并排显示分支。",
       "group": "布局",
       "label": "自动整理",
       "shortcut": "Ctrl+Shift+A",
@@ -52,6 +50,7 @@
     },
     {
       "id": "fit",
+      "description": "调整缩放和位置，让所有节点都进入视野。",
       "group": "视图",
       "label": "显示全部节点",
       "shortcut": "Z",
@@ -59,17 +58,20 @@
     },
     {
       "id": "flow",
+      "description": "沿连线重新计算每个节点接收和传出的数据。",
       "group": "工具与历史",
       "label": "计算数据流",
       "requires": "nodes"
     },
     {
       "id": "terminal",
+      "description": "打开项目终端，在当前项目目录运行命令并查看输出。",
       "group": "工具与历史",
       "label": "打开工具面板"
     },
     {
       "id": "checkpoints",
+      "description": "打开检查点列表，创建快照或恢复先前保存的状态。",
       "group": "工具与历史",
       "label": "检查点与恢复"
     }
@@ -77,8 +79,10 @@
   "activityBarWidth": 48,
   "autoSaveEnabled": true,
   "autoSaveDelayMs": 1200,
-  "preferenceVersion": 4,
+  "preferenceVersion": 5,
   "typewriterEnabled": true,
   "typewriterCharsPerSecond": 60,
-  "workbenchView": "conversation"
+  "workbenchView": "conversation",
+  "advancedMode": true,
+  "vectorEditorEnabled": true
 }

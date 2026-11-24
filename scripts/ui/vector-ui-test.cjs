@@ -475,12 +475,15 @@ async function main() {
     ok(`门禁页提供打开/新建工程入口（${JSON.stringify(gateBtns)}）`, gateBtns.length >= 2 && gateBtns[0].includes('打开工程') && gateBtns[1].includes('新建工程'));
     // 等价于「打开工程」：直接把工程根目录载入，放行到工作台
     await cdp.eval(`window.__codenodeProject.getState().loadRoot('E:\\\\demo')`);
-    await waitFor(cdp, `document.querySelector('.toolbar-vector') && !!window.__codenodeVectorNode`, 9000, '按需工具栏与画布 store 就绪');
+    await cdp.eval(`window.__codenodeUi.getState().updatePreferences({advancedMode:true,vectorEditorEnabled:true})`);
+    await waitFor(cdp, `document.querySelector('.canvas-add-trigger') && !!window.__codenodeVectorNode`, 9000, '按需工具栏与画布 store 就绪');
     out('— Agent 工作台已加载，画布节点 store 工厂已挂载');
 
     /* ========== 1. 在画布上新增画布节点（不再单独占一栏） ========== */
-    ok('工具栏不再进入独立矢量工作区', await cdp.eval(`!/矢量设计工作室/.test(document.querySelector('.toolbar-vector').title)`));
-    await clickEl(cdp, '.toolbar-vector');
+    ok('工具栏不再进入独立矢量工作区', await cdp.eval(`!/矢量设计工作室/.test(document.querySelector('.canvas-add-trigger').title)`));
+    await clickEl(cdp, '.canvas-add-trigger');
+    await waitFor(cdp, "!!document.querySelector('.add-menu-item[data-node-type=vector]')", 3000, '添加节点菜单');
+    await clickEl(cdp, '.add-menu-item[data-node-type=vector]');
     await waitFor(cdp, `!!document.querySelector(${JSON.stringify(NODE)})`, 6000, '画布节点挂载');
     nodeId = await cdp.eval(`document.querySelector('.react-flow__node-vector').dataset.id`);
     ok('画布节点直接出现在 Agent 画布上', Boolean(nodeId));
@@ -664,7 +667,7 @@ async function main() {
     await cdp.eval(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'A', code: 'KeyA', shiftKey: true, bubbles: true, cancelable: true }))`);
     await waitFor(cdp, `!!document.querySelector('.add-menu')`, 4000, 'Shift+A 添加菜单');
     await cdp.eval(`(() => {
-      const item = [...document.querySelectorAll('.add-menu-item')].find(el => el.textContent.includes('画布节点'));
+      const item = [...document.querySelectorAll('.add-menu-item')].find(el => el.dataset.nodeType === 'vector');
       if (!item) throw new Error('添加菜单里没有画布节点项');
       item.click();
       return 'ok';

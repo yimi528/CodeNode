@@ -98,6 +98,7 @@
     "acp": []
   },
   "commandAliases": {
+    "mcode": ["code-acp"],
     "qodercli": [
       "qoder"
     ],

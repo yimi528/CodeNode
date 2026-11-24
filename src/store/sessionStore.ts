@@ -86,6 +86,8 @@ interface SessionState {
   getDocument: () => SessionDoc;
   pushUser: (content: string, attachments?: SessionMsg['attachments']) => void;
   beginTurn: () => void;
+  updateMessage: (index: number, patch: Partial<SessionMsg>) => void;
+  updateRun: (runId: string, patch: Partial<SessionMsg['run']>) => void;
   streamDelta: (d: {
     document?: SessionDoc;
     content?: any;
@@ -96,9 +98,10 @@ interface SessionState {
     exitStatus?: any;
     diff?: string;
     changes?: SessionMsg['backendChanges'];
-    codeVerification?: import('../types').CodeVerificationReport;
+    taskAcceptance?: import('../types').TaskAcceptanceReport; codeVerification?: import('../types').CodeVerificationReport;
     fileChange?: { path?: string; kind?: string; detail?: string };
     kind?: string;
+    state?: string;
     text?: string;
     toolCalls?: unknown;
     saved?: { filePath?: string };
@@ -421,8 +424,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }));
   },
 
+  updateMessage: (index, patch) => set(s => ({ messages: s.messages.map((message, at) => at === index ? { ...message, ...patch } : message) })),
+  updateRun: (runId, patch) => set(s => ({ messages: s.messages.map(message => message.run?.id === runId ? { ...message, run: { ...message.run, ...patch } } : message) })),
+
   streamDelta: (d) => {
     const s = get();
+    if (d.kind === 'state') {
+      const index = s.messages.map(message => message.role).lastIndexOf('assistant');
+      const message = s.messages[index];
+      if (message?.run) get().updateRun(message.run.id, { state: d.state || 'RUNNING', reason: d.reason });
+      return;
+    }
+    if (d.kind === 'done') return;
     if (d.kind === 'model' && d.document?.root) { get().applyAgentDoc(d.document); return; }
     if (d.kind === 'backend_approval') return; // The existing approval dialog owns the user interaction.
     if (['backend_content', 'backend_info', 'backend_terminal'].includes(d.kind || '')) {
@@ -445,6 +458,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const messages = s.messages.slice();
       const at = messages.map(message => message.role).lastIndexOf('assistant');
       if (at >= 0) messages[at] = { ...messages[at], editedFiles: [...new Set([...(messages[at].editedFiles || []), d.fileChange.path])] };
+      set({ messages }); return;
+    }
+    if (d.kind === 'task_acceptance' && d.taskAcceptance) {
+      const messages = s.messages.slice();
+      const at = messages.map(message => message.role).lastIndexOf('assistant');
+      if (at >= 0) messages[at] = { ...messages[at], taskAcceptance: d.taskAcceptance };
       set({ messages }); return;
     }
     if (d.kind === 'code_verification' && d.codeVerification) {

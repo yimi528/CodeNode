@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld('codenode', {
   subagentViews: (root, options) => ipcRenderer.invoke('agent:subagents', root, options),
   // §4.2：运行中插话（steering）—— 长任务跑偏时不用整停
   steerAgent: (requestId, text) => ipcRenderer.invoke('agent:steer', requestId, text),
-  createProject: () => ipcRenderer.invoke('project:create'),
+  createProject: (currentFile) => ipcRenderer.invoke('project:create', currentFile),
   listProject: (root) => ipcRenderer.invoke('project:list', root),
   readProjectFile: (root, relPath, options) => ipcRenderer.invoke('project:read', root, relPath, options),
   writeProjectFile: (root, relPath, content, backup) => ipcRenderer.invoke('project:write', root, relPath, content, backup),
@@ -88,6 +88,8 @@ contextBridge.exposeInMainWorld('codenode', {
   goalWaitCheck: (root, goalId, taskId) => ipcRenderer.invoke('goal:wait-check', root, goalId, taskId),
   ragCheck: (root, settings) => ipcRenderer.invoke('agent:rag-check', root, settings),
   ragSave: (root, settings) => ipcRenderer.invoke('agent:rag-save', root, settings),
+  webSearchCheck: (root, settings) => ipcRenderer.invoke('agent:web-search-check', root, settings),
+  webSearchSave: (root, settings) => ipcRenderer.invoke('agent:web-search-save', root, settings),
   editingSave: (root, settings) => ipcRenderer.invoke('agent:editing-save', root, settings),
     executionSave: (root, settings) => ipcRenderer.invoke('agent:execution-save', root, settings),
   schedulingSave: settings => ipcRenderer.invoke('agent:scheduling-save', settings),
@@ -101,6 +103,14 @@ contextBridge.exposeInMainWorld('codenode', {
   agentResumePlan: (root, runId) => ipcRenderer.invoke('agent:resume-plan', root, runId),
   agentReadPlan: (root, sessionId) => ipcRenderer.invoke('agent:plan-read', root, sessionId),
   agentResumeStart: (root, runId, replacementRunId) => ipcRenderer.invoke('agent:resume-start', root, runId, replacementRunId),
+  branchList: root => ipcRenderer.invoke('branches:list', root),
+  branchCheckpoint: (root, input) => ipcRenderer.invoke('branches:checkpoint', root, input),
+  branchFork: (root, checkpointId, name) => ipcRenderer.invoke('branches:fork', root, checkpointId, name),
+  branchContext: (root, context) => ipcRenderer.invoke('branches:context', root, context),
+  branchCompare: (root, id) => ipcRenderer.invoke('branches:compare', root, id),
+  branchPreviewAdopt: (root, id) => ipcRenderer.invoke('branches:preview-adopt', root, id),
+  branchAdopt: (root, id, preview) => ipcRenderer.invoke('branches:adopt', root, id, preview),
+  branchArchive: (root, id) => ipcRenderer.invoke('branches:archive', root, id),
   agentTimeTravel: (root, sourceRunId, branchRunId, checkpointIndex) => ipcRenderer.invoke('agent:time-travel', root, sourceRunId, branchRunId, checkpointIndex),
   // 运行指标 / 成本 / 告警 / 执行隔离状态
   agentMetrics: (root) => ipcRenderer.invoke('agent:metrics', root),
@@ -116,6 +126,7 @@ contextBridge.exposeInMainWorld('codenode', {
   modelsDelete: (id) => ipcRenderer.invoke('models:delete', id),
   modelsActive: (id) => ipcRenderer.invoke('models:active', id),
   agentChat: (payload) => ipcRenderer.invoke('agent:chat', payload),
+  startDictation: () => ipcRenderer.invoke('app:start-dictation'),
   stopAgent: (requestId) => ipcRenderer.invoke('agent:stop', requestId),
   onAgentDelta: (cb) => {
     const listener = (_e, data) => cb(data);

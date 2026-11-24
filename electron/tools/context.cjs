@@ -34,6 +34,7 @@ class AgentToolContext {
     if (!this.benchmarkContainerValue && require('path').resolve(this.accessRootValue) !== require('path').resolve(this.projectRootValue)) throw Error('accessRoot expansion requires an evaluator-owned container');
     this.modelValue = o.model || null;
     this.confirmHandler = o.confirm || null;
+    this.forceApproval = o.forceApproval === true;
     this.autoExecuteTools = o.autoExecuteTools === true;
     // S7：审批服务（懒创建）。显式注入时优先用注入实例（便于同一 run 内共享令牌表）
     this.approvalServiceValue = o.approvalService || null;
@@ -172,10 +173,10 @@ class AgentToolContext {
           : null,
         ttlMs: this.approvalTtlMsValue,
         runId: this.runIdValue,
-        // 持久化审批规则：从项目里读一次（`.codenode/approvals.json`），命中就不打扰用户。
+        // 每次匹配读取当前项目规则（`.codenode/approvals.json`），命中就不打扰用户。
         // 读坏文件=没有规则（偏保守：只会多问一次），不会静默放行。
         projectRoot: this.projectRootValue,
-        rules: ruleLib.readRules(this.projectRootValue).rules,
+        loadRules: () => !this.forceApproval && this.projectRootValue ? ruleLib.readRules(this.projectRootValue).rules : [],
         taskId: this.taskIdValue,
         role: this.roleValue,
         /**
@@ -470,6 +471,7 @@ class AgentToolContext {
       model: o.model || this.modelValue,
       confirm: this.confirmHandler,
       autoExecuteTools: this.autoExecuteTools,
+      forceApproval: this.forceApproval,
       audit: this.auditLogger,
       mutateWorkbench: this.workbenchMutator,
       saveProject: this.saveAction,

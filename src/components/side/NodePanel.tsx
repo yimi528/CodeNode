@@ -1,17 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useGraphStore } from '../../store/graphStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
 import type { FileData, ImageData, ScopeData } from '../../types';
 import { flattenFilePaths } from '../../lib/flow';
-import { workflowGraph, workflowSignature } from '../../lib/workflowRunState';
+import { isWorkflowStage, workflowGraph, workflowSignature } from '../../lib/workflowRunState';
+import { stageOutcomePreview, type StageEvidence } from '../../lib/stageScene';
+import { readMaterial } from '../../lib/materialFile';
+import { ALLOWED_IMAGE_MIME, TEXT_FILE_ACCEPT } from '../../lib/imageAttach';
+import { NodeIcon } from '../../nodes/NodeIcon';
+import { nodeModes, nodePresentation } from '../../nodes/presentation';
 import FlowList from './FlowList';
+import StageFileList from './StageFileList';
 
-type StageExecution = { phase: 'loading' | 'ready' | 'unavailable'; output?: string; error?: string };
+type StageExecution = { key: string; phase: 'ready' | 'unavailable'; error?: string; evidence?: StageEvidence | null };
 
 /** 标签页 1：选中节点的属性检查器（原独立「检查器」浮层的全部内容） */
-export default function NodePanel({ onOpenFile }: { onOpenFile: (relPath: string) => void }) {
+export default function NodePanel() {
   const node = useGraphStore((s) => s.nodes.find((n) => n.id === s.selectedId));
   const flow = useGraphStore((s) => (s.selectedId ? s.flow[s.selectedId] : undefined));
   const updateNodeData = useGraphStore((s) => s.updateNodeData);
@@ -22,35 +28,32 @@ export default function NodePanel({ onOpenFile }: { onOpenFile: (relPath: string
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
   const workflowId = useSessionStore((s) => s.activeId) || 'canvas';
-  const executionSignature = workflowSignature(workflowGraph(nodes, edges));
-  const [stageExecution, setStageExecution] = useState<StageExecution | null>(null);
+  const graph = useMemo(() => workflowGraph(nodes, edges), [nodes, edges]);
+  const executionSignature = useMemo(() => workflowSignature(graph), [graph]);
+  const isStage = isWorkflowStage(node?.type);
+  const running = node?.data.status === 'running';
+  const sceneKey = JSON.stringify([projectRoot, workflowId]);
+  const requestKey = JSON.stringify([sceneKey, executionSignature, node?.id, node?.data.status]);
+  const [execution, setStageExecution] = useState<StageExecution | null>(null);
+  const stageExecution = execution?.key === requestKey ? execution : null;
 
   useEffect(() => {
     let alive = true;
-    if (!node || !projectRoot || !window.codenode?.workflowState) {
-      setStageExecution(null);
-      return () => { alive = false; };
-    }
-    if (node.data.status === 'running') {
-      setStageExecution({ phase: 'loading' });
-      return () => { alive = false; };
-    }
-    setStageExecution({ phase: 'loading' });
+    if (!isStage || !node || !projectRoot || !window.codenode?.workflowState) return;
     void window.codenode.workflowState(projectRoot, workflowId, {
-      action: 'read', graph: workflowGraph(nodes, edges),
+      action: 'read', graph, inspectNodeId: node.id,
     }).then((result) => {
       if (!alive) return;
       if (!result.ok || !result.state) {
-        setStageExecution({ phase: 'unavailable', error: result.error || '暂时无法读取本阶段记录' });
+        setStageExecution({ key: requestKey, phase: 'unavailable', error: result.error || '暂时无法读取本阶段记录' });
         return;
       }
-      const output = result.state.outputs[node.id];
-      setStageExecution({ phase: 'ready', output: typeof output === 'string' ? output : '' });
+      setStageExecution({ key: requestKey, phase: 'ready', evidence: result.stageEvidence });
     }).catch((error) => {
-      if (alive) setStageExecution({ phase: 'unavailable', error: String(error?.message || error) });
+      if (alive) setStageExecution({ key: requestKey, phase: 'unavailable', error: String(error?.message || error) });
     });
     return () => { alive = false; };
-  }, [node?.id, node?.data.status, projectRoot, workflowId, executionSignature]);
+  }, [requestKey, isStage]);
 
   // 进入编辑前记录一次快照，使“编辑节点”成为一次可撤销的节点操作
   const beginEdit = () => useGraphStore.getState().commit();
@@ -68,9 +71,13 @@ export default function NodePanel({ onOpenFile }: { onOpenFile: (relPath: string
 
   const d = node.data as Record<string, unknown> & FileData & ScopeData & ImageData;
   const status = String(d.status || 'pending');
+  const modes = nodeModes(node.type || 'task');
   const isFile = node.type === 'file';
   const isImage = node.type === 'image';
   const isScope = node.type === 'scope';
+  const stageEvidence = stageExecution?.evidence;
+  const outcome = stageEvidence?.output.trim() || '';
+  const preview = stageOutcomePreview(outcome);
 
   const handleReadFile = async () => {
     const root = projectRoot;
@@ -113,8 +120,33 @@ export default function NodePanel({ onOpenFile }: { onOpenFile: (relPath: string
       </div>
       <div className="sp-kv">
         <span>类型</span>
-        <code>{String(node.type)}</code>
+        <span><NodeIcon type={node.type} /> {nodePresentation(node.type).label}</span>
       </div>
+      {modes && <div className="inspector-field"><label>
+        {isStage ? '执行方式' : '资料格式'}
+        <select value={node.type} disabled={running} onChange={event => useGraphStore.getState().changeNodeMode(node.id, event.target.value)}>
+          {Object.entries(modes).map(([type, label]) => <option key={type} value={type}>{label}</option>)}
+        </select>
+      </label></div>}
+      {modes && !isStage && <div className="inspector-field"><label>导入文件或图片
+        <input type="file" accept={[...ALLOWED_IMAGE_MIME, TEXT_FILE_ACCEPT].join(',')} onChange={async event => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (!file) return;
+          try {
+            const item = await readMaterial(file);
+            if ((useSessionStore.getState().activeId || 'canvas') === workflowId)
+              useGraphStore.getState().changeNodeMode(node.id, item.type, item.data);
+          } catch (error) { setToast(String(error)); }
+        }} /></label></div>}
+      {isStage && <div className="inspector-field"><label>任务指令
+        <textarea value={String(d.prompt || '')} rows={3} onFocus={beginEdit}
+          onChange={event => updateNodeData(node.id, { prompt: event.target.value })} />
+      </label></div>}
+      {isStage && <div className="inspector-field"><label>流程标记
+        <select value={String(d.boundary || '')} onFocus={beginEdit} onChange={event => updateNodeData(node.id, { boundary: event.target.value })}>
+          <option value="">无</option><option value="start">起点</option><option value="end">输出</option><option value="both">起点和输出</option>
+        </select></label></div>}
       {d.trellis && <div className="sp-kv"><span>Trellis 执行动作</span><code>{String((d.trellis as {phase: string; role: string}).phase)} · {String((d.trellis as {phase: string; role: string}).role)}</code></div>}
 
       <div className="inspector-field">
@@ -132,30 +164,32 @@ export default function NodePanel({ onOpenFile }: { onOpenFile: (relPath: string
         </select>
       </div>
 
-      {(node.type === 'task' || node.type === 'stage' || node.type === 'tool') && (
-        <section className={`stage-execution-card is-${status}`} aria-label="本阶段 Agent 执行情况">
-          <div className="stage-execution-heading">
-            <strong>本阶段执行情况</strong>
-            <span>{status === 'running' ? '正在执行' : status === 'done' ? '已完成' : status === 'failed' ? '未完成' : status === 'blocked' ? '等待处理' : '尚未执行'}</span>
-          </div>
+      {isStage && (
+        <section className="stage-execution-card" aria-label="本阶段 Agent 执行情况">
+          {stageEvidence && (
+            <>
+              {preview && <p>{preview}</p>}
+              {stageEvidence.files.length > 0 && <details>
+                <summary>文件变更 {stageEvidence.fileCount}</summary>
+                <StageFileList files={stageEvidence.files} />
+                {stageEvidence.fileCount > stageEvidence.files.length && <p>显示前 {stageEvidence.files.length} 个文件。</p>}
+              </details>}
+              {outcome && outcome.replace(/^Agent[：:]\s*/, '') !== preview && <details>
+                <summary>阶段总结</summary><pre className="stage-execution-output">{outcome}</pre>
+              </details>}
+            </>
+          )}
+          <button type="button" className="stage-scene-trigger"
+            onClick={() => useUiStore.getState().openStageReplay({ scope: sceneKey, nodeId: node.id })}>查看 3D 回放</button>
           {status === 'running' ? (
             <p>Agent 正在处理这个阶段。任务要求：{String(d.prompt || d.goal || '尚未填写任务说明')}</p>
-          ) : stageExecution?.phase === 'loading' ? (
-            <p>正在读取阶段记录…</p>
           ) : stageExecution?.phase === 'unavailable' ? (
             <p>{stageExecution.error}</p>
-          ) : stageExecution?.output ? (
-            <>
-              <p className="stage-execution-hint">下面是 Agent 在本阶段留下的结果与验证说明。</p>
-              <pre className="stage-execution-output">{stageExecution.output}</pre>
-            </>
-          ) : (
-            <p>还没有可查看的执行总结。任务完成后，这里会显示 Agent 解决的问题、采取的做法和验证结果。</p>
-          )}
+          ) : null}
         </section>
       )}
 
-      {(node.type === 'task' || node.type === 'stage' || node.type === 'tool') && (
+      {isStage && (
         <>
         <div className="inspector-field"><label><input type="checkbox" checked={Boolean(d.requiresInput)} onFocus={beginEdit} onChange={(e) => updateNodeData(node.id, { requiresInput: e.target.checked })} /> 需要上游输出</label><div className="sp-empty-hint">当前连线输入：{flow?.input?.length ? flow.input.map((item) => item.label).join('、') : '无'}</div>{d.requiresInput && !flow?.input?.length ? <div className="task-trace-warning">缺少输入连线，运行时会阻塞</div> : null}</div>
         <div className="inspector-field"><label>输出名称</label><input value={String(d.outputName || '')} placeholder="例如：测试结果" onFocus={beginEdit} onChange={(e) => updateNodeData(node.id, { outputName: e.target.value })} /></div>
@@ -330,8 +364,10 @@ export default function NodePanel({ onOpenFile }: { onOpenFile: (relPath: string
                 value={String(d.filePath || '')}
                 onFocus={beginEdit}
                 onChange={(e) => {
-                  updateNodeData(node.id, { filePath: e.target.value });
-                  if (e.target.value) onOpenFile(e.target.value);
+                  const path = e.target.value;
+                  if (/\.(png|jpe?g|webp|gif)$/i.test(path)) {
+                    useGraphStore.getState().changeNodeMode(node.id, 'image', { imagePath: path, dataUrl: '', label: path.split('/').pop() });
+                  } else updateNodeData(node.id, { filePath: path, content: '' });
                 }}
               >
                 <option value="">— 选择 —</option>

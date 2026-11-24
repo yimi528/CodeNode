@@ -79,7 +79,7 @@ interface ChatState {
   inflight: ReturnType<typeof createInflightRegistry<AbortController>>;
   send: (
     prompt: string,
-    options?: { resumeRunId?: string; resumeForce?: boolean; attachments?: AgentAttachment[]; projectRoot?: string; goalId?: string; taskId?: string; requestId?: string; autoAdvanceClaimId?: string }
+    options?: { acceptance?: import('../lib/taskAcceptance').TaskAcceptanceContract; composerOverrides?: import('../types').ComposerOverrides; resumeRunId?: string; resumeForce?: boolean; attachments?: AgentAttachment[]; projectRoot?: string; goalId?: string; taskId?: string; requestId?: string; autoAdvanceClaimId?: string }
   ) => Promise<{ reply: string; reasoning: string; tools: ToolRecord[] }>;
   /** 停止请求：不传 id 时停「最近一个已受理」的请求；传 id 精确停那一条 */
   stop: (requestId?: string) => void;
@@ -256,7 +256,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const selectedGoal = useGoalControlStore.getState();
     const goalBinding = !options?.resumeRunId && options?.goalId && options?.taskId
       ? { goalId: options.goalId, taskId: options.taskId }
-      : !options?.resumeRunId && selectedGoal.selectedGoalId && selectedGoal.selectedTaskId
+      : !options?.resumeRunId && selectedGoal.selectedGoalId && selectedGoal.selectedTaskId && !['completed','cancelled'].includes(selectedGoal.goals.find(goal => goal.id === selectedGoal.selectedGoalId)?.tasks.find(task => task.id === selectedGoal.selectedTaskId)?.status || '')
         ? { goalId: selectedGoal.selectedGoalId, taskId: selectedGoal.selectedTaskId }
         : {};
     useSessionStore.getState().beginPlanRun(planSessionId);
@@ -275,6 +275,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     requestOwners.set(requestId, { sessionId: planSessionId, root: requestRoot, projectFile: useProjectStore.getState().projectFile });
     lastRequestId = requestId;
+    const startedAt = Date.now();
+    useSessionStore.getState().updateMessage(useSessionStore.getState().messages.length - 1, { run: { id: requestId, startedAt, state: 'RUNNING' } });
     let unsub: (() => void) | null = null;
     try {
       unsub = api.onAgentDelta ? api.onAgentDelta((d) => {
@@ -288,6 +290,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }) : null;
       const res = await api.agentChat({
         projectRoot: requestRoot,
+        ...(options?.composerOverrides ? { composerOverrides: options.composerOverrides } : {}),
+        acceptance: options?.acceptance,
         ...goalBinding,
         prompt: userText,
         attachments: attachments.length ? attachments : undefined,
@@ -312,6 +316,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         signal: controller.signal,
       });
       if (controller.signal.aborted || !ownsActiveView(requestId)) return empty;
+      useSessionStore.getState().updateRun(requestId, {
+        finishedAt: Date.now(), state: res.state || (res.aborted ? 'CANCELLED' : res.ok ? 'COMPLETED' : 'FAILED'),
+        reason: res.stopReason || res.error || undefined,
+        costUsd: res.costUnknown || res.cost?.costKnown === false ? null : res.cost?.costUsd ?? null,
+        tokens: normalizeUsage(res.usage)?.totalTokens,
+      });
+      if (res.taskAcceptance) {
+        const index = useSessionStore.getState().messages.findIndex(message => message.run?.id === requestId);
+        useSessionStore.getState().updateMessage(index, { taskAcceptance: res.taskAcceptance });
+      }
+      if (res.codeVerification) {
+        const index = useSessionStore.getState().messages.findIndex(message => message.run?.id === requestId);
+        useSessionStore.getState().updateMessage(index, { codeVerification: res.codeVerification });
+      }
       // 需要人工复核的续跑：主进程拒绝自动执行 —— #21 的关键点是**不能把 plan 丢掉**。
       // 后端回传 `{ok:false, needsReview:true, plan}`，plan 里有 reason / warning /
       // unknownEffects（哪些工具结果不可知）/ pendingSteps（还差哪几步），全部要落到界面上，
@@ -415,6 +433,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       return empty;
     } finally {
+      if (ownsActiveView(requestId)) {
+        const message = useSessionStore.getState().messages.find(item => item.run?.id === requestId);
+        if (message?.run && !message.run.finishedAt) useSessionStore.getState().updateRun(requestId, {
+          finishedAt: Date.now(), state: controller.signal.aborted ? 'CANCELLED' : 'FAILED',
+        });
+      }
       try { if (unsub) unsub(); } catch { /* A disposed IPC listener cannot retain a request lock. */ }
       // #7 只清自己那一条：修复前这里无条件 `set({ sending:false, requestId:null })`，
       // 会把**别人的**在跑请求一起标成空闲（旧请求的 controller 也就此失联）。

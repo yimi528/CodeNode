@@ -1,0 +1,23 @@
+.stage-evidence-files { list-style: none; margin: 4px 0 0; padding: 0; }
+.stage-evidence-files li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-block: 3px;
+  font-size: 12px;
+}
+.stage-evidence-files li code { min-width: 0; overflow-wrap: anywhere; }
+.stage-evidence-files li small { flex-shrink: 0; }
+.stage-execution-card > details { margin-block: 6px; font-size: 12px; }
+.stage-execution-card > details summary { cursor: pointer; }
+.stage-scene-trigger {
+  margin-top: 7px;
+  padding: 5px 9px;
+  border: 1px solid var(--glass-border, var(--border));
+  border-radius: 7px;
+  background: var(--glass-control, var(--bg-panel-2));
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}

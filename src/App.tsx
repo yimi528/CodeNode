@@ -2,8 +2,9 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { themeTokens, themeColorScheme } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
-import ActivityBar from './components/ActivityBar';
 import ProjectGate from './components/ProjectGate';
+import welcomeLogo from '../assets/branding/welcome-logo.png';
+import ActivityBar from './components/ActivityBar';
 import SidePanel from './components/side/SidePanel';
 import './components/side/nodeInspectorDock.css';
 import ProjectNavigation from './components/ProjectNavigation';
@@ -14,11 +15,12 @@ import { useGraphStore } from './store/graphStore';
 import { useUiStore } from './store/uiStore';
 import { useSessionStore } from './store/sessionStore';
 import { useProjectStore } from './store/projectStore';
+import { useTrellisStore } from './store/trellisStore';
 import { newProject, openProject, saveProject, restoreLastProject } from './lib/projectActions';
 import { installToolListener } from './lib/toolUi';
 import ToolDialog from './components/ToolDialog';
 import GoalAutoAdvanceManager from './components/GoalAutoAdvanceManager';
-import { getActiveVectorNode } from './vector/vectorStore';
+import { useVectorPlugin, useVectorPluginLifecycle } from './plugins/vectorEditor';
 
 const GlobalSettings = lazy(() => import('./components/GlobalSettings'));
 const ModelManager = lazy(() => import('./components/ModelManager'));
@@ -27,12 +29,10 @@ const PluginWorkspace = lazy(() => import('./components/PluginWorkspace'));
 const TaskWorkspace = lazy(() => import('./components/TaskWorkspace'));
 const FileWorkspace = lazy(() => import('./components/FileWorkspace'));
 const Canvas = lazy(() => import('./components/Canvas'));
+const StageReplayWorkspace = lazy(() => import('./components/StageReplayWorkspace'));
 const GoalOverview = lazy(() => import('./components/GoalOverview'));
 const Toolbar = lazy(() => import('./components/Toolbar'));
-
-function CanvasLoading() {
-  return <div className="canvas-welcome" role="status"><div className="canvas-welcome-eyebrow">CODE NODE</div><h2>正在准备画布…</h2><p>项目与对话已经就绪。</p></div>;
-}
+const TutorialPage = lazy(() => import('./components/TutorialPage'));
 
 function DialogLoading() {
   return <div className="settings-mask"><section className="global-settings settings-loading" role="status">正在加载设置…</section></div>;
@@ -72,24 +72,48 @@ function isTextEditingNow(): boolean {
 }
 
 export default function App() {
+  useVectorPluginLifecycle();
   const undo = useGraphStore((s) => s.undo);
   const redo = useGraphStore((s) => s.redo);
   const duplicateNode = useGraphStore((s) => s.duplicateNode);
   const selectedId = useGraphStore((s) => s.selectedId);
   const deleteNodes = useGraphStore((s) => s.deleteNodes);
-  const layoutNodes = useGraphStore((s) => s.layoutNodes);
   const arrangeNodes = useGraphStore((s) => s.arrangeNodes);
   const createScopeFromSelection = useGraphStore((s) => s.createScopeFromSelection);
   useProjectAutoSave();
-  const appPage = useUiStore(s => s.appPage);
+  const requestedPage = useUiStore(s => s.appPage);
+  const projectRoot = useProjectStore(s => s.root);
+  const conversation = useSessionStore(s => s.memoryConversationId);
+  const streaming = useSessionStore(s => s.streaming);
+  const trellisReady = useTrellisStore(s => s.root === projectRoot && s.project?.detected === true);
+  const trellisUnavailable = useTrellisStore(s => s.root === projectRoot && !s.loading && (s.project?.detected === false || !s.project && !!s.error));
+  const refreshTrellis = useTrellisStore(s => s.refresh);
+  const appPage = requestedPage === 'tasks' && !trellisReady ? 'workbench' : requestedPage;
+  useEffect(() => {
+    if (projectRoot && window.codenode?.trellisProject) void refreshTrellis(projectRoot, conversation);
+  }, [projectRoot, conversation, streaming, refreshTrellis]);
+  useEffect(() => {
+    if (requestedPage === 'tasks' && (!projectRoot || trellisUnavailable)) useUiStore.getState().setAppPage('workbench');
+  }, [requestedPage, projectRoot, trellisUnavailable]);
   const [loadedPages, setLoadedPages] = useState(() => ({ tasks: appPage === 'tasks', plugins: appPage === 'plugins' }));
   useEffect(() => {
     if (appPage === 'tasks' || appPage === 'plugins') setLoadedPages(current => current[appPage] ? current : { ...current, [appPage]: true });
   }, [appPage]);
   const sideOpen = useUiStore((s) => s.sideOpen);
   const sideTab = useUiStore(s => s.sideTab);
+  const workflowId = useSessionStore(s => s.activeId) || 'canvas';
+  const replayOpen = useUiStore(s => s.stageReplayOpen);
+  const replayVisible = appPage === 'workbench' && replayOpen && sideTab !== 'project';
+  const [replayLoaded, setReplayLoaded] = useState(false);
+  useEffect(() => {
+    if (replayVisible) setReplayLoaded(true);
+  }, [replayVisible]);
   const workbenchView=useUiStore(s=>s.preferences.workbenchView);
-  const overview=workbenchView==='overview'&&!['project','preview'].includes(sideTab);
+  const overview=!replayVisible && workbenchView==='overview'&&sideTab !== 'project';
+  const canvasVisible = appPage === 'workbench' && !overview && !replayVisible && sideTab !== 'project';
+  useEffect(() => {
+    if (!canvasVisible) useUiStore.getState().closeAddMenu();
+  }, [canvasVisible]);
   const theme = useUiStore((s) => s.theme);
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -98,9 +122,9 @@ export default function App() {
   }, [theme]);
   const dockOpen = useUiStore((s) => s.dockOpen);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const tutorialOpen = useUiStore(s => s.tutorialOpen);
   const modelManagerOpen = useUiStore((s) => s.modelManagerOpen);
   const booted = useUiStore((s) => s.booted);
-  const projectRoot = useProjectStore((s) => s.root);
   const { fitView } = useReactFlow();
 
   useEffect(() => {
@@ -158,12 +182,21 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if(useUiStore.getState().preferences.workbenchView==='overview')return;
+      if (useUiStore.getState().tutorialOpen || useUiStore.getState().appPage !== 'workbench') return;
       if (useUiStore.getState().settingsOpen || useUiStore.getState().modelManagerOpen) return;
       const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 'p') {
+        e.preventDefault();
+        useUiStore.getState().setSideTab('project');
+        window.setTimeout(() => document.querySelector<HTMLInputElement>('.files-workspace .pm-search input')?.focus(), 0);
+        return;
+      }
+      const ui = useUiStore.getState();
+      const replay = ui.stageReplayOpen && ui.sideTab !== 'project';
+      if (!replay && useUiStore.getState().preferences.workbenchView === 'overview' && useUiStore.getState().sideTab !== 'project') return;
 
-      // 启动门禁页（还没有工程）：只保留与「取得工程」有关的快捷键。
-      // 其余画布快捷键一律不生效——此时既没有工程可保存，也没有 ReactFlow 实例。
+      // 未打开工程时保留新建/打开快捷键，避免对空工作区执行工程操作。
       if (!useProjectStore.getState().root) {
         if (mod && e.key.toLowerCase() === 'n') {
           e.preventDefault();
@@ -181,7 +214,7 @@ export default function App() {
       // 这条规则的两端分别是「选中画布节点后删不掉」和「在画布节点里按 Delete 把节点整个删了」。
       // 画布节点会在指针按下时把焦点收回 .vs-scope（VectorNode.tsx 的 focusBodyOnPointerDown），
       // 所以这里判断焦点归属是可靠的。
-      if (!mod && (e.key === 'Delete' || e.key === 'Backspace' || e.key.toLowerCase() === 'x')) {
+      if (!replay && !mod && (e.key === 'Delete' || e.key === 'Backspace' || e.key.toLowerCase() === 'x')) {
         const focused=document.activeElement as HTMLElement|null;
         if(focused&&focused!==document.body&&!focused.closest('.canvas-wrap'))return;
         if (!isTextEditingNow() && !isVectorNodeFocus()) {
@@ -199,7 +232,7 @@ export default function App() {
       }
 
       // 选中的是画布节点 / 焦点在矢量画布内时，快捷键交给画布节点处理
-      const activeVector = getActiveVectorNode();
+      const activeVector = useUiStore.getState().preferences.vectorEditorEnabled ? useVectorPlugin.getState().plugin?.getActiveVectorNode() : null;
       if (activeVector && activeVector === selectedId) return;
       if (isVectorNodeFocus()) return;
 
@@ -208,7 +241,7 @@ export default function App() {
         if (document.activeElement?.closest('.dock-code-editor')) return;
         e.preventDefault();
         const state = useProjectStore.getState();
-        if (['project','preview'].includes(useUiStore.getState().sideTab) && state.selected && !/\.cnode$/i.test(state.selected.relPath)) { if (state.dirty) void state.saveSelected(); }
+        if (useUiStore.getState().sideTab === 'project' && state.selected && !/\.cnode$/i.test(state.selected.relPath)) { if (state.dirty) void state.saveSelected(); }
         else void saveProject();
         return;
       }
@@ -223,12 +256,6 @@ export default function App() {
         return;
       }
 
-      if (mod && e.key.toLowerCase() === 'p') {
-        e.preventDefault(); useUiStore.getState().setAppPage('workbench'); useUiStore.getState().setSideTab('project');
-        window.setTimeout(() => document.querySelector<HTMLInputElement>('.files-workspace .pm-search input')?.focus(),0);
-        return;
-      }
-
       if (isTypingTarget()) return;
 
       // Ctrl+B：开合右侧侧栏（对齐 VS Code 的习惯）
@@ -238,7 +265,8 @@ export default function App() {
         return;
       }
 
-      if (e.code === 'KeyA' && e.shiftKey && !mod) {
+      if (replay) return;
+      if (e.code === 'KeyA' && e.shiftKey && !mod && !e.altKey && useUiStore.getState().sideTab !== 'project') {
         e.preventDefault();
         const m = useUiStore.getState().lastMouse;
         useUiStore.getState().openAddMenu(m.x, m.y);
@@ -257,16 +285,13 @@ export default function App() {
         // Blender 风格：Ctrl+J 把选中的节点“加入”为一个新的范围节点
         e.preventDefault();
         createScopeFromSelection();
-      } else if (mod && e.key.toLowerCase() === 'l') {
-        // 自动排版属于画布操作，不入撤销历史（撤销只记录节点操作）
-        e.preventDefault();
-        layoutNodes();
-      } else if (mod && e.key.toLowerCase() === 'a' && e.shiftKey) {
+      } else if (mod && (key === 'l' || (e.shiftKey && key === 'a'))) {
         e.preventDefault();
         arrangeNodes();
       } else if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        undo();
+        if (e.shiftKey) redo();
+        else undo();
       } else if (mod && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         redo();
@@ -280,14 +305,14 @@ export default function App() {
     // 就会被吞掉 —— 表现就是「选中画布节点后 Delete 没反应」。
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [undo, redo, duplicateNode, selectedId, deleteNodes, fitView, layoutNodes, arrangeNodes, createScopeFromSelection]);
+  }, [undo, redo, duplicateNode, selectedId, deleteNodes, fitView, arrangeNodes, createScopeFromSelection]);
 
   // 启动引导尚未结束：先显示占位，避免「门禁页 -> 工作台」之间闪一下
   if (!booted) {
     return (
       <div className="gate gate-boot">
         <div className="gate-card">
-          <div className="gate-logo">CN</div>
+          <img className="gate-logo" src={welcomeLogo} alt="" />
           <h1>CodeNode</h1>
           <p className="gate-sub">正在恢复上次工程…</p>
         </div>
@@ -300,34 +325,41 @@ export default function App() {
 
   return (
     <div className={`app ui-clean glass-theme theme-${theme}`}>
-      <div className="app-shell"><ActivityBar/><div className="app-shell-main">
-      <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Suspense fallback={<div className="toolbar toolbar-loading" aria-hidden="true" />}>{appPage === 'workbench' ? <Toolbar /> : null}</Suspense></div>
-      <div className={`app-body side-left${dockOpen && appPage==='workbench' ? ' has-dock' : ''}`}>
+      <div className="app-shell"><ActivityBar showTasks={trellisReady}/><div className="app-shell-main">
+      <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Suspense fallback={null}><Toolbar /></Suspense></div>
+      <div inert={tutorialOpen} className={`app-body side-left${dockOpen && appPage==='workbench' ? ' has-dock' : ''}`}>
         <Suspense fallback={null}>
-          {loadedPages.plugins ? <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'}><PluginWorkspace /></div> : null}
-          {loadedPages.tasks ? <TaskWorkspace hidden={appPage !== 'tasks'} /> : null}
+          {loadedPages.plugins && <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'} className="app-plugin-layer"><PluginWorkspace /></div>}
+          {loadedPages.tasks && <TaskWorkspace hidden={appPage!=='tasks'}/>}
         </Suspense>
         <div className="app-workbench-layer" data-inactive={appPage!=='workbench'} aria-hidden={appPage!=='workbench'} inert={appPage!=='workbench'}>
         <div className="app-project-navigation"><ProjectNavigation /></div>
         <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
 <div className="workspace-overview-layer" hidden={!overview}><Suspense fallback={null}><GoalOverview /></Suspense></div>
-<div className="workspace-content" hidden={overview} inert={overview}>
-            <Suspense fallback={null}>{(sideTab === 'project' || sideTab === 'preview') ? <FileWorkspace /> : null}</Suspense>
+<div className={`workspace-content${replayVisible ? ' is-replay-covered' : ''}`} hidden={overview}
+  aria-hidden={overview || replayVisible} inert={overview || replayVisible}>
+            {sideTab === 'project' && <Suspense fallback={null}><FileWorkspace /></Suspense>}
             {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
-            <div className="workspace-canvas" aria-hidden={sideTab === 'project' || sideTab === 'preview'}><Suspense fallback={<CanvasLoading />}><Canvas /></Suspense></div>
+            <div className="workspace-canvas" aria-hidden={sideTab === 'project'}><Suspense fallback={null}><Canvas /></Suspense></div>
             <ConversationPanel />
           </div>
+          {(replayVisible || replayLoaded) && <div className="workspace-stage-replay" hidden={!replayVisible} inert={!replayVisible}>
+            <Suspense fallback={<p className="workspace-stage-empty" role="status">正在打开 3D 回放…</p>}>
+              <StageReplayWorkspace key={JSON.stringify([projectRoot, workflowId])} root={projectRoot} workflowId={workflowId} active={replayVisible} />
+            </Suspense>
+          </div>}
         </main>
-        <div className="app-workbench-overlays" hidden={appPage!=='workbench'}><AddMenu />
-        <Suspense fallback={null}>{dockOpen && appPage === 'workbench' ? <WorkbenchDock /> : null}</Suspense></div></div>
+        <div className="app-workbench-overlays" hidden={appPage!=='workbench'}>{canvasVisible && <AddMenu />}
+        <Suspense fallback={null}>{dockOpen && <WorkbenchDock />}</Suspense></div></div>
       </div>
-      <div hidden={appPage!=='workbench'} className="app-workbench-status"><StatusBar /></div>
+      <div hidden={appPage!=='workbench'} className="app-workbench-status"><StatusBar showCanvasStatus={!replayVisible} /></div>
       </div></div>
+      {tutorialOpen && <Suspense fallback={null}><TutorialPage /></Suspense>}
       <ToolDialog />
       <GoalAutoAdvanceManager />
       <Suspense fallback={(settingsOpen || modelManagerOpen) ? <DialogLoading /> : null}>
-        {settingsOpen ? <GlobalSettings /> : null}
-        {modelManagerOpen ? <ModelManager /> : null}
+        {settingsOpen && <GlobalSettings />}
+        {modelManagerOpen && <ModelManager />}
       </Suspense>
     </div>
   );

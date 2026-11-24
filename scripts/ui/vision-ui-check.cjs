@@ -53,6 +53,7 @@ app.whenReady().then(async () => {
     await sleep(700);
 
     // 通过当前模型选择器切到视觉模型
+    await js(`document.querySelector('.model-connection-trigger')?.click()`); await sleep(200);
     await js(`document.querySelector('.pp-model')?.click()`); await sleep(200);
     const picked = await js(`(()=>{const button=[...document.querySelectorAll('.hermes-model-row button')].find(b=>/DeepSeek V4(\.1)? Flash/i.test(b.textContent||''));if(!button)return null;button.click();return button.textContent;})()`);
     await sleep(700);

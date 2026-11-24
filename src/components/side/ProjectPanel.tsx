@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useProjectStore, type FileNode } from '../../store/projectStore';
 import { useUiStore } from '../../store/uiStore';
 import { openProject } from '../../lib/projectActions';
@@ -30,37 +30,40 @@ function countFiles(nodes: FileNode[]): number {
 function TreeRow({
   node,
   depth,
+  filtering,
   onOpen,
   selectedPath,
   dirty,
 }: {
   node: FileNode;
   depth: number;
+  filtering: boolean;
   onOpen: (p: string) => void;
   selectedPath: string | null;
   dirty: boolean;
 }) {
   const [expanded, setExpanded] = useState(node.type === 'dir' && depth < 2);
 
+  const open = filtering || expanded;
   if (node.type === 'dir') {
     return (
       <>
-        <div
+        <button type="button" aria-expanded={open} disabled={filtering}
           className="pm-row pm-dir"
           style={{ paddingLeft: 6 + depth * 13 }}
           onClick={() => setExpanded((v) => !v)}
           title={node.relPath}
         >
-          <span className={`pm-caret ${expanded ? 'open' : ''}`} />
+          <span className={`pm-caret ${open ? 'open' : ''}`} />
           <span className="pm-name">{node.name}</span>
           <span className="pm-count">{node.children?.length ?? 0}</span>
-        </div>
-        {expanded &&
+        </button>
+        {open &&
           node.children?.map((c) => (
             <TreeRow
               key={c.relPath}
               node={c}
-              depth={depth + 1}
+              depth={depth + 1} filtering={filtering}
               onOpen={onOpen}
               selectedPath={selectedPath}
               dirty={dirty}
@@ -72,7 +75,7 @@ function TreeRow({
 
   const isSelected = selectedPath === node.relPath;
   return (
-    <div
+    <button type="button" aria-current={isSelected || undefined}
       className={`pm-row pm-file ${node.relPath.endsWith('.cnode') ? 'pm-file-cnode' : ''} ${isSelected ? 'is-selected' : ''}`}
       style={{ paddingLeft: 19 + depth * 13 }}
       onClick={() => onOpen(node.relPath)}
@@ -86,11 +89,66 @@ function TreeRow({
         </span>
       )}
       <span className="pm-size">{fmtSize(node.size)}</span>
-    </div>
+    </button>
   );
 }
 
 const TreeRowMemo = memo(TreeRow);
+
+export function ProjectFileTree({
+  root, tree, loading, error, selectedPath, dirty, fileFilter, setFileFilter, onOpen, workspaceLabel, actions,
+}: {
+  root: string | null;
+  tree: FileNode[];
+  loading: boolean;
+  error: string | null;
+  selectedPath: string | null;
+  dirty?: boolean;
+  fileFilter: string;
+  setFileFilter: (value: string) => void;
+  onOpen: (relPath: string) => void;
+  workspaceLabel: ReactNode;
+  actions: ReactNode;
+}) {
+  const visible = useMemo(() => filterTree(tree, fileFilter), [tree, fileFilter]);
+  const fileCount = useMemo(() => countFiles(visible), [visible]);
+  return (
+    <div className="sp-pane sp-pane-tree">
+      <div className="sp-subhead">
+        <div className="sp-path" title={root || ''}>
+          {workspaceLabel}
+          {root && !loading && !error && <span className="sp-path-meta">{fileFilter.trim() ? `匹配 ${fileCount} 个文件` : `${fileCount} 个文件`}</span>}
+        </div>
+        {actions && <div className="pm-actions">{actions}</div>}
+      </div>
+
+      {(tree.length > 0 || fileFilter) && <div className="pm-search">
+        <span aria-hidden>⌕</span>
+        <input
+          value={fileFilter}
+          onChange={(e) => setFileFilter(e.target.value)}
+          aria-label="查找文件" placeholder="按文件名或路径查找…"
+          spellCheck={false}
+        />
+        {fileFilter && (
+          <button className="pm-search-clear" title="清除过滤" onClick={() => setFileFilter('')}>
+            ×
+          </button>
+        )}
+      </div>}
+
+      <div className="pm-tree">
+        {!root && <div className="pm-empty">请选择项目目录</div>}
+        {root && loading && <div className="pm-empty">加载中…</div>}
+        {root && !loading && tree.length === 0 && <div className="pm-empty">{error || '暂无文件'}</div>}
+        {root && !loading && tree.length > 0 && visible.length === 0 && <div className="pm-empty">没有匹配的文件</div>}
+        {root && !loading && visible.map((node) => (
+          <TreeRowMemo key={node.relPath} node={node} depth={0} filtering={!!fileFilter.trim()} onOpen={onOpen} selectedPath={selectedPath} dirty={!!dirty} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * 标签页 2：项目树（原左侧「项目管理」栏的上半部分）。
@@ -110,8 +168,6 @@ export default function ProjectPanel({ onOpen, embedded = false }: { onOpen: (re
   const openFile = useProjectStore((s) => s.openFile);
   const setSideOpen = useUiStore((s) => s.setSideOpen);
 
-  const visible = useMemo(() => filterTree(tree, fileFilter), [tree, fileFilter]);
-  const fileCount = useMemo(() => countFiles(tree), [tree]);
   const rootName = root ? root.split(/[\\/]/).filter(Boolean).pop() : null;
   const fileName = projectFile ? projectFile.split(/[\\/]/).filter(Boolean).pop() : null;
 
@@ -124,13 +180,11 @@ export default function ProjectPanel({ onOpen, embedded = false }: { onOpen: (re
   );
 
   return (
-    <div className="sp-pane sp-pane-tree">
-      <div className="sp-subhead">
-        <div className="sp-path" title={root || ''}>
-          <span className="sp-path-name">{(embedded ? rootName || fileName : fileName || rootName) || '未打开项目'}</span>
-          {root && <span className="sp-path-meta">{fileCount} 文件</span>}
-        </div>
-        <div className="pm-actions">
+    <ProjectFileTree
+      root={root} tree={tree} loading={loading} error={error} selectedPath={selected?.relPath ?? null}
+      dirty={dirty} fileFilter={fileFilter} setFileFilter={setFileFilter} onOpen={handleOpen}
+      workspaceLabel={<span className="sp-path-name">{(embedded ? rootName || fileName : fileName || rootName) || '未打开项目'}</span>}
+      actions={<>
           {!embedded && <button onClick={() => void openProject()} title="选择项目目录">
             {root ? '切换' : '打开'}
           </button>}
@@ -142,42 +196,7 @@ export default function ProjectPanel({ onOpen, embedded = false }: { onOpen: (re
           {!embedded && <button onClick={() => setSideOpen(false)} title="收起侧栏 (Ctrl+B)">
             »
           </button>}
-        </div>
-      </div>
-
-      <div className="pm-search">
-        <span aria-hidden>⌕</span>
-        <input
-          value={fileFilter}
-          onChange={(e) => setFileFilter(e.target.value)}
-          placeholder="过滤文件…"
-          spellCheck={false}
-        />
-        {fileFilter && (
-          <button className="pm-search-clear" title="清除过滤" onClick={() => setFileFilter('')}>
-            ×
-          </button>
-        )}
-      </div>
-
-      <div className="pm-tree">
-        {!root && <div className="pm-empty">点击「打开」选择项目目录</div>}
-        {root && loading && <div className="pm-empty">加载中…</div>}
-        {root && !loading && tree.length === 0 && <div className="pm-empty">{error || '目录为空或无文件'}</div>}
-        {root && !loading && tree.length > 0 && visible.length === 0 && <div className="pm-empty">没有匹配的文件</div>}
-        {root &&
-          !loading &&
-          visible.map((n) => (
-            <TreeRowMemo
-              key={n.relPath}
-              node={n}
-              depth={0}
-              onOpen={handleOpen}
-              selectedPath={selected?.relPath ?? null}
-              dirty={dirty}
-            />
-          ))}
-      </div>
-    </div>
+      </>}
+    />
   );
 }

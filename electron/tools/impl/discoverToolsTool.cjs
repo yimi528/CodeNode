@@ -83,8 +83,8 @@ function register(registry) {
       const query = String((args && args.query) || '').trim();
       if (!query) return AgentToolResult.error('缺少 query', { code: 'ARG_SEMANTIC', tool: 'discover_tools' });
 
-      const exposed = new Set(registry.exposedNames());
-      const all = registry.listTools().map((t) => t.name);
+      const exposed = new Set(registry.exposedExecutorNames());
+      const all = registry.registeredExecutorNames();
       const hidden = all.filter((n) => !exposed.has(n));
 
       if (!hidden.length) {
@@ -92,21 +92,35 @@ function register(registry) {
         return AgentToolResult.ok(text, { enabled: [], hidden: [], matched: 0 }, { modelContent: text });
       }
 
-      const terms_ = terms(query);
-      // ① profile 名精确命中 → 整组启用（比逐词打分更符合「我要一类能力」的说法）
-      const profileHits = profiles.PROFILE_NAMES.filter((p) => query.toLowerCase().includes(p));
-      const scored = hidden
-        .map((name) => ({ name, score: scoreTool(registry, name, terms_) }))
-        .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-
-      const picks = [];
-      for (const name of hidden) {
-        if (profileHits.some((p) => profiles.PROFILE_TOOLS[p].includes(name)) && !picks.includes(name)) picks.push(name);
+      const queryName = query.toLowerCase();
+      const publicName = registry.modelToolName(queryName);
+      if (publicName !== queryName && !registry.contains(queryName)) {
+        const text = '动作 ' + queryName + ' 在当前工具配置下不可用。';
+        return AgentToolResult.ok(text, { enabled: [], hidden, matched: 0 }, { modelContent: text });
       }
-      for (const item of scored) {
-        if (picks.length >= MAX_ENABLE) break;
-        if (!picks.includes(item.name)) picks.push(item.name);
+      const exact = all.includes(query) ? query : all.find(name => name.toLowerCase() === queryName);
+      const familyMembers = all.filter(name => registry.modelToolName(name) === queryName);
+      const requested = exact ? [exact] : familyMembers;
+      const picks = requested.filter(name => !exposed.has(name));
+      if (requested.length && !picks.length) {
+        const text = '工具 ' + publicName + ' 已在当前工具面，可以直接调用。';
+        return AgentToolResult.ok(text, { enabled: [], hidden, matched: 0 }, { modelContent: text });
+      }
+      if (!requested.length) {
+        const lowered = queryName;
+        const terms_ = terms(query);
+        const profileHits = profiles.PROFILE_NAMES.filter(p => lowered.includes(p));
+        for (const name of hidden) {
+          if (profileHits.some(p => profiles.PROFILE_TOOLS[p].includes(name))) picks.push(name);
+        }
+        const scored = hidden
+          .map(name => ({ name, score: scoreTool(registry, name, terms_) }))
+          .filter(item => item.score > 0)
+          .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+        for (const item of scored) {
+          if (picks.length >= MAX_ENABLE) break;
+          if (!picks.includes(item.name)) picks.push(item.name);
+        }
       }
 
       if (!picks.length) {
@@ -124,18 +138,19 @@ function register(registry) {
       }
 
       const enabled = registry.exposeNames(picks);
-      const newly = picks.slice(0, MAX_LIST);
+      const published = [...new Set(picks.map(name => registry.modelToolName(name)))];
+      const newly = published.slice(0, MAX_LIST);
       const lines = newly.map((n) => {
-        const d = registry.descriptorOf(n);
-        const desc = String((d && d.description) || '').replace(/\s+/g, ' ').slice(0, 60);
+        const d = registry.modelSpec(n, picks);
+        const desc = String((d && d.description) || '').replace(/\s+/g, ' ').slice(0, 140);
         return '- ' + n + '：' + desc;
       });
       const text =
-        '已启用 ' + picks.length + ' 个工具（**从下一轮开始**可以调用）：\n' + lines.join('\n') +
+        '已启用以下工具或动作（**从下一轮开始**可以调用）：\n' + lines.join('\n') +
         '\n（本次 run 的工具面只增不减；如还需要别的能力，再调用一次 discover_tools 换功能词。）';
       return AgentToolResult.ok(
         text,
-        { enabled: picks, exposed: enabled, matched: picks.length, hiddenRemaining: hidden.filter((n) => !picks.includes(n)) },
+        { enabled: published, exposed: enabled, matched: published.length, hiddenRemaining: hidden.filter((n) => !picks.includes(n)) },
         { modelContent: text },
       );
     },

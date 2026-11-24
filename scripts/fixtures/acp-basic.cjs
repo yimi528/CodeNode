@@ -4,10 +4,16 @@ const send=value=>process.stdout.write(JSON.stringify(value)+'\n');
 let session='';let pendingPrompt=null;
 readline.createInterface({input:process.stdin}).on('line',line=>{
   const m=JSON.parse(line);const result=value=>send({jsonrpc:'2.0',id:m.id,result:value});
-  if(m.method==='initialize')result({protocolVersion:1,agentCapabilities:{loadSession:true,sessionCapabilities:{resume:{},close:{}}},agentInfo:{name:'fixture',version:'1'}});
+  if(m.method==='initialize')result({protocolVersion:1,agentCapabilities:process.env.FIXTURE_NO_RESTORE ? {} : {loadSession:true,sessionCapabilities:{resume:{},close:{}}},agentInfo:{name:'fixture',version:'1'}});
   else if(m.method==='error-test')send({jsonrpc:'2.0',id:m.id,error:{code:-32001,message:'fixture protocol error',data:{detail:'preserve diagnostic'}}});
   else if(m.method==='session/new'||m.method==='session/load'||m.method==='session/resume'){
-    if(process.env.FIXTURE_REQUIRE_MCP_SERVERS==='1'&&!Array.isArray(m.params.mcpServers))send({jsonrpc:'2.0',id:m.id,error:{code:-32602,message:'Invalid params',data:{_errors:[],mcpServers:{_errors:['Invalid input: expected array, received undefined']}}}});
+    if(m.method==='session/new' && process.env.FIXTURE_SESSION_AUTH) send({jsonrpc:'2.0',id:m.id,error:{code:-32000,message:'Authentication required'}});
+    else if(m.method==='session/load' && process.env.FIXTURE_REPLAY) {
+      session=m.params.sessionId;
+      send({jsonrpc:'2.0',method:'session/update',params:{sessionId:session,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'OLD ACP REPLAY'}}}});
+      result({});
+    }
+    else if(process.env.FIXTURE_REQUIRE_MCP_SERVERS==='1'&&!Array.isArray(m.params.mcpServers))send({jsonrpc:'2.0',id:m.id,error:{code:-32602,message:'Invalid params',data:{_errors:[],mcpServers:{_errors:['Invalid input: expected array, received undefined']}}}});
     else{session=m.params.sessionId||'acp-fixture';if(process.env.FIXTURE_SESSION_PARAMS)require('node:fs').writeFileSync(process.env.FIXTURE_SESSION_PARAMS,JSON.stringify({method:m.method,params:m.params}));result(m.method==='session/new'?{sessionId:session}:{});}
   }
   else if(m.method==='session/prompt'){

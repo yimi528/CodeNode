@@ -1,0 +1,5 @@
+.agent-switch-diagnostics { width:min(300px,calc(100vw - 16px)); }
+.agent-switch-diagnostics .agent-unavailable { display:block; margin-top:3px; color:var(--glass-muted); }
+.agent-switch-diagnostics > button { padding:9px 12px; background:var(--glass-control); color:var(--glass-text); border:0; border-top:1px solid var(--glass-border); text-align:left; cursor:pointer; font:inherit; }
+.backend-diagnostics { display:grid; gap:7px; padding:12px; border:1px solid var(--glass-border); border-radius:8px; background:var(--glass-control); }
+.backend-diagnostics p,.backend-diagnostics small { margin:0; color:var(--glass-muted); line-height:1.5; overflow-wrap:anywhere; }

@@ -97,26 +97,15 @@ function makeBridge(sender, signal, options) {
       }
       return approved;
     }
-    const r = await request('confirm', { level, what, detail });
-    /**
-     * 「本项目始终允许」：界面按钮回 `{ok:true, always:'project'}`。
-     * 只有**注册表级**审批（`what` 就是工具名）才记忆 —— shell 命令那种「允许一条命令文本」
-     * 很快就会退化成「允许一类命令」，而 Windows 上没有内核兜底，所以那类逐条问、不记忆。
-     * 规则文件本身是受保护路径（写工具写不进去），只能从这里或人手写产生。
-     */
-    if (r && r.always === 'project') {
-      const projectRoot = (meta && meta.projectRoot) || bridgeOptions.projectRoot || null;
-      const tool = (meta && meta.tool) || String(what || '');
-      if (projectRoot && approvalRules.isRememberableTool(tool)) {
-        const added = approvalRules.addRule(projectRoot, { capability: meta && meta.capability, tool, level: (meta && meta.level) || level });
-        try {
-          console.log('[bridge] 审批规则' + (added.ok ? '已写入' : '写入失败') + '：tool=' + tool + (added.ok ? '（以后本项目不再询问）' : ' ' + (added.error || '')));
-        } catch {}
-      } else {
-        try {
-          console.log('[bridge] 这次审批无法被记住（' + (tool || '?') + ' 不是注册表级工具审批）：仅对本次调用有效');
-        } catch {}
-      }
+    const tool = meta?.tool;
+    const projectRoot = meta?.projectRoot || bridgeOptions.projectRoot;
+    const actions = meta?.canRemember === true && projectRoot && approvalRules.isRememberableTool(tool)
+      ? approvalRules.approvalActions(tool, meta.actionIds) : [];
+    const r = await request('confirm', { level, what, detail, rememberActions: actions });
+    // Persist only the main process's resolved actions for this specific approved request.
+    if (r?.ok === true && r.always === 'project' && actions.length && !closed && !signal?.aborted) {
+      const saved = approvalRules.addRule(projectRoot, { tool, capability: meta.capability, level, actionIds: actions });
+      if (!saved.ok) throw Error('无法保存项目审批规则：' + saved.error);
     }
     return r && r.ok === true;
   }

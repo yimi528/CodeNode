@@ -74,6 +74,17 @@ function luminanceStats(image) {
   return { mean: +mean.toFixed(2), sd: +Math.sqrt(Math.max(0, sumSq / n - mean * mean)).toFixed(2) };
 }
 
+// A light conversation pane beside a dark canvas has high spatial contrast even when fully opaque.
+// Measure changes in the same foreground pixels while inverting the backdrop.
+function meanPixelChange(first, second) {
+  assert.equal(first.length, second.length);
+  let sum = 0;
+  for (let i = 0; i < first.length; i += 4) {
+    for (let channel = 0; channel < 3; channel++) sum += Math.abs(first[i + channel] - second[i + channel]);
+  }
+  return sum / (first.length * 0.75);
+}
+
 async function grabScreen(scale) {
   const display = screen.getPrimaryDisplay();
   const physical = { width: Math.round(display.size.width * scale), height: Math.round(display.size.height * scale) };
@@ -82,11 +93,11 @@ async function grabScreen(scale) {
   return sources[0].thumbnail;
 }
 
-async function captureRegion(region, scale, file) {
+async function captureRegion(region, scale, file = '') {
   const shot = await grabScreen(scale);
   const crop = shot.crop(region);
   if (file) fs.writeFileSync(file, crop.toPNG());
-  return luminanceStats(crop);
+  return { ...luminanceStats(crop), pixels: crop.toBitmap() };
 }
 
 app.on('window-all-closed', () => {});
@@ -97,7 +108,7 @@ app.whenReady().then(async () => {
     const ids = Object.keys(themesJson);
     const packagedThemes = runtimeAsar ? JSON.parse(fs.readFileSync(path.join(runtimeAsar, 'config', 'ui.themes.json'), 'utf8')) : themesJson;
     assert.deepEqual(Object.keys(packagedThemes), ids, '包内主题表必须与源码主题表一致');
-    assert.deepEqual(ids, ['light', 'dark', THIRD_THEME], '主题表必须是日间/夜间/无色玻璃三套');
+    assert.deepEqual(ids, ['light', 'dark', THIRD_THEME], '主题表与参考分支的三套主题一致');
     const referenceKeys = Object.keys(themesJson.light).sort();
     for (const id of ids) assert.deepEqual(Object.keys(themesJson[id]).sort(), referenceKeys, id + ' 主题 token 键与 light 不一致');
     const CHROMATIC_ALLOWED = new Set(['--stage-running', '--stage-done', '--stage-failed', '--stage-blocked', '--menu-danger']);
@@ -139,11 +150,11 @@ app.whenReady().then(async () => {
     await js('window.__codenodeUi.getState().closeSettings()');
 
     // ---- 4. 窗口本身必须不是透明窗口，底色始终保持不透明深色 ----
-    for (const theme of ['light', 'dark', THIRD_THEME]) {
+    for (const theme of ids) {
       await js(`window.__codenodeUi.getState().setTheme(${JSON.stringify(theme)})`);
       await sleep(200);
       assert.equal(await js('window.__codenodeUi.getState().theme'), theme);
-      assert.equal(windowBg(), '#14161A', theme + ' 主题下窗口底色必须始终不透明，实际 ' + JSON.stringify(win.getBackgroundColor()));
+      assert.equal(windowBg(), '#222222', theme + ' 主题下窗口底色必须始终不透明，实际 ' + JSON.stringify(win.getBackgroundColor()));
     }
 
     // ---- 5. 像素级不透明：三套主题都不允许把背后的棋盘格透出来 ----
@@ -161,7 +172,7 @@ app.whenReady().then(async () => {
     fs.mkdirSync(outDir, { recursive: true });
     const shotPath = (name) => path.join(outDir, 'bright-theme-' + name + (packageRoot ? '-packaged' : '') + '.png');
 
-    // 三次像素测量必须处在同一套布局，否则量到的是界面内容差异而不是不透明度。
+    // 四次像素测量必须处在同一套布局，否则量到的是界面内容差异而不是不透明度。
     await js(`window.__codenodeUi.setState({navigationOpen:false,conversationOpen:false,sideOpen:false,dockOpen:false,sideTab:'agent',appPage:'workbench'}); window.__codenodeUi.getState().closeSettings()`);
     await sleep(300);
 
@@ -169,6 +180,15 @@ app.whenReady().then(async () => {
     await sleep(500);
     const backdropOnly = await captureRegion(region, scale, shotPath('backdrop-reference'));
     assert.ok(backdropOnly.sd > 60, '参照棋盘格必须是高频图案，实际标准差 ' + backdropOnly.sd);
+
+    const invertBackdrop = async inverted => {
+      await backdrop.webContents.executeJavaScript(`document.documentElement.style.filter = ${JSON.stringify(inverted ? 'invert(1)' : 'none')}`);
+      await sleep(250);
+    };
+    await invertBackdrop(true);
+    const inverse = await captureRegion(region, scale);
+    assert.ok(meanPixelChange(backdropOnly.pixels, inverse.pixels) > 100, '参照背景必须实际翻转');
+    await invertBackdrop(false);
 
     const opaqueOf = async (theme) => {
       await js(`window.__codenodeUi.getState().setTheme(${JSON.stringify(theme)})`);
@@ -181,11 +201,14 @@ app.whenReady().then(async () => {
       return captureRegion(region, scale, shotPath(theme));
     };
 
-    for (const theme of ['light', 'dark', THIRD_THEME]) {
+    for (const theme of ids) {
       const shot = await opaqueOf(theme);
-      console.log('OPACITY', theme, { mean: shot.mean, sd: shot.sd }, '| backdrop sd', backdropOnly.sd);
-      assert.ok(shot.sd <= 20, theme + ' 主题必须完全不透明（背后的棋盘格不得透出），实际标准差 ' + shot.sd);
-      assert.ok(Math.abs(shot.mean - backdropOnly.mean) > 40, theme + ' 主题必须与背后的棋盘格明显不同，实际均值 ' + shot.mean);
+      await invertBackdrop(true);
+      const inverted = await captureRegion(region, scale);
+      const change = meanPixelChange(shot.pixels, inverted.pixels);
+      console.log('OPACITY', theme, { foregroundChange: change });
+      assert.ok(change < 2, theme + ' 主题的前景像素随背景变化，平均差值 ' + change);
+      await invertBackdrop(false);
     }
     win.setAlwaysOnTop(false);
 

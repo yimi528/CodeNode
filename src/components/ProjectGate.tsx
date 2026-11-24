@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import './ProjectGate.css';
+import welcomeLogo from '../../assets/branding/welcome-logo.png';
 import { useProjectStore } from '../store/projectStore';
 import { newProject, openProject, openProjectFile, openRecentProject } from '../lib/projectActions';
 import {
@@ -34,7 +34,7 @@ export default function ProjectGate() {
   }, []);
 
   const run = useCallback(
-    async (label: string, action: () => Promise<void>) => {
+    async (label: string, action: () => Promise<unknown>) => {
       if (busy) return;
       if (!hasApi) {
         setStatus('未检测到 Electron 环境');
@@ -65,17 +65,17 @@ export default function ProjectGate() {
 
   return (
     <div className="gate">
-      <div className={`gate-card${recent.length ? ' has-recent' : ''}`}>
+      <div className="gate-card">
         <div className="gate-main">
           <header className="gate-head">
-            <div className="gate-logo" aria-hidden="true">CN</div>
+            <img className="gate-logo" src={welcomeLogo} alt="" />
             <div className="gate-head-text">
               <h1>CodeNode</h1>
-              <p className="gate-sub">打开一个项目，开始与 Agent 协作。</p>
             </div>
+            <p className="gate-sub">打开一个项目，开始与 Agent 协作。</p>
           </header>
 
-          <div className="gate-actions">
+          <div className="gate-actions" role="group" aria-label="工程操作">
             <button
               type="button"
               className="gate-btn"
@@ -102,15 +102,15 @@ export default function ProjectGate() {
             </button>
           </div>
 
-          <div className="gate-hint">项目、会话与检查点保存在本机。</div>
-
-          {status ? <div className="gate-status">{status}</div> : null}
-          {error ? <div className="gate-status err">{error}</div> : null}
-          {!hasApi ? (
-            <div className="gate-status err">
-              未检测到 Electron 环境，请通过桌面快捷方式或 <code>npm run dev</code> 启动。
-            </div>
-          ) : null}
+          <div className="gate-feedback">
+            {status ? <div className="gate-status">{status}</div> : null}
+            {error ? <div className="gate-status err">{error}</div> : null}
+            {!hasApi ? (
+              <div className="gate-status err">
+                未检测到 Electron 环境，请通过桌面快捷方式或 <code>npm run dev</code> 启动。
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <aside className="gate-recent">

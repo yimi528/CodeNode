@@ -97,7 +97,7 @@ app.whenReady().then(async () => {
       draft.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise(resolve => setTimeout(resolve, 30));
       const snapshot = () => JSON.stringify({ messages: session.getState().messages, activeId: session.getState().activeId,
-        draft: document.querySelector('.pp-input')?.value, model: document.querySelector('.pp-model')?.textContent,
+        draft: document.querySelector('.pp-input')?.value, model: document.querySelector('.model-connection-trigger')?.title,
         sideOpen: ui.getState().sideOpen, sideTab: ui.getState().sideTab });
       const beforeTheme = snapshot();
       const themeChecks = [];

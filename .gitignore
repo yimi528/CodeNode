@@ -49,3 +49,7 @@ benchmarks/**/__pycache__/
 # Python bytecode is generated during SDK tests.
 **/__pycache__/
 *.py[cod]
+
+# 会话分支的本地工作树与事实日志
+.codenode/branches/
+.codenode/worktrees/

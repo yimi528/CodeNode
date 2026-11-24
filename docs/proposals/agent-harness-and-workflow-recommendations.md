@@ -274,7 +274,7 @@ MCP 可用于把 CodeNode 的领域能力提供给 Agent；它本身不替代会
 
 ### CodeNode 本地设计与现状
 
-- [项目首页](../README.md)
+- [项目首页](../../README.md)
 
 ### LoopX
 
@@ -312,8 +312,8 @@ MCP 可用于把 CodeNode 的领域能力提供给 Agent；它本身不替代会
 
 验证证据与范围：
 
-1. 原离线基线 11/11 通过：127 次真实工具调用、45 个脚本化模型步骤、2475 ms。该评测不代表真实模型成功率；原始 JSON 见 [P0 builtin 基线](eval-reports/p0-builtin-baseline.json)。
-2. 全量核心门禁 151/151 通过，最后修正后补跑了静态检查、后端、画布、会话、差异摘要与昼夜 UI 专项。交付检查汇总见 [P0 交付记录](../release/p0-backends-result.json)。
+1. 原离线基线 11/11 通过：127 次真实工具调用、45 个脚本化模型步骤、2475 ms。该评测不代表真实模型成功率；原始 JSON 见 [P0 builtin 基线](../eval-reports/p0-builtin-baseline.json)。
+2. 全量核心门禁 151/151 通过，最后修正后补跑了静态检查、后端、画布、会话、差异摘要与昼夜 UI 专项。交付检查汇总见 [P0 交付记录](../../release/p0-backends-result.json)。
 3. `test:backend-workflow` 从真实画布 IPC 进入真实聊天 handler，经独立协议子进程完成一次拒绝、确认中断、持久化恢复、文件差异和独立 Node 测试。协议对端为可复现夹具；这不是实际模型演示。
 4. 本机两个原生 Codex 运行时均完成握手、账户探测和线程／执行创建；模型请求持续重连，90 秒内未得到回答，随后均收到确认中断终态，隔离项目文件未改变。隔离测试宿主 API Key 后仍复现。因此真实模型成功执行、实际模型下的审批与恢复完整案例、实际沙箱边界仍待进一步验收，**P0 尚未标记全部完成**。
 5. 暂存包与固定交付包均须通过自检，打包后设置在昼夜两种主题中共用结构和交互，并验证会话、草稿、内置模型选择与侧栏状态保留。新增 backend 模块、配置和构建输出逐文件与 asar 比对。
@@ -407,7 +407,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 验收发现并修复了刷新竞态：原自动推进 effect 每次因 Goal 列表更新而清理时都会设置 cancelled，导致同一项目的有效认领被误标记为 project_changed_before_dispatch。现在只在组件卸载或项目代际改变时取消待启动认领，普通 Goal 刷新不取消。构建、JavaScript 检查、Goal store/IPC 专项及源码和包内双主题 UI 均通过；双主题保持会话、草稿、模型和侧栏状态。暂存包 UI 自检 19/19 和实际 asar 启动自检通过。
 
-可复现命令：`npm run build` 后运行 `npm run test:goal-auto-live`。设置 `CODENODE_AUTO_LIVE_PACKAGE` 为 unpacked 包目录可验收其实际 app.asar main/preload/renderer；`CODENODE_AUTO_LIVE_REPORT` 可指定 JSON 报告。此入口会实际使用已登录 OpenCode 发起模型请求，故不加入默认离线测试套件。原始打包验收摘要及脚本、组件和 asar 的 SHA-256 保存于 [验收证据](validation/goal-auto-advance-live-2026-10-09.json)。报告中的 recordedAt 使用 UTC。
+可复现命令：`npm run build` 后运行 `npm run test:goal-auto-live`。设置 `CODENODE_AUTO_LIVE_PACKAGE` 为 unpacked 包目录可验收其实际 app.asar main/preload/renderer；`CODENODE_AUTO_LIVE_REPORT` 可指定 JSON 报告。此入口会实际使用已登录 OpenCode 发起模型请求，故不加入默认离线测试套件。原始打包验收摘要及脚本、组件和 asar 的 SHA-256 保存于 [验收证据](../validation/goal-auto-advance-live-2026-10-09.json)。报告中的 recordedAt 使用 UTC。
 
 范围：本次验证 Windows 桌面上的 OpenCode、时间等待以及文本任务自动推进；不代表所有外部 Agent、GitHub Actions/Agent Eval 外部状态真实闭环、美元预算或操作系统隔离均已实测，也不替代具体业务 Task 的独立验收。其余角色质量比较、阶段 E、外部实验跟踪和一般经验提炼保持原状态。
 
@@ -424,7 +424,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 测试新增 test:backend-port，并纳入默认离线套件；真实 stdin/stdout 夹具覆盖初始化幂等、Task 生命周期、owner 边界、权限/输入、取消、共享/隔离会话、事件、重复/关闭门禁、旧配置迁移和旧记录拒绝重放。现有文件任务的权限拒绝、中断恢复、指纹、独立校验和画布工作流测试已切换为 ACP。OpenCode 真实模型自动推进、失败和重启路径通过；本机 codex-acp/dsh 不在可解析命令中，未下载第三方 Agent，不声称这两条模型请求实测通过。
 
-本轮完整构建、脚本检查与核心回归 159/159 通过；后续取消统一转发、预取消和纯 ACP 夹具清理又通过 BackendPort／后端／状态机／多后端专项与静态检查。源码与最终包内设置 UI 在日夜主题下共用结构、功能和配置，切换保留会话、草稿、模型及侧栏状态。最终包 UI 自检 19/19、实际 asar main/preload/renderer 启动检查通过。最终包通过 OpenCode 1.17.18 的真实自动推进、失败不重试、启动前遗留认领恢复，以及推理中断后的三进程重启复核；报告直接从被验收的 asar 提取 BackendPort 和配置哈希，保存于 [新版 ACP 实测证据](validation/acp-backend-port-live-2026-10-09.json)。
+本轮完整构建、脚本检查与核心回归 159/159 通过；后续取消统一转发、预取消和纯 ACP 夹具清理又通过 BackendPort／后端／状态机／多后端专项与静态检查。源码与最终包内设置 UI 在日夜主题下共用结构、功能和配置，切换保留会话、草稿、模型及侧栏状态。最终包 UI 自检 19/19、实际 asar main/preload/renderer 启动检查通过。最终包通过 OpenCode 1.17.18 的真实自动推进、失败不重试、启动前遗留认领恢复，以及推理中断后的三进程重启复核；报告直接从被验收的 asar 提取 BackendPort 和配置哈希，保存于 [新版 ACP 实测证据](../validation/acp-backend-port-live-2026-10-09.json)。
 
 固定交付路径 E:\CodeNode\release\win-unpacked 已更新；覆盖前确认 CodeNode 未运行，不保留旧包备份。app.asar SHA-256 为 B36CABFD71D723E277BB66869ADDF89FBA23F87B17FA24C0A49827E1FC6AA548；CodeNode.exe SHA-256 为 4E069955705384D0B711BEDF5611B7C0BC91FF8C84FC199879D29FC4910F9BAB。覆盖后 19/19 自检与实际启动检查再次通过。只把公开 Agent 模板和已提交 Soul 放入交付包，本机私有配置及未提交 Soul 修改保留。
 ### 2026-10-09 对话栏顶部 Agent 快捷切换
@@ -433,7 +433,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 连接配置按 Agent 分别保存在既有 backend.json 的 profiles 中，兼容旧单配置格式；快捷切换有项目时仅覆盖当前项目，无项目时保存本机默认。切回已有 Agent 恢复其命令、参数、模型和 ACP 配置。会话配置查询可带当前 session ID，恢复旧 ACP 会话时顶部与输入区显示该会话实际绑定的 Agent，而非误显示项目默认值。
 
-新增 test:agent-switch-ui，已纳入显示环境测试组。源码与最终包内 UI 验证了两步确认、Escape 取消、已保存配置恢复、原历史和草稿保留、运行禁用、自定义 ACP 未配置时阻止切换、高级设置跳转，以及双主题相同结构/状态。图片来自实际暂存包界面：[日间效果](validation/agent-switcher-preview/light.png)、[夜间效果](validation/agent-switcher-preview/dark.png)。构建、脚本检查、后端与画布工作流专项、既有后端设置双主题检查通过；暂存和固定交付包 UI 自检 19/19、实际 asar 启动自检通过。
+新增 test:agent-switch-ui，已纳入显示环境测试组。源码与最终包内 UI 验证了两步确认、Escape 取消、已保存配置恢复、原历史和草稿保留、运行禁用、自定义 ACP 未配置时阻止切换、高级设置跳转，以及双主题相同结构/状态。图片来自实际暂存包界面：[日间效果](../validation/agent-switcher-preview/light.png)、[夜间效果](../validation/agent-switcher-preview/dark.png)。构建、脚本检查、后端与画布工作流专项、既有后端设置双主题检查通过；暂存和固定交付包 UI 自检 19/19、实际 asar 启动自检通过。
 
 已覆盖 E:\CodeNode\release\win-unpacked，覆盖前确认 CodeNode 未运行，不保留旧包备份。app.asar SHA-256：8BF65362B3362721B5F94DF1B8985DC61AC6A8FB8D41AFF7175A9BB00E51F1F5；CodeNode.exe SHA-256：4E069955705384D0B711BEDF5611B7C0BC91FF8C84FC199879D29FC4910F9BAB。打包仅包含公开 Agent 配置模板和已提交 Soul，本机私有配置和用户未提交 Soul 修改保留。
 ### 2026-10-09 参考 LoopX 的紧凑 Agent 选择器
@@ -442,7 +442,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 新增只读本机启动命令探测，直接按已保存的命令/路径或默认命令做文件解析，不启动 CLI、不发模型请求、不自动安装。找不到命令或自定义 ACP 尚未配置时，菜单置灰并标注“不可用”，键盘导航跳过这些项。命令存在仅表示已找到启动入口，不代表认证、Gateway、依赖或模型请求已通过，完整连接仍使用设置中的检测。
 
-构建、脚本检查、后端专项、原后端设置双主题测试和源码/包内 Agent 选择 UI 测试通过；验证了当前勾选、候选预览不保存、不可用禁用、确认切换、Escape、历史与草稿保留及双主题同结构。最新效果图仍在 [日间](validation/agent-switcher-preview/light.png) 和 [夜间](validation/agent-switcher-preview/dark.png)。暂存与固定路径均通过 UI 自检 19/19 及正式 asar 启动检查。
+构建、脚本检查、后端专项、原后端设置双主题测试和源码/包内 Agent 选择 UI 测试通过；验证了当前勾选、候选预览不保存、不可用禁用、确认切换、Escape、历史与草稿保留及双主题同结构。最新效果图仍在 [日间](../validation/agent-switcher-preview/light.png) 和 [夜间](../validation/agent-switcher-preview/dark.png)。暂存与固定路径均通过 UI 自检 19/19 及正式 asar 启动检查。
 
 已覆盖 E:\CodeNode\release\win-unpacked，覆盖前确认 CodeNode 未运行。app.asar SHA-256：AD99350593F367238B1EE2B14914528172020C18741358550A8CC6E4BBCDDB45；CodeNode.exe SHA-256：4E069955705384D0B711BEDF5611B7C0BC91FF8C84FC199879D29FC4910F9BAB。使用公开 Agent 模板及已提交 Soul 打包，用户私有配置及未提交 Soul 修改保留。
 
@@ -461,7 +461,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 最终包内交互、目标控件、自检 19/19 和实际启动通过；固定目录 E:\CodeNode\release\win-unpacked 已覆盖，覆盖前确认 CodeNode 未运行。app.asar SHA-256：7385512B43EC85F03B619CB7DEDDB62549FFD6E7401333F5E009C564BC7CA6F8；CodeNode.exe SHA-256：4E069955705384D0B711BEDF5611B7C0BC91FF8C84FC199879D29FC4910F9BAB。原私有配置及未提交 Soul 修改保留，交付仅含公开模板与已提交 Soul。
 
-最终包 [原始交互验收摘要](validation/workspace-ux-preview/acceptance.json)、[日间截图](validation/workspace-ux-preview/light.png) 和 [夜间截图](validation/workspace-ux-preview/dark.png) 保留为交付证据；截图使用隔离演示工程。
+最终包 [原始交互验收摘要](../validation/workspace-ux-preview/acceptance.json)、[日间截图](../validation/workspace-ux-preview/light.png) 和 [夜间截图](../validation/workspace-ux-preview/dark.png) 保留为交付证据；截图使用隔离演示工程。
 
 
 ### 2026-10-09 同对话 Agent 接手与总览／对话页面
@@ -472,14 +472,14 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 新增 test:agent-handoff 纳入离线核心套件，用真实 ACP stdio 夹具验证同一界面对话的历史／画布交接、代次绑定、相同 Agent 精确恢复、跨 Agent/切回来新内部会话和绑定持久化；该夹具不是跨供应商真实模型质量比较。包内 Agent UI 检查确认切换后 activeId、memoryConversationId、消息和草稿保持原值，切回 CodeNode 仍保留原对话。页面检查验证总览和对话独立、配置持久化、目标表单/对话草稿保留和双主题同功能。核心完整回归 160/160、构建和脚本检查通过；源码/包内目标控件、Agent 切换、目标重启复核、调用链及页面交互通过。
 
-[日间总览](validation/overview-handoff-preview/light.png)、[夜间总览](validation/overview-handoff-preview/dark.png)、[日间对话](validation/overview-handoff-preview/conversation-light.png)、[夜间对话](validation/overview-handoff-preview/conversation-dark.png) 来自最终暂存包的隔离演示工程。[包内验收摘要](validation/overview-handoff-preview/acceptance.json) 绑定交付 app.asar。固定路径 E:\CodeNode\release\win-unpacked 已覆盖，覆盖前确认 CodeNode 未运行；暂存和固定路径 UI 自检 19/19、实际 asar 启动自检通过。app.asar SHA-256 为 CF6C55FF8934767A7825115D478C9B86CB355D7DE9CB68AE4AABF6CCA9A9715C，CodeNode.exe SHA-256 为 4E069955705384D0B711BEDF5611B7C0BC91FF8C84FC199879D29FC4910F9BAB。私有 Agent 配置及用户 Soul 修改保留，包只包含公开配置模板和已提交 Soul。
+[日间总览](../validation/overview-handoff-preview/light.png)、[夜间总览](../validation/overview-handoff-preview/dark.png)、[日间对话](../validation/overview-handoff-preview/conversation-light.png)、[夜间对话](../validation/overview-handoff-preview/conversation-dark.png) 来自最终暂存包的隔离演示工程。[包内验收摘要](../validation/overview-handoff-preview/acceptance.json) 绑定交付 app.asar。固定路径 E:\CodeNode\release\win-unpacked 已覆盖，覆盖前确认 CodeNode 未运行；暂存和固定路径 UI 自检 19/19、实际 asar 启动自检通过。app.asar SHA-256 为 CF6C55FF8934767A7825115D478C9B86CB355D7DE9CB68AE4AABF6CCA9A9715C，CodeNode.exe SHA-256 为 4E069955705384D0B711BEDF5611B7C0BC91FF8C84FC199879D29FC4910F9BAB。私有 Agent 配置及用户 Soul 修改保留，包只包含公开配置模板和已提交 Soul。
 
 
 ### 2026-10-09 内部空白选区的 Del 删除修正
 
 针对用户再次反馈 Del 无法删除节点，复现并确认内部画布快捷键在无图形选中时仍吞掉 Delete/Backspace。此前验收只允许标题/边框删除整节点，内部空白路径被设计成空操作，与界面外层节点选中标记不一致。本轮按实际选区分流：内部图形选中时只删图形，内部空白且仅外层节点选中时删除整个节点；删图形后清理外层选区，第二次 Delete 不会意外删整节点。文字编辑、正在画线或编辑对象时不触发外层删除。底部提示同步更新。
 
-实际鼠标／键盘专项覆盖内部空白 Del、删除图形后重复 Del 保护、标题 Delete/Backspace/X、拖动节点后 Delete、输入保护、连线、多选和撤销，源码与最终包均通过，日夜主题检查通过；graph undo、构建、静态检查通过。暂存与固定交付路径自检 19/19 及实际启动通过。证据见 [包内交互摘要](validation/delete-routing-2026-10-09.json)。
+实际鼠标／键盘专项覆盖内部空白 Del、删除图形后重复 Del 保护、标题 Delete/Backspace/X、拖动节点后 Delete、输入保护、连线、多选和撤销，源码与最终包均通过，日夜主题检查通过；graph undo、构建、静态检查通过。暂存与固定交付路径自检 19/19 及实际启动通过。证据见 [包内交互摘要](../validation/delete-routing-2026-10-09.json)。
 
 已覆盖 E:\CodeNode\release\win-unpacked，覆盖前确认 CodeNode 未运行。app.asar SHA-256：FBB231C9897E0FCEF665FED8A577905EDC555C172FF42499ED6549AE8DF1E629；CodeNode.exe SHA-256：4E069955705384D0B711BEDF5611B7C0BC91FF8C84FC199879D29FC4910F9BAB。仅用公开模板与已提交 Soul 打包，保留用户私有配置和未提交 Soul 改动。
 
@@ -490,7 +490,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 创建窗口主要展示目标名称、希望完成什么和完成标准三项，范围与预算折叠为可选；没有名称和完成标准时不能提交。提交调用真实 goal:create IPC，成功后关闭窗口并刷新列表；创建模式与当前被选中 Goal 分离，避免刷新把创建表单替换成既有 Goal，取消再打开保留创建草稿。实际 UI 测试创建了含两条独立标准的目标，验证了 IPC 保存与列表结果。编辑窗口保持已有任务、审批决定、等待、自动推进及证据功能，键盘焦点限制在打开的窗口内。总览／对话切换继续保留消息、画布和表单草稿，日夜主题共用结构。
 
-构建、脚本检查、源码和最终包的空状态／实际创建／取消草稿／目标列表／详情编辑／双主题交互通过；Goal Store 专项、既有目标设置与重启复核通过。暂存和固定交付路径 UI 自检 19/19、实际 asar 启动通过。[无目标日间效果](validation/simple-overview-preview/empty-light.png)、[无目标夜间效果](validation/simple-overview-preview/empty-dark.png)、[已有目标日间效果](validation/simple-overview-preview/light.png)、[已有目标夜间效果](validation/simple-overview-preview/dark.png) 来自最终包的隔离演示工程，原始摘要见 [acceptance.json](validation/simple-overview-preview/acceptance.json)。
+构建、脚本检查、源码和最终包的空状态／实际创建／取消草稿／目标列表／详情编辑／双主题交互通过；Goal Store 专项、既有目标设置与重启复核通过。暂存和固定交付路径 UI 自检 19/19、实际 asar 启动通过。[无目标日间效果](../validation/simple-overview-preview/empty-light.png)、[无目标夜间效果](../validation/simple-overview-preview/empty-dark.png)、[已有目标日间效果](../validation/simple-overview-preview/light.png)、[已有目标夜间效果](../validation/simple-overview-preview/dark.png) 来自最终包的隔离演示工程，原始摘要见 [acceptance.json](../validation/simple-overview-preview/acceptance.json)。
 
 固定目录 E:\CodeNode\release\win-unpacked 已覆盖，覆盖前确认 CodeNode 未运行。app.asar SHA-256：4CB8E5F429BE2804F150C485029C138A3BB46EE6E23520E9252E93E65CAE9A10；CodeNode.exe SHA-256：4E069955705384D0B711BEDF5611B7C0BC91FF8C84FC199879D29FC4910F9BAB。仅使用公开模板与已提交 Soul 打包，用户本地私有配置及未提交 Soul 修改保留。
 
@@ -507,7 +507,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 **Muse Code 走 MSP 而不是 ACP。** 新增 `electron/backends/muse.cjs`：启动 `muse serve`，在同一个 stdio 上跑 MSP（换行分隔 JSON-RPC 2.0），复用现有 StdioRpc 传输。已接入 `initialize` + `initialized` 握手与 `schema.version === 1` 校验、`session/start`（UUIDv7 `commandId`/`sessionId`、`workspaceRoot`、可选 `modelId`，写入模式不带 `approvalMode`）、`turn/start`（文本与内联图片、`displayText`、`ifBusy: "queue"`）、`item/started|delta|updated|completed` 流式映射（`item/delta` 逐段出文本与推理，`item/completed` 只补增量未覆盖的部分，不重复拼接）、`turn/completed` 终态、`turn/cancel`。权限与补充输入按 MSP 的“双通道”处理：`approval/requested`／`userInput/requested` 通知与 `approval/request`／`userInput/request` 服务端请求只回空 `{}` 收据，真正决定走带当前 `requirementId` 的 `approval/decide` 与 `userInput/answer`（无回答时 `userInput/cancel`）。只读直接选拒绝项且不弹确认，写入逐次询问且只选单次允许，不升级为会话或持久策略。MSP 没有 `session/close`，结束靠关闭 stdin 让 Muse drain 后退出；会话编号不跨重启保存，也不注入 CodeNode 工具，附件只支持内联图片。Windows 上的 WSL2 部署用 `wsl.exe` 作为启动命令，“工作区”字段填 Muse 在 Linux 内看到的路径并作为 `workspaceRoot`。因为 MSP 会话不可恢复，该后端不进入 `acpBackends`（据此 `BackendPort.describe().transport` 为 `msp`、`sessionContinuity` 为 `unsupported`），每轮新建 Muse 会话并交接可见历史与画布。
 
-验证：`npx tsc --noEmit`、`npm run check:js` 通过；`npm test` 核心套件 166/166 通过（含新增 `test:muse-backend`，覆盖 MSP 握手、会话/回合生命周期、流式增量不重复、权限允许与只读拒绝、补充输入映射、取消，以及“Muse 不能声明为 ACP 后端”；`test:multi-backends` 扩展到全部 ACP 后端别名与无扩展名垫片解析）。`test:backend-ui` 覆盖全部 ACP 后端的权限设置与 ACP 配置、Pi 的警告、Muse 的 MSP 权限策略与 MSP 模型且不显示 ACP 会话配置，日夜主题结构一致。`test:agent-switch-ui` 的“高级设置跳转”此前的实现与期望不一致（`全局设置` 默认打开“常规”，测试却直接等 `backend-settings`），本轮改为进入设置后点击“Agent 连接”分类，测试恢复通过。Agent 列表预览图见 [日间](validation/agent-switcher-preview/light.png)、[夜间](validation/agent-switcher-preview/dark.png)。
+验证：`npx tsc --noEmit`、`npm run check:js` 通过；`npm test` 核心套件 166/166 通过（含新增 `test:muse-backend`，覆盖 MSP 握手、会话/回合生命周期、流式增量不重复、权限允许与只读拒绝、补充输入映射、取消，以及“Muse 不能声明为 ACP 后端”；`test:multi-backends` 扩展到全部 ACP 后端别名与无扩展名垫片解析）。`test:backend-ui` 覆盖全部 ACP 后端的权限设置与 ACP 配置、Pi 的警告、Muse 的 MSP 权限策略与 MSP 模型且不显示 ACP 会话配置，日夜主题结构一致。`test:agent-switch-ui` 的“高级设置跳转”此前的实现与期望不一致（`全局设置` 默认打开“常规”，测试却直接等 `backend-settings`），本轮改为进入设置后点击“Agent 连接”分类，测试恢复通过。Agent 列表预览图见 [日间](../validation/agent-switcher-preview/light.png)、[夜间](../validation/agent-switcher-preview/dark.png)。
 
 打包自检：暂存包与固定路径均为 packaged UI 自检 20/20、实际 asar main/preload 渲染启动检查通过、Soul 成长专项通过；暂存目录已清理。已覆盖固定目录 E:\CodeNode\release\win-unpacked，覆盖前确认 CodeNode 未运行，不保留旧包备份。app.asar SHA-256：F4E015BB9E1035B946D4C58C7084545823784299AFAA12A5829BAD5839B2C715；CodeNode.exe SHA-256：9A931D4ECE0281E171D7D4087AE3687B399E443088E190D4F7405F81A8BFCC59；便携版 CodeNode-0.13.0.exe SHA-256：29d46cf2c7f154fb6a2972597ac5f02266a735d536addce10d86236deac825c1。用户本地未提交的 Soul 成长数据与私有配置未提交、未被改写。
 
@@ -517,7 +517,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 外观设置从「日间／夜间」两态切换改为**三选一**：日间、夜间、透明玻璃。三套皮肤继续共用同一套控件结构、布局与交互，差异只由 `config/ui.themes.json` 的配色变量表达；主题选择入口集中在 `src/lib/theme.ts`（ID、标签、说明、校验、token 读取的唯一来源），选中后写入 `localStorage` 并由主进程另存一份用于下次启动建窗。切换主题不重建窗口，因此不会重置会话、输入草稿、模型选择或侧栏状态。
 
-**先测量再定方案。** 本轮先用一次性探针在真实屏幕上量「哪种窗口配置能真透出桌面」，结论写进 [透明玻璃主题](theme-glass.md)：
+**先测量再定方案。** 本轮先用一次性探针在真实屏幕上量「哪种窗口配置能真透出桌面」，结论写进 [透明玻璃主题](../theme-glass.md)：
 
 - CSS 的 `backdrop-filter` **模糊不到桌面**：透明窗口 + `blur(28px)` 面板与透明窗口 + 纯半透明色块，屏幕像素逐点一致（亮度均值同为 245.75、标准差同为 26.50），模糊只作用于页面自身内容。所以桌面透亮只能来自窗口材质。
 - `backgroundMaterial: 'acrylic'` **在有边框窗口上同样生效**（亮度均值 221.66、标准差 2.81 的磨砂玻璃，对照：不透明底色 107.01／1.47）。因此不需要改成无边框窗口、不需要自绘标题栏，昼夜主题的窗口外观与行为完全不变。
@@ -526,7 +526,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 **实现。** 新增 `electron/theme.cjs` 负责「主题 → 窗口材质」：读取并持久化主题（`userData/window-theme.json`，原子写）、给出建窗参数（避免启动时先闪一下不透明深色）、运行时施加材质，并在最大化／还原／重新聚焦等时机补施一次（DWM 在这些时机可能丢弃材质）。`electron/main.cjs` 用 `windowTheme.windowOptions()` 建窗并绑定该窗口；`electron/preload.cjs` 暴露 `applyTheme`；`src/App.tsx` 在主题变化时写 `html[data-theme]`、`color-scheme` 与全部 CSS 变量并上报主进程。CSS 侧只要 `html[data-theme="glass"]` 下 `html/body/#root` 整体透明（原来的 `body` 有不透明底色会盖住桌面玻璃），其余玻璃质感沿用既有 `.glass-theme` 规则。主题 ID 直接取 `config/ui.themes.json` 的键，主进程与渲染层不各维护一份列表。玻璃主题除语义状态色外**必须无色**（RGB 极差 ≤ 12），由测试直接断言，避免以后顺手加回偏蓝的灰。
 
-**验收。** 新增 `npm run test:glass-theme-ui` 并纳入显示环境测试组，跑真实 `main.cjs`、真实 preload 与构建产物：三套 token 键一致、设置入口三选一与持久化、玻璃主题下窗口底色变全透明且 `color-scheme` 为亮色、`.app`/`body`/`#root` 计算背景透明、**透光率**（把窗口背后的底色从纯亮黄换成近黑，玻璃主题下 99.8% 像素亮度变化、均值差 69.3；夜间主题下变化 0%、均值 35.69 —— 后者同时是对照组，证明取样区确实是应用本体）、切换主题保留工程／消息／偏好／侧栏／工作台状态、切回夜间后底色恢复不透明且 `nativeTheme.themeSource` 恢复 `system`。`npx tsc --noEmit`、`npm run check:js` 通过；`npm test` 核心套件 167/167 通过。显示组里受影响的既有用例同步更新：`test:project-ui`、`test:coding-settings-ui`、`test:token-cost-ui`、`test:simple-settings-ui` 改为点击 `[data-theme-option]`，全部通过；`test:node-inspector-ui` 此前在「常规」标签里找只存在于「界面 → 画布菜单」的节点属性开关而失败（与本次改动无关，`HEAD` 同样如此），本轮按控件真实位置修正点击分类并展开折叠项后通过。证据图：[亮色桌面背景](validation/glass-theme-preview/bright-backdrop.png)、[暗色桌面背景](validation/glass-theme-preview/dark-backdrop.png)。
+**验收。** 新增 `npm run test:glass-theme-ui` 并纳入显示环境测试组，跑真实 `main.cjs`、真实 preload 与构建产物：三套 token 键一致、设置入口三选一与持久化、玻璃主题下窗口底色变全透明且 `color-scheme` 为亮色、`.app`/`body`/`#root` 计算背景透明、**透光率**（把窗口背后的底色从纯亮黄换成近黑，玻璃主题下 99.8% 像素亮度变化、均值差 69.3；夜间主题下变化 0%、均值 35.69 —— 后者同时是对照组，证明取样区确实是应用本体）、切换主题保留工程／消息／偏好／侧栏／工作台状态、切回夜间后底色恢复不透明且 `nativeTheme.themeSource` 恢复 `system`。`npx tsc --noEmit`、`npm run check:js` 通过；`npm test` 核心套件 167/167 通过。显示组里受影响的既有用例同步更新：`test:project-ui`、`test:coding-settings-ui`、`test:token-cost-ui`、`test:simple-settings-ui` 改为点击 `[data-theme-option]`，全部通过；`test:node-inspector-ui` 此前在「常规」标签里找只存在于「界面 → 画布菜单」的节点属性开关而失败（与本次改动无关，`HEAD` 同样如此），本轮按控件真实位置修正点击分类并展开折叠项后通过。证据图：[亮色桌面背景](../validation/glass-theme-preview/bright-backdrop.png)、[暗色桌面背景](../validation/glass-theme-preview/dark-backdrop.png)。
 
 **打包自检。** `packaged-ui-check` 增加 6 项主题检查（asar 内主题→材质模块、三套色值齐全且 token 键一致、asar preload 暴露 `theme:apply`、渲染包包含第三个主题入口与整体透明规则、切玻璃后页面整体透明且主进程换成系统玻璃底色、切回夜间恢复不透明）：暂存包与固定路径均为 **28/28** 通过，`packaged-startup-check` 与 Soul 成长专项同样通过。把 `CODENODE_UI_TEST_PACKAGE` 指向交付包再跑一次 `test:glass-theme-ui`，透光率与源码一致（99.8%、亮度差 69.3）。已覆盖固定目录 `E:\CodeNode\release\win-unpacked`，覆盖前确认 CodeNode 未运行，不保留旧包备份；独立暂存目录 `.stage-glass-theme`、临时打包配置与隔离自检数据均已清理。app.asar SHA-256：`A7020D35AA040D101B58DE035CF58F297465EA1D190C1497BC4C8408060207F2`；CodeNode.exe SHA-256：`9A931D4ECE0281E171D7D4087AE3687B399E443088E190D4F7405F81A8BFCC59`（与替换前逐字节一致，本次交付只更新包内容）；便携版 CodeNode-0.13.0.exe SHA-256：`D47DF8A76A77659EBC72F5BD46B6208DB1A271A8C4A3F38B8C91AB4CD0F27495`。用户本地未提交的 Soul 修改与私有配置未提交、未被改写。
 
@@ -542,7 +542,7 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 **主题选择改下拉框。** 设置 → 常规 → 主题由横排三个按钮改成 `select[data-theme-select]`（选项：日间／夜间／透明玻璃），选中态与提示文案保留。
 
-**取舍与边界（写进 docs/theme-glass.md）。** ① `transparent: true` 的窗口失去 DWM 外阴影（外扩 10dip 实测亮度差 8.57 → 0，`hasShadow` 补不回来）——这是三套主题共担的一处损失，换来玻璃主题可随时切换而无需重建窗口（重建会打断进行中的会话）。② 「透明 → 不透明」不可逆：`setBackgroundColor('#00000000')` 生效，但反向设回不透明色在 Windows 上不生效、`getBackgroundColor()` 的回报也不可信（同一调用先后回报 `#FFFFFF` / `#000000`），所以只在需要透明时动窗口，昼夜主题的不透明底由页面自己画。③ 非 Windows 平台窗口保持不透明底色，玻璃主题退化为「明亮无色的半透明界面」。④ `test:glass-theme-ui` 把「透亮」写成可测量断言：玻璃主题取样区标准差保住 ≥18%（实测 27.3%）、与棋盘格结构相关性 ≥0.4（实测 0.614），一旦退回系统磨砂两者会塌到个位数百分比与 ~0；昼夜主题在同样背景下标准差 ≤20（实测 10.7 / 11.0）作为「取样区确实是应用本体」的对照。证据图：[真实桌面下的玻璃主题](validation/glass-theme-preview/workspace.png)、[棋盘格原样透出](validation/glass-theme-preview/checkerboard.png)、[主题下拉框](validation/glass-theme-preview/settings.png)。
+**取舍与边界（写进 docs/theme-glass.md）。** ① `transparent: true` 的窗口失去 DWM 外阴影（外扩 10dip 实测亮度差 8.57 → 0，`hasShadow` 补不回来）——这是三套主题共担的一处损失，换来玻璃主题可随时切换而无需重建窗口（重建会打断进行中的会话）。② 「透明 → 不透明」不可逆：`setBackgroundColor('#00000000')` 生效，但反向设回不透明色在 Windows 上不生效、`getBackgroundColor()` 的回报也不可信（同一调用先后回报 `#FFFFFF` / `#000000`），所以只在需要透明时动窗口，昼夜主题的不透明底由页面自己画。③ 非 Windows 平台窗口保持不透明底色，玻璃主题退化为「明亮无色的半透明界面」。④ `test:glass-theme-ui` 把「透亮」写成可测量断言：玻璃主题取样区标准差保住 ≥18%（实测 27.3%）、与棋盘格结构相关性 ≥0.4（实测 0.614），一旦退回系统磨砂两者会塌到个位数百分比与 ~0；昼夜主题在同样背景下标准差 ≤20（实测 10.7 / 11.0）作为「取样区确实是应用本体」的对照。证据图：[真实桌面下的玻璃主题](../validation/glass-theme-preview/workspace.png)、[棋盘格原样透出](../validation/glass-theme-preview/checkerboard.png)、[主题下拉框](../validation/glass-theme-preview/settings.png)。
 
 **验收。** `npx tsc --noEmit`、`npm run check:js` 通过；`npm test` 核心套件 167/167 通过；显示组受影响用例同步改为驱动下拉框（`test:project-ui`、`test:coding-settings-ui`、`test:token-cost-ui`、`test:simple-settings-ui`）后全部通过，`test:node-inspector-ui`、`test:agent-switch-ui`、`test:ime-shortcut-ui`、`test:workflow-canvas-ui`、`test:scheduling-ui`、`test:workspace-ux-ui` 一并复跑通过。
 
@@ -552,9 +552,9 @@ Hermes v0.20.0 在 `HERMES_SAFE_MODE=1` 下的短文本 ACP 请求通过，说�
 
 用户看到透明版后明确要求：**主界面不允许做成透明玻璃**，并选择「保留第三套主题但不透明」。据此回退：窗口不再开 `transparent`（底色固定 `#14161a`），系统标题栏与 DWM 外阴影一并回到原状；`electron/theme.cjs`、`theme:apply` IPC、preload 的 `applyTheme`、`global.d.ts` 声明与 `html[data-theme="glass"]` 整页透明规则全部删除 —— 主题状态重新只存在渲染层（`localStorage`），切换主题不产生任何 IPC、也不重建窗口。第三套主题由「透明玻璃」改为 **「无色玻璃」（id `bright`）**：纯无色（RGB 极差 ≤12）的亮色玻璃质感，靠不透明白底 + 白色薄膜层叠出玻璃感，而不是靠透明。
 
-**为什么回退（实测数据保留在 [主题文档](theme-glass.md)）。** 同一套真屏幕取样方法量出四代实现：`acrylic` 标准差 2.35（桌面结构全丢，就是「灰蒙蒙」）、真透明+白膜 33.7（结构保住但桌面内容与界面抢注意力，启动门禁页尤其明显，用户截图确认）、不透明皮肤 11。主界面是长时间盯着干活的地方，可读性优先于透明；顺带排除了「用 CSS 模糊桌面」（做不到，`backdrop-filter` 只作用于页面自身内容）和「透明窗口+系统材质」（糊成灰雾，且丢掉 DWM 外阴影）。
+**为什么回退（实测数据保留在 [主题文档](../theme-glass.md)）。** 同一套真屏幕取样方法量出四代实现：`acrylic` 标准差 2.35（桌面结构全丢，就是「灰蒙蒙」）、真透明+白膜 33.7（结构保住但桌面内容与界面抢注意力，启动门禁页尤其明显，用户截图确认）、不透明皮肤 11。主界面是长时间盯着干活的地方，可读性优先于透明；顺带排除了「用 CSS 模糊桌面」（做不到，`backdrop-filter` 只作用于页面自身内容）和「透明窗口+系统材质」（糊成灰雾，且丢掉 DWM 外阴影）。
 
-**验收。** 新增 `npm run test:bright-theme-ui` 并纳入显示环境测试组，核心是**像素级不透明断言**：窗口背后放高频棋盘格（参照标准差 123.51），三套主题取样区标准差都必须 ≤20（实测 日间 11.2 / 夜间 11.0 / 无色玻璃 11.8）且与棋盘格均值差 >40，任何一套漏出桌面内容都会失败；另断言窗口底色在三套主题下恒为不透明 `#14161A`、第三套无色且有不透明兜底色、设置入口是 `select` 下拉框、切换主题保留工程/消息/偏好/侧栏/工作台状态。`packaged-ui-check` 的主题检查同步改写为「打包主进程不使用透明窗口」「打包产物不含主题→窗口材质模块」「preload 不再暴露材质 IPC」「渲染包没有整页透明规则」「应用主窗口按不透明底色创建且切主题后不变」等 14 项，暂存包与固定路径均为 **34/34** 通过，`packaged-startup-check` 与 Soul 专项通过；把 `CODENODE_UI_TEST_PACKAGE` 指向交付包再跑一次第三套主题测试，三套不透明度指标与源码一致。`npx tsc --noEmit`、`npm run check:js`、核心套件 167/167 与显示组相关用例全部通过。证据图：[无色玻璃工作台](validation/glass-theme-preview/workspace.png)、[主题下拉框](validation/glass-theme-preview/settings.png)。
+**验收。** 新增 `npm run test:bright-theme-ui` 并纳入显示环境测试组，核心是**像素级不透明断言**：窗口背后放高频棋盘格（参照标准差 123.51），三套主题取样区标准差都必须 ≤20（实测 日间 11.2 / 夜间 11.0 / 无色玻璃 11.8）且与棋盘格均值差 >40，任何一套漏出桌面内容都会失败；另断言窗口底色在三套主题下恒为不透明 `#14161A`、第三套无色且有不透明兜底色、设置入口是 `select` 下拉框、切换主题保留工程/消息/偏好/侧栏/工作台状态。`packaged-ui-check` 的主题检查同步改写为「打包主进程不使用透明窗口」「打包产物不含主题→窗口材质模块」「preload 不再暴露材质 IPC」「渲染包没有整页透明规则」「应用主窗口按不透明底色创建且切主题后不变」等 14 项，暂存包与固定路径均为 **34/34** 通过，`packaged-startup-check` 与 Soul 专项通过；把 `CODENODE_UI_TEST_PACKAGE` 指向交付包再跑一次第三套主题测试，三套不透明度指标与源码一致。`npx tsc --noEmit`、`npm run check:js`、核心套件 167/167 与显示组相关用例全部通过。证据图：[无色玻璃工作台](../validation/glass-theme-preview/workspace.png)、[主题下拉框](../validation/glass-theme-preview/settings.png)。
 
 **打包自检。** 已覆盖固定目录 `E:\CodeNode\release\win-unpacked`，覆盖前确认 CodeNode 未运行，不保留旧包备份；暂存目录 `.stage-bright-theme`、临时打包配置与隔离自检数据均已清理。app.asar SHA-256：`6AA5852AD0DFB54D1FB354C89EC69202FA407EB9FE732C12215BE8E31EC34377`；CodeNode.exe SHA-256：`9A931D4ECE0281E171D7D4087AE3687B399E443088E190D4F7405F81A8BFCC59`（与替换前逐字节一致，本次交付只更新包内容）；便携版 CodeNode-0.13.0.exe SHA-256：`C414030DCB009FDAC8CB1BDC7E201AB5F1CECAABCE70DC5A4418D699DADA89A1`。用户本地未提交的 Soul 修改与私有配置未提交、未被改写。
 

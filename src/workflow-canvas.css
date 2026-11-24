@@ -1,3 +1,7 @@
+.glass-theme.ui-clean .workspace-canvas .canvas-wrap {
+  background: var(--workbench-canvas);
+}
+
 .canvas-wrap.canvas-raster-mode::after { display: none; }
 .canvas-raster-mode .workflow-canvas-layer {
   position: absolute;
@@ -16,3 +20,105 @@
 .canvas-raster-mode .react-flow__node.selected:has(.wf-image-node),
 .canvas-raster-mode .react-flow__node.selected:has(.wf-scope),
 .canvas-raster-mode .react-flow__node.selected:has(.wf-object-node) { opacity: 1; }
+
+/* Shared values for the raster previews and the live node editors. */
+.canvas-wrap {
+  --node-glass-top: rgba(77, 77, 77, .86);
+  --node-glass-center: rgba(61, 61, 61, .88);
+  --node-glass-bottom: rgba(54, 54, 54, .92);
+  --node-glass-rim: rgba(255, 255, 255, .22);
+  --node-glass-border: rgba(255, 255, 255, .12);
+  --node-glass-selection: #a8a8a8;
+  --node-glass-shadow: rgba(0, 0, 0, .25);
+  --node-glass-filter: blur(10px);
+  --edge-color: #777777;
+}
+
+.theme-dark .canvas-wrap {
+  --node-glass-top: rgba(72, 72, 72, .86);
+  --node-glass-center: rgba(57, 57, 57, .88);
+  --node-glass-bottom: rgba(51, 51, 51, .92);
+}
+
+.theme-bright .canvas-wrap {
+  --node-glass-top: rgba(83, 83, 83, .86);
+  --node-glass-center: rgba(65, 65, 65, .88);
+  --node-glass-bottom: rgba(57, 57, 57, .92);
+}
+
+.glass-theme .workspace-canvas .canvas-wrap .wf-node {
+  background: linear-gradient(var(--node-glass-top), var(--node-glass-center) 35%, var(--node-glass-bottom));
+  border-radius: 10px;
+  animation: none;
+}
+
+.glass-theme .workspace-canvas .canvas-wrap .wf-node:not(.is-dragover) {
+  border-color: var(--node-glass-border) !important;
+  border-top-color: var(--node-glass-rim) !important;
+  box-shadow: 0 3px 7px var(--node-glass-shadow);
+}
+
+.glass-theme .workspace-canvas .react-flow__node.selected > .wf-node:not(.is-dragover) {
+  outline: none;
+  border-color: var(--node-glass-selection) !important;
+}
+
+.workspace-canvas .react-flow__edge:not(.animated, .selected, :hover) .react-flow__edge-path {
+  stroke: var(--edge-color);
+}
+
+.glass-theme .workspace-canvas .react-flow__node.selected .wf-node,
+.glass-theme .workspace-canvas .canvas-wrap:not(.canvas-raster-mode) .wf-node {
+  backdrop-filter: var(--node-glass-filter);
+}
+
+.glass-theme .workspace-canvas .wf-vector :is(.wf-vector-body, .vs-stage) {
+  background: transparent;
+}
+
+.glass-theme .workspace-canvas .wf-vector :is(.wf-vector-rail, .vs-node-dock) {
+  background: rgba(0, 0, 0, .17);
+}
+
+.glass-theme .workspace-canvas .wf-vector .wf-vector-title {
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+}
+
+.glass-theme .workspace-canvas .wf-vector .wf-vector-foot {
+  border-radius: 0 0 9px 9px;
+  background: rgba(0, 0, 0, .12);
+}
+
+.glass-theme .workspace-canvas .wf-vector :is(.wf-vector-mode.on, .wf-vector-icon.on) {
+  background: var(--glass-selected);
+  color: var(--glass-text);
+  border-color: var(--node-glass-rim) !important;
+  box-shadow: none;
+}
+
+.glass-theme .workspace-canvas .wf-vector-body:not(.vs-light) .vs-canvas {
+  background: #242424;
+}
+
+.glass-theme .workspace-canvas .wf-vector-body:not(.vs-light) :is(.vs-ruler, .vs-ruler-corner, .vs-zoombar) {
+  background: #2b2b2b;
+  border-color: var(--node-glass-border);
+}
+
+.glass-theme .workspace-canvas .wf-vector-body:not(.vs-light) :is(.vs-tick i, .vs-zoombar button) {
+  color: var(--glass-muted);
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .glass-theme .canvas-wrap {
+    --node-glass-top: var(--glass-base);
+    --node-glass-center: var(--glass-base);
+    --node-glass-bottom: var(--glass-base);
+    --node-glass-border: var(--glass-muted);
+    --node-glass-rim: var(--glass-muted);
+    --node-glass-selection: var(--glass-text);
+    --node-glass-shadow: transparent;
+    --node-glass-filter: none;
+  }
+}

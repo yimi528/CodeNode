@@ -16,6 +16,13 @@ try {
   assert.deepEqual(recent.read(root).map(item => item.name), ['A updated', 'B']);
   recent.forget(root, { root: '/workspace/b' });
   assert.deepEqual(recent.read(root).map(item => item.name), ['A updated']);
+  recent.remember(root, { root: '/workspace/a', file: '/workspace/a/A2.cnode' });
+  recent.remember(root, { root: '/workspace/a' });
+  assert.deepEqual(recent.read(root).map(item => item.file), [undefined, '/workspace/a/A2.cnode', '/workspace/a/a.cnode']);
+  recent.forget(root, { root: '/workspace/a' });
+  assert.deepEqual(recent.read(root).map(item => item.file), ['/workspace/a/A2.cnode', '/workspace/a/a.cnode']);
+  recent.forget(root, { root: '/workspace/a', file: '/workspace/a/A2.cnode' });
+  assert.deepEqual(recent.read(root).map(item => item.file), ['/workspace/a/a.cnode']);
   assert.throws(() => recent.remember(root, { root: '../bad\npath' }), /无效/);
   recent.clear(root);
   assert.deepEqual(recent.read(root), []);

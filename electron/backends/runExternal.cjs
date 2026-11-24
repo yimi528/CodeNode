@@ -67,15 +67,27 @@ async function runExternal(input, deps = {}) {
   }
   const backendName = previous?.start?.backend || settings.backend;
   if(previous && previous.session?.protocol!=='acp')return {ok:false,error:'旧 app-server/SDK 会话不能跨协议恢复；请复核原 Run 后新建 ACP 会话',stopReason:'legacy_session_protocol'};
-  const adapterSettings = previous?.session?.adapterSettings || settings;
+  const adapterSettings = input.adapterSettingsOverride || previous?.session?.adapterSettings || settings;
   if (resumeRunId && previous?.start?.backend !== settings.backend && !previous?.session?.adapterSettings) return { ok: false, error: '恢复必须使用原 Agent 后端：' + String(previous?.start?.backend || 'unknown') };
   const backend = (deps.createBackend || backendFactory.createBackend)(backendName, adapterSettings, deps);
   const priorCost=priorSessionCost(root,previous);
-  const externalSandboxPolicy = sandbox.externalAgentPolicy(input.sandboxPolicy, { projectRoot: root, access: adapterSettings.sandbox });
+  const fullAccess = input.approvalMode === 'full';
+  if (fullAccess && (resumeRunId || input.goalId || input.taskId || input.nodeId || input.goalWriteScope?.length ||
+      require('../composerPolicy.cjs').locked(cfg?.sandbox) || input.sandboxPolicy?.mode === 'strict')) {
+    return { ok: false, error: '当前任务或项目隔离策略不允许完全访问' };
+  }
+  if (['request', 'assist'].includes(input.approvalMode) &&
+      require('../../config/agent.backends.json').permissionEnforcement[backendName] === 'unavailable') {
+    return { ok: false, error: '当前 Agent 不支持协议审批' };
+  }
+  const externalSandboxPolicy = fullAccess
+    ? sandbox.resolvePolicy({mode:'off', network:'inherit'}, {projectRoot:root})
+    : sandbox.externalAgentPolicy(input.sandboxPolicy, { projectRoot: root, access: adapterSettings.sandbox });
   const sandboxCaps = externalSandboxPolicy?.capabilities || {};
   const permissions = {owner:'acp-agent-runtime',transport:(require('../../config/agent.backends.json').mspBackends||[]).includes(backendName)?'msp':'acp',requestPolicy:adapterSettings.sandbox,
     osSandboxEnforcedByCodeNode:externalSandboxPolicy?.mode!=='off'&&sandboxCaps.backend!=='none',
-    processIsolation:sandboxCaps.isolation?.lifetime===true,filesystemIsolation:sandboxCaps.isolation?.filesystem===true,
+    approvalMode: input.approvalMode || 'custom',
+    processIsolation:externalSandboxPolicy?.mode!=='off'&&sandboxCaps.isolation?.lifetime===true,filesystemIsolation:externalSandboxPolicy?.mode!=='off'&&sandboxCaps.isolation?.filesystem===true,
     sandboxBackend:sandboxCaps.backend||'none',degraded:externalSandboxPolicy?.degraded||[]};
   const runId = runStore.normalizeRunId(requestId);
   let goalTokenAllowance=null,goalCostAllowance=null,goalTokenExceeded=false,goalCostExceeded=false,latestGoalUsage=null;
@@ -93,6 +105,10 @@ async function runExternal(input, deps = {}) {
   }
   activeProjects.add(key);
   try {
+    if (fullAccess) {
+      const authorize = deps.authorizeFullAccess || require('../composerPolicy.cjs').authorizeFullAccess;
+      if (!await authorize(backendName, root) || signal?.aborted) return { ok: false, aborted: true, state: 'CANCELLED', error: '本次完全访问未获授权' };
+    }
     input.onStart?.();
     goalTokenAllowance=Number.isSafeInteger(cfg?.goalTokenBudgetAllowance)&&cfg.goalTokenBudgetAllowance>=0?cfg.goalTokenBudgetAllowance:null;
     goalCostAllowance=Number.isFinite(cfg?.goalCostBudgetAllowance)&&cfg.goalCostBudgetAllowance>=0?cfg.goalCostBudgetAllowance:null;
@@ -107,6 +123,10 @@ async function runExternal(input, deps = {}) {
     emit({ kind: 'start' });
     emit({ kind: 'state', state: 'RUNNING', previous: null, sequence: 0 });
     emit({ kind: 'backend_info', info: { externalAgentIsolation: permissions } });
+    const acceptanceNotes = [];
+    const acceptance = new (require('../taskAcceptance.cjs').TaskAcceptance)({cfg:{...cfg,costRunId:runId},tools:{registry:input.toolRegistry,context:input.toolContext},signal,onDelta:emit,messages:acceptanceNotes});
+    await acceptance.initialize(signal);
+    if (acceptanceNotes.length) input = {...input,prompt:String(input.prompt || '')+'\n'+acceptanceNotes.map(item=>item.content).join('\n')};
     const before = diff.capture(root);
     const contextFingerprint = crypto.createHash('sha256').update(JSON.stringify([...before.entries].sort())).digest('hex');
     runStore.appendEvent(root, runId, 'backend_context', { contextRevision: input.document?.root?.revision || 0, contextFingerprint, complete: before.complete });
@@ -133,7 +153,13 @@ async function runExternal(input, deps = {}) {
     });
     let result;
     try{result = await backend.submit({ ...input, sandboxPolicy:externalSandboxPolicy, onDelta:undefined, backendSession: previous?.session,
-      onSession: session => { if (!runStore.appendEvent(root, runId, 'backend_session', session)) throw new Error('无法持久化 ACP 会话，停止执行'); },
+      allowHistoryContinuation: !resumeRunId && previous?.finish?.state === 'COMPLETED',
+      onSession: session => {
+        const originalSettings = previous?.session?.adapterSettings || settings;
+        const recorded = input.approvalMode && input.approvalMode !== 'custom' && session.adapterSettings
+          ? { ...session, adapterSettings: { ...session.adapterSettings, sandbox: originalSettings.sandbox } } : session;
+        if (!runStore.appendEvent(root, runId, 'backend_session', recorded)) throw new Error('无法持久化 ACP 会话，停止执行');
+      },
       confirm });}finally{unsubscribe();await backend.close();}
     const currentCost=latestCostState.value;
     const goalRunCost=cumulativeCostDelta(priorCost,currentCost);
@@ -154,6 +180,12 @@ async function runExternal(input, deps = {}) {
     const verification = verifier.freshness();
     if (verification) emit({ kind: 'code_verification', codeVerification: verification });
     let state = result.state || 'FAILED';
+    if (state === 'COMPLETED') await acceptance.check(signal);
+    const taskAcceptance = acceptance.freshness();
+    acceptance.publish();
+    if (state === 'COMPLETED' && acceptance.blocked()) {
+      state = signal?.aborted ? 'CANCELLED' : 'FAILED'; result.error = '显式任务验收未通过；改动已保留，请查看验收结果'; result.stopReason = 'task_acceptance_failed';
+    }
     if (state === 'COMPLETED' && goalScopeViolations.length) {
       state = 'FAILED'; result.error = goalScopeUnverified ? '项目文件快照不完整，无法核对 Task 写入范围；变更已保留，请审阅后重试' : 'Task 修改了声明写入范围之外的文件；变更已保留，请审阅后调整任务范围或回滚'; result.stopReason = goalScopeUnverified ? 'goal_scope_unverified' : 'goal_scope_violation';
     }
@@ -165,11 +197,11 @@ async function runExternal(input, deps = {}) {
     }
     machine.go(state, result.stopReason || state);
     runStore.finishRun(root, runId, toRunStatus(state), { state, reply: result.content, usage: result.usage,
-      stopReason: result.stopReason, error: result.error, backendErrorCode: result.backendErrorCode || null, backendErrorMethod: result.backendErrorMethod || null, backendErrorDetails: result.backendErrorDetails || null, backendStderr: result.backendStderr || null, backend: backendName, changes, goalScopeViolations, codeVerification: verification, costUsd:goalRunCost,costKnown:goalRunCostKnown,cost:goalRunCostKnown?{amount:goalRunCost,currency:'USD',source:'ACP cumulative session cost delta'}:'unknown' });
+      stopReason: result.stopReason, error: result.error, backendErrorCode: result.backendErrorCode || null, backendErrorMethod: result.backendErrorMethod || null, backendErrorDetails: result.backendErrorDetails || null, backendStderr: result.backendStderr || null, backend: backendName, changes, goalScopeViolations, taskAcceptance, codeVerification: verification, costUsd:goalRunCost,costKnown:goalRunCostKnown,cost:goalRunCostKnown?{amount:goalRunCost,currency:'USD',source:'ACP cumulative session cost delta'}:'unknown' });
     return { ok: state === 'COMPLETED', runId, reply: result.content || '', reasoning: result.reasoning || '', toolCalls: result.toolCalls || [],
       usage: result.usage, state, error: result.error, aborted: result.aborted, backend: backendName, stopReason: result.stopReason,
       backendErrorCode: result.backendErrorCode, backendErrorMethod: result.backendErrorMethod, backendErrorDetails: result.backendErrorDetails, backendStderr: result.backendStderr,
-      changes, goalScopeViolations, codeVerification: verification, cost:goalRunCostKnown?{costUsd:goalRunCost,costKnown:true,currency:'USD',source:'ACP cumulative session cost delta'}:{costUsd:null,costKnown:false},costUnknown:!goalRunCostKnown };
+      changes, goalScopeViolations, taskAcceptance, codeVerification: verification, cost:goalRunCostKnown?{costUsd:goalRunCost,costKnown:true,currency:'USD',source:'ACP cumulative session cost delta'}:{costUsd:null,costKnown:false},costUnknown:!goalRunCostKnown };
   } catch (error) {
     machine.go('FAILED', 'backend_result_unknown');
     runStore.finishRun(root, runId, 'error', { state: 'FAILED', error: error.message, stopReason: 'backend_result_unknown', backend: backendName });

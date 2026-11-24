@@ -54,11 +54,11 @@ function makeRegistry() {
   return toolkit.buildDefaultRegistryWithConfig({
     projectRoot: root,
     ragEnabled: false,
-    toolsAllowed: ['read_file', 'write_file', 'execute_shell', 'list_directory'],
+    toolsAllowed: ['read_file', 'write_file', 'execute_shell', 'list_directory', 'search_files', 'find_files'],
   });
 }
 
-async function runTurn(script) {
+async function runTurn(script, options = {}) {
   const controller = new AbortController();
   const context = new AgentToolContext({
     projectRoot: root,
@@ -70,6 +70,11 @@ async function runTurn(script) {
     signal: controller.signal,
   });
   fetchStub = installScriptedModel(script, { loopLast: false });
+  const scriptedFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    if (options.beforeRequest) options.beforeRequest(fetchStub.calls);
+    return scriptedFetch(url, init);
+  };
   try {
     const result = await agent.runAgentChat({
       cfg: {
@@ -79,7 +84,7 @@ async function runTurn(script) {
         maxTokens: 2048,
         reasoningEffort: '',
         reliability: { maxAttempts: 1, retryBaseMs: 1, retryMaxMs: 2 },
-        limits: { maxTotalTokens: 1000000, maxConcurrentRuns: 1 },
+        limits: { maxTotalTokens: 1000000, maxConcurrentRuns: 1, workspaceCacheVersions: true },
         compression: { enabled: false },
         rag: { enabled: false },
         tools: {},
@@ -188,6 +193,80 @@ function callsOf(result, name) {
   ]);
   const twoReads = callsOf(offsetReads, 'read_file');
   check('不同参数不共享缓存（第二次不是 repeated）', twoReads[1] && twoReads[1].repeated !== true);
+
+  // External changes do not pass through a mutating tool, including changes with identical stat metadata.
+  resetWorkspace();
+  console.log('\n== 场景 6：外部同大小、同时间戳写入后必须重新读取 ==');
+  const originalStat = fs.statSync(aTxt);
+  const external = await runTurn([
+    { toolCalls: [{ id: 'external-1', name: 'read_file', args: { path: 'work/a.txt' } }] },
+    { toolCalls: [{ id: 'external-2', name: 'read_file', args: { path: 'work/a.txt' } }] },
+    { content: '完成' },
+  ], { beforeRequest: (request) => {
+    if (request === 1) {
+      fs.writeFileSync(aTxt, 'NEW-CONTENT\n');
+      fs.utimesSync(aTxt, originalStat.atime, originalStat.mtime);
+    }
+  } });
+  const externalReads = callsOf(external, 'read_file');
+  check('外部改写后缓存失效且返回新版本', externalReads[1]?.repeated !== true && externalReads[1]?.result.includes('NEW-CONTENT'));
+  check('外部改写后证据版本哈希变化', externalReads[0]?.data.sourceSha256 !== externalReads[1]?.data.sourceSha256);
+  check('新版本正文进入模型请求，不引用旧结果', lastSeen.at(-1).messages.some(m => m.role === 'tool' && m.tool_call_id === 'external-2' && m.content.includes('NEW-CONTENT')));
+
+  resetWorkspace();
+  const deleted = await runTurn([
+    { toolCalls: [{ name: 'read_file', args: { path: 'work/a.txt' } }] },
+    { toolCalls: [{ name: 'read_file', args: { path: 'work/a.txt' } }] },
+    { content: '完成' },
+  ], { beforeRequest: (request) => { if (request === 1) fs.unlinkSync(aTxt); } });
+  check('外部删除后不再返回缓存中的文件正文', callsOf(deleted, 'read_file')[1]?.ok === false);
+
+  resetWorkspace();
+  fs.writeFileSync(path.join(root, 'work', '.env'), 'CACHED-VALUE-MUST-NOT-SURVIVE\n');
+  fs.symlinkSync('a.txt', path.join(root, 'work', 'alias.txt'));
+  const retargeted = await runTurn([
+    { toolCalls: [{ name: 'read_file', args: { path: 'work/alias.txt' } }] },
+    { toolCalls: [{ name: 'read_file', args: { path: 'work/alias.txt' } }] },
+    { content: '完成' },
+  ], { beforeRequest: (request) => {
+    if (request === 1) {
+      fs.unlinkSync(path.join(root, 'work', 'alias.txt'));
+      fs.symlinkSync('.env', path.join(root, 'work', 'alias.txt'));
+    }
+  } });
+  check('符号链接改指敏感文件后走原工具拒绝路径', callsOf(retargeted, 'read_file')[1]?.ok === false && !callsOf(retargeted, 'read_file')[1]?.result.includes('CACHED-VALUE-MUST-NOT-SURVIVE'));
+
+  const { matchesCurrentFile } = require('../../electron/tools/readFileCache.cjs');
+  check('缺少来源版本时不复用缓存', !await matchesCurrentFile(root, { path: 'work/a.txt' }, { data: {} }));
+  const bytes = Buffer.alloc(150000, 0xff);
+  const binaryFile = path.join(root, 'work', 'raw.dat');
+  fs.writeFileSync(binaryFile, bytes);
+  const binaryResult = { data: { sourceSha256: 'sha256:' + require('crypto').createHash('sha256').update(bytes).digest('hex') } };
+  check('PDF／Office 同口径的原始字节哈希支持分块校验', await matchesCurrentFile(root, { path: 'work/raw.dat' }, binaryResult));
+  bytes[bytes.length - 1] = 0x00;
+  fs.writeFileSync(binaryFile, bytes);
+  check('分块末尾字节变化也使缓存失效', !await matchesCurrentFile(root, { path: 'work/raw.dat' }, binaryResult));
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(matchesCurrentFile(root, { path: 'work/a.txt' }, externalReads[0], controller.signal), { name: 'AbortError' });
+  check('版本校验响应取消', true);
+
+  // Fuzzy matching may have resolved to a different file before an exact path was created.
+  fs.writeFileSync(path.join(root, 'work', '“quoted”.txt'), 'IDENTICAL\n');
+  const fuzzy = await runTurn([
+    { toolCalls: [{ name: 'read_file', args: { path: 'work/"quoted".txt' } }] },
+    { toolCalls: [{ name: 'read_file', args: { path: 'work/"quoted".txt' } }] },
+    { content: '完成' },
+  ], { beforeRequest: (request) => { if (request === 1) fs.writeFileSync(path.join(root, 'work', '"quoted".txt'), 'IDENTICAL\n'); } });
+  check('模糊路径变为精确路径时即使字节相同也重新定位', callsOf(fuzzy, 'read_file')[0]?.data.matched && !callsOf(fuzzy, 'read_file')[1]?.data.matched && callsOf(fuzzy, 'read_file')[1]?.repeated !== true);
+
+  for (const [name, args] of [['search_files', { pattern: 'NEWSEARCH', path: 'work' }], ['find_files', { pattern: '**/added.txt' }], ['list_directory', { path: 'work' }]]) {
+    fs.rmSync(path.join(root, 'work', 'added.txt'), { force: true });
+    const refreshed = await runTurn([{ toolCalls: [{ name, args }] }, { toolCalls: [{ name, args }] }, { content: '完成' }],
+      { beforeRequest: request => { if (request === 1) fs.writeFileSync(path.join(root, 'work', 'added.txt'), 'NEWSEARCH\n'); } });
+    const calls = callsOf(refreshed, name);
+    check(name + ' 外部新文件出现后不复用旧缓存', calls[1]?.repeated !== true && calls[1]?.result.includes('added.txt'));
+  }
 
   console.log('\n== 结论：' + (failures === 0 ? '全部通过' : failures + ' 项失败') + ' ==');
   try {

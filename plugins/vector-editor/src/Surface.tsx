@@ -6,7 +6,7 @@
  * 全部指针手势统一在 svg 的 pointer 事件中按命中目标分类分发。
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useSpacePan } from '../hooks/useSpacePan';
+import { useSpacePan } from './host';
 import { useVector, type VectorStore } from './vectorStore';
 import { computeLogicAnalysisForSets } from './region';
 import type { Bounds, LogicAnalysis, VecObject, VecShapeKind } from './types';
