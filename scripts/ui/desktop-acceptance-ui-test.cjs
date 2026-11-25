@@ -23,7 +23,7 @@ app.whenReady().then(async()=>{
  const change=async(label,value)=>{await js(`(()=>{const el=document.querySelector('[aria-label="${label}"]');Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event('input',{bubbles:true}));})()`);await sleep(30);};
  try{
   require(path.join(source,'electron/modelStore.cjs')).writeModels(userData,[{id:'desktop-fixture',model:'fixture-model',label:'Offline acceptance',apiBase:'http://127.0.0.1:1',apiKey:'synthetic-ui-key'}],'desktop-fixture');
-  await win.loadFile(path.join(source,'dist/index.html'));await wait('!!window.__codenodeUi && window.__codenodeUi.getState().booted && (!!document.querySelector(".gate-actions") || !!document.querySelector(".pp-input"))');
+  await win.loadFile(path.join(source,'dist/index.html'));await wait('!!window.__codenodeUi && window.__codenodeUi.getState().booted && (!!document.querySelector(".workspace-home") || !!document.querySelector(".pp-input"))');
   assert.match(await js('document.title'),/CodeNode/);assert.match(win.webContents.getURL(),/dist\/index.html$/);
   await js(`window.__codenodeUi.getState().updatePreferences({autoSaveEnabled:false,typewriterEnabled:false,autoCollapseSidebars:false});window.__codenodeProject.getState().loadRoot(${JSON.stringify(root)});window.__codenodeSession.getState().newCanvas()`);
   await wait('!!document.querySelector(".task-acceptance-options")');

@@ -3,12 +3,13 @@ import { useStore, type Edge, type Node } from '@xyflow/react';
 import { useUiStore } from '../store/uiStore';
 import { useVectorPlugin } from '../plugins/vectorEditor';
 import { boundaryLabel, nodePresentation } from '../nodes/presentation';
+import { isWorkflowStage } from '../lib/workflowRunState';
 
 export const CANVAS_GRID_SIZE = 22;
 const SOLID_MATERIAL_QUERY = '(prefers-reduced-transparency: reduce), (prefers-contrast: more)';
 
 type Point = { x: number; y: number };
-type NodeData = { boundary?: string; label?: string; status?: string; accent?: string; prompt?: string; goal?: string; subtitle?: string; filePath?: string; imagePath?: string; dataUrl?: string; width?: number; height?: number; fill?: string; opacity?: number; collapsed?: boolean; objectName?: string };
+type NodeData = { boundary?: string; label?: string; status?: string; accent?: string; content?: string; prompt?: string; goal?: string; subtitle?: string; filePath?: string; imagePath?: string; dataUrl?: string; width?: number; height?: number; fill?: string; opacity?: number; collapsed?: boolean; objectName?: string };
 
 const iconPaths = new Map<string, Path2D>();
 
@@ -131,6 +132,7 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
       border: token(style, '--node-glass-border', border),
       selection: token(style, '--node-glass-selection', foreground),
       shadow: token(style, '--node-glass-shadow', 'transparent'),
+      input: token(style, '--node-glass-input', '#181818'),
     };
     const statuses: Record<string, string> = {
       running: token(style, '--stage-running', '#f59e0b'),
@@ -180,12 +182,13 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
       const { x, y } = node.position;
       if ((x + width) * zoom + tx < -40 || x * zoom + tx > bounds.width + 40 || (y + height) * zoom + ty < -40 || y * zoom + ty > bounds.height + 40) continue;
       // Rich editors remain live DOM surfaces while selected; Canvas paints their inactive preview.
-      if (node.selected && ['vector', 'image', 'scope', 'object'].includes(node.type || '')) continue;
+      const instructionNode = isWorkflowStage(node.type);
+      if (node.selected && ((instructionNode && data.status !== 'running') || ['vector', 'image', 'scope', 'object'].includes(node.type || ''))) continue;
       const accent = data.accent || token(style, '--canvas-node-accent', '#3b82f6');
       const activeStatus = statuses[data.status || ''];
       const statusColor = activeStatus || token(style, '--canvas-idle-text', muted);
       const isScope = node.type === 'scope';
-      const radius = isScope ? 11 : 10;
+      const radius = instructionNode ? 14 : isScope ? 11 : 10;
       ctx.save();
       ctx.beginPath();
       ctx.roundRect(x, y, width, height, radius);
@@ -230,15 +233,43 @@ export default function WorkflowCanvasLayer({ nodes, edges, hoveredEdgeId, cutLi
       ctx.save();
       ctx.translate(x + 10, y + 8);
       ctx.scale(.8, .8);
-      ctx.strokeStyle = icon.color; ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.strokeStyle = instructionNode ? foreground : icon.color;
+      ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       ctx.stroke(iconPath(icon.path));
       ctx.restore();
       if (isScope) {
         ctx.fillStyle = foreground; ctx.font = '600 13px sans-serif'; text(ctx, `${data.collapsed ? '▸' : '▾'} ${data.label || '分组'}`, x + 34, y + 24, width - 46);
         ctx.fillStyle = muted; ctx.font = '11px sans-serif'; text(ctx, data.collapsed ? '已折叠' : '分组', x + 12, y + 43, width - 24);
+      } else if (instructionNode) {
+        ctx.fillStyle = foreground;
+        ctx.font = '600 13px system-ui, sans-serif';
+        text(ctx, data.label || node.id, x + 36, y + 24, width - 46);
+        const description = data.goal || data.subtitle;
+        if (description) {
+          ctx.fillStyle = muted; ctx.font = '11px system-ui, sans-serif';
+          text(ctx, description, x + 10, y + 49, width - 20);
+        }
+        const fieldY = y + (description ? 56 : 38);
+        ctx.beginPath();
+        ctx.roundRect(x + 10, fieldY, width - 20, 30, 6);
+        ctx.fillStyle = glass.input; ctx.fill();
+        ctx.strokeStyle = glass.border; ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = data.prompt ? foreground : muted;
+        ctx.font = '12px system-ui, sans-serif';
+        text(ctx, data.prompt?.split('\n', 1)[0] || '任务指令', x + 19, fieldY + 19, width - 38);
+        if (activeStatus || data.boundary) {
+          ctx.fillStyle = statusColor;
+          ctx.font = '10px system-ui, sans-serif';
+          text(ctx, [STATUS_LABEL[data.status || 'pending'] || data.status, boundaryLabel(data.boundary)].filter(Boolean).join(' · '), x + 10, y + height - 8, width - 20);
+        }
+        for (const px of [x, x + width]) {
+          ctx.beginPath(); ctx.arc(px, y + height / 2, 3.6, 0, Math.PI * 2);
+          ctx.fillStyle = glass.input; ctx.fill();
+          ctx.strokeStyle = muted; ctx.lineWidth = 1.2; ctx.stroke();
+        }
       } else {
         ctx.fillStyle = foreground; ctx.font = '600 13px sans-serif'; text(ctx, data.label || node.id, x + 33, y + 23, width - 45);
-        const detail = data.goal || data.prompt || data.filePath || data.imagePath || data.objectName || data.subtitle || (node.type === 'vector' ? '点击节点编辑矢量画布' : '');
+        const detail = data.prompt || data.goal || data.content || data.filePath || data.imagePath || data.objectName || data.subtitle || '';
         ctx.fillStyle = muted; ctx.font = '11px sans-serif'; text(ctx, detail, x + 12, y + Math.min(47, height - 28), width - 24);
         if (node.type === 'image' && data.dataUrl) {
           let image = images.current.get(data.dataUrl);

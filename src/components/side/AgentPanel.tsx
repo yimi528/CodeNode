@@ -6,9 +6,8 @@ import TaskAcceptanceOptions from './TaskAcceptanceOptions';
 import { buildAcceptance, emptyAcceptanceDraft } from '../../lib/taskAcceptance';
 import ConversationTaskLink from '../ConversationTaskLink';
 import { useProjectStore } from '../../store/projectStore';
-import { useGraphStore } from '../../store/graphStore';
 import { projectNameOf, readRecentProjects, sameRecentProject } from '../../lib/recentProjects';
-import { newProject, openProject, openProjectFile, openRecentProject, saveProject } from '../../lib/projectActions';
+import { newProject, openProject, openProjectFile, openRecentProject } from '../../lib/projectActions';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
@@ -138,14 +137,12 @@ function UsageMeter() {
 }
 
 /**
- * 对话面板底部的输入区，和当前阶段的 Prompt 编辑共用发送流程。
+ * 对话面板底部的输入区。
  */
 function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
   const [acceptanceDraft,setAcceptanceDraft] = useState(emptyAcceptanceDraft);
   const [acceptanceError,setAcceptanceError] = useState('');
   const [text, setText] = useState('');
-  const selectedNode = useGraphStore(s => s.nodes.find(n => n.id === s.selectedId && ['task','stage','tool'].includes(n.type || '')));
-  const inputText = selectedNode ? String(selectedNode.data.prompt || '') : text;
   const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
   const projectRoot = useProjectStore(s => s.root);
   const projectFile = useProjectStore(s => s.projectFile);
@@ -205,6 +202,15 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
   const backendSwitching=useBackendSwitchStore(s=>s.switching);
   const busy = sending || streaming || backendSwitching;
   const taRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const reference = (event: Event) => {
+      const nodeText = (event as CustomEvent<string>).detail;
+      setText(draft => draft ? draft + '\n' + nodeText : nodeText);
+      requestAnimationFrame(() => taRef.current?.focus());
+    };
+    window.addEventListener('codenode-reference-node', reference);
+    return () => window.removeEventListener('codenode-reference-node', reference);
+  }, []);
   const composing = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   // §4.2：运行中插话（steering）—— 长任务跑偏时不用整停，这句话会在下一轮进请求体
@@ -233,7 +239,7 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
   const model = models.find((m) => m.id === modelId) || models[0] || null;
   const isAcp = backendConfig.acpBackends.includes(externalBackend);
   const isMsp = (backendConfig.mspBackends as readonly string[]).includes(externalBackend);
-  const canVision = !selectedNode && (isAcp || isMsp || externalBackend === 'builtin' && model?.vision === true);
+  const canVision = (isAcp || isMsp || externalBackend === 'builtin' && model?.vision === true);
   const project = { root: projectRoot || '', file: projectFile || undefined };
   const projectName = projectRoot ? projectNameOf(projectFile || projectRoot).replace(/\.cnode$/i, '') : '选择项目';
   const selectProject = async (event: React.MouseEvent<HTMLButtonElement>, open: () => Promise<boolean>) => {
@@ -310,7 +316,6 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
 
   const send = async () => {
     if (composing.current || projectChanging) return;
-    if (selectedNode && !busy) { await saveProject(); return; }
     const prompt = text.trim();
     if ((!prompt && !attachments.length) || busy) return;
     let acceptance;
@@ -330,8 +335,8 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
 
   return (
     <>
-      {!selectedNode && <ConversationTaskLink />}
-      {!selectedNode && optionsHost && createPortal(<details ref={optionsRef} className="conversation-options" open={acceptanceError ? true : undefined}>
+      <ConversationTaskLink />
+      {optionsHost && createPortal(<details ref={optionsRef} className="conversation-options" open={acceptanceError ? true : undefined}>
         <summary>对话选项</summary>
         <div className="conversation-options-menu">
           <div className="conversation-options-actions"><BranchPanel /></div>
@@ -339,7 +344,7 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
         </div>
       </details>, optionsHost)}
     <div className="composer-dock">
-      {!selectedNode && <div className="composer-context">
+      <div className="composer-context">
         <details className="composer-picker composer-project">
           <summary aria-label="选择对话项目" title={projectFile || projectRoot || '选择项目'}
             aria-disabled={busy || projectChanging} onClick={event => {
@@ -364,7 +369,7 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
             </div>
           </div>
         </details>
-      </div>}
+      </div>
       <div
         className={`pp-composer${dragOver ? ' is-dragover' : ''}`}
         onDragOver={(e) => {
@@ -382,9 +387,8 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
           void addFiles(files);
         }}
       >
-        {selectedNode && <div className="node-prompt-context"><span>阶段 · {String(selectedNode.data.label || selectedNode.id)}</span><button aria-label="返回对话" onClick={() => useGraphStore.getState().setSelectedIds([])}>×</button></div>}
 
-        {!selectedNode && attachments.length > 0 && (
+        {attachments.length > 0 && (
           <div className="pp-attach-list">
             {attachments.map((a, i) => (
               <div className="pp-attach" key={i} title={`${a.name || '附件'}（${fmtBytes(a.bytes || 0)}）`}>
@@ -404,15 +408,14 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
         <textarea
           ref={taRef}
           className="pp-input"
-          aria-label={selectedNode ? '阶段 Prompt' : '输入 Prompt'}
-          value={inputText}
+          aria-label="输入 Prompt"
+          value={text}
           rows={1}
           disabled={busy || projectChanging}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={() => { composing.current = false; }}
-          onFocus={() => { if (selectedNode) useGraphStore.getState().commit(); }}
           onChange={(e) => {
-            if (selectedNode) useGraphStore.getState().updateNodeData(selectedNode.id, { prompt: e.target.value }); else setText(e.target.value);
+            setText(e.target.value);
             const el = taRef.current;
             if (el) {
               el.style.height = 'auto';
@@ -450,7 +453,7 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
           <button
             className="pp-attach-btn"
             aria-label="添加附件"
-            disabled={!!selectedNode || busy || projectChanging}
+            disabled={busy || projectChanging}
             title={canVision ? '添加文件或图片' : '添加文本或代码文件；当前模型不支持图片'}
             onClick={() => {
               fileRef.current?.click();
@@ -458,11 +461,11 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
           >
             <CanvasIcon name="plus" />
           </button>
-          {!selectedNode && <ApprovalPicker key={`approval:${scope}:${externalBackend}`} mode={overrides?.approvalMode ?? 'custom'}
+          <ApprovalPicker key={`approval:${scope}:${externalBackend}`} mode={overrides?.approvalMode ?? 'custom'}
             disabled={!settings || busy || projectChanging} builtin={externalBackend === 'builtin'}
             policyLocked={!!settings?.fullAccessLocked}
             protocolApprovals={(backendConfig.permissionEnforcement as Record<string, string>)[externalBackend] !== 'unavailable'}
-            onChange={approvalMode => choose({ approvalMode })} />}
+            onChange={approvalMode => choose({ approvalMode })} />
           <ModelConnectionControl key={`${scope}:${externalBackend}`} backend={settings?.backend?.backend || 'builtin'}
             busy={busy || projectChanging || !settings}
             label={externalBackend === 'builtin' ? model?.label || '配置模型' : overrides?.externalModel || settings?.backend?.model || followLabel}>
@@ -471,10 +474,10 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
                 model={overrides?.externalModel ?? settings.backend.model} busy={busy || projectChanging} canList={isAcp}
                 onChange={value => choose({ externalModel: value })} />}
           </ModelConnectionControl>
-          {!selectedNode && <button type="button" className="composer-voice" aria-label="语音输入" title="语音输入"
+          <button type="button" className="composer-voice" aria-label="语音输入" title="语音输入"
             disabled={busy || projectChanging} onClick={() => void dictate()}>
             <CanvasIcon name="microphone" />
-          </button>}
+          </button>
 
           {busy ? (
             <>
@@ -505,11 +508,11 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
             <button
               className="pp-send"
               onClick={() => void send()}
-              disabled={(!selectedNode && !text.trim() && !attachments.length) || busy || projectChanging}
-              aria-label={selectedNode ? '保存阶段 Prompt' : '发送 Prompt'}
-              title={selectedNode ? '保存阶段 Prompt (Enter)' : '发送 (Enter)'}
+              disabled={(!text.trim() && !attachments.length) || busy || projectChanging}
+              aria-label="发送 Prompt"
+              title="发送 (Enter)"
             >
-              {selectedNode ? '保存' : <CanvasIcon name="send" />}
+              <CanvasIcon name="send" />
             </button>
           )}
         </div>

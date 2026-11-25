@@ -58,7 +58,7 @@ export default function StageReplayWorkspace({ root, workflowId, active }: {
     : record?.unavailable ? 'unavailable'
     : record || !window.codenode?.workflowState ? 'ready' : 'loading';
 
-  return <StageScene open={active} stages={stages} selectedId={selected.id}
+  return <StageScene open={active} projectName={root.split(/[\\/]/).filter(Boolean).pop() || '项目'} stages={stages} selectedId={selected.id}
     timeline={timeline} evidence={evidence} upstream={upstream}
     onSelect={nodeId => openStageReplay({ scope, nodeId })} status={status} />;
 }

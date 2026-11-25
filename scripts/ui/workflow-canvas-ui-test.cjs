@@ -154,9 +154,16 @@ app.whenReady().then(async () => {
     assert.equal(await js(`window.__codenodeStore.getState().nodes.length`), 5);
     await click(button('撤销'));
     await js(`window.__codenodeStore.getState().setSelectedIds(['work'])`);
-    await click('.node-actions > button');
+    await click('.node-actions button[aria-expanded]');
     await js(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
-    assert.ok(await js(`document.activeElement.matches('.node-actions > button') && !document.querySelector('.node-action-list')`));
+    assert.ok(await js(`document.activeElement.matches('.node-actions button[aria-expanded]') && !document.querySelector('.node-action-list')`));
+    await click(button('展开输入框'));
+    assert.ok(await js(`document.querySelector('.node-editor [aria-expanded=true]') !== null`));
+    await click(button('移出画布'));
+    assert.equal(await js(`window.__codenodeStore.getState().nodes.some(n => n.id === 'work')`), false);
+    assert.equal(await js(`!!document.querySelector('.node-editor')`), false);
+    await click(button('撤销'));
+    assert.ok(await js(`window.__codenodeStore.getState().nodes.some(n => n.id === 'work')`));
     await js(`window.__codenodeStore.getState().setSelectedIds([])`);
     await click(button('运行工作流'));
     for (let i=0; i<60 && !await js(`!!document.querySelector('.workflow-scope')`); i++) await new Promise(resolve=>setTimeout(resolve,30));
@@ -164,6 +171,13 @@ app.whenReady().then(async () => {
     await click('.dock-close');
     const visibleControls = `[...document.querySelectorAll('.canvas-actions button, .canvas-actions summary, .canvas-quick-actions button')].filter(el => el.checkVisibility()).length`;
     assert.equal(await js(visibleControls), 10);
+    const quickActionsCentered = `(() => {
+      const canvas = document.querySelector('.canvas-wrap').getBoundingClientRect();
+      const actions = document.querySelector('.canvas-quick-actions').getBoundingClientRect();
+      const centerDifference = (actions.left + actions.right - canvas.left - canvas.right) / 2;
+      return Math.abs(centerDifference) <= 1 && actions.height > 0 && Math.abs(canvas.bottom - actions.bottom - 10) <= 1;
+    })()`;
+    assert.ok(await js(quickActionsCentered), '画布底部快捷操作应沿画布居中');
     const menuClick = async label => {
       await click('.canvas-command-menu summary');
       assert.ok(await js(`document.querySelector(${JSON.stringify(button(label))}).checkVisibility()`));
@@ -312,10 +326,13 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(screenshotDir, 'canvas-desktop.png'), (await win.webContents.capturePage()).toPNG());
     }
 
-    if (await js('window.__codenodeUi.getState().conversationOpen')) await click('.conversation-toggle');
+    if (!await js('window.__codenodeUi.getState().conversationOpen')) await click('.conversation-toggle');
+    assert.ok(await js(quickActionsCentered), '展开对话栏后，快捷操作仍应沿画布居中');
+    await click('.conversation-toggle');
     win.setSize(720, 700);
     await new Promise(resolve => setTimeout(resolve, 480));
     assert.equal(await js(visibleControls), 10);
+    assert.ok(await js(quickActionsCentered), '窄窗口中，快捷操作仍应沿画布居中');
     await click('.canvas-command-menu summary');
     const compact = await js(`(() => {
       const canvas = document.querySelector('.canvas-wrap').getBoundingClientRect();

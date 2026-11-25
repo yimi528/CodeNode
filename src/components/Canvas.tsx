@@ -474,16 +474,12 @@ export default function Canvas() {
             st.setSelectedIds(cur.includes(node.id) ? cur.filter((id) => id !== node.id) : [...cur, node.id]);
           } else {
             useGraphStore.getState().setSelectedIds([node.id]);
-            const ui = useUiStore.getState();
-            if (!ui.preferences.advancedMode && isWorkflowStage(node.type)) {
-              ui.setSideTab('node');
-            }
           }
         }}
         onNodeDoubleClick={(event, node) => {
           if (panning) return;
           const ui = useUiStore.getState();
-          if (!ui.preferences.advancedMode || event.altKey || event.shiftKey || event.ctrlKey || event.metaKey || !isWorkflowStage(node.type)) return;
+          if (event.altKey || event.shiftKey || event.ctrlKey || event.metaKey || !isWorkflowStage(node.type)) return;
           useGraphStore.getState().setSelectedIds([node.id]);
           ui.setSideTab('node');
         }}

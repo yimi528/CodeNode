@@ -125,7 +125,7 @@ app.whenReady().then(async () => {
     }
     console.log('BRIGHT THEME TOKENS: PASS (三套主题键一致、第三套无色、底色不透明)');
 
-    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".gate-actions")').catch(() => false), '启动页');
+    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && window.__codenodeUi.getState().booted').catch(() => false), '启动页');
     const js = (code) => win.webContents.executeJavaScript(code);
     win.setBounds({ x: 200, y: 110, width: 900, height: 620 });
 

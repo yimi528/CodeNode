@@ -46,10 +46,10 @@ app.whenReady().then(async () => {
     ipcMain.handle('agent:chat', async (_event, payload) => { firstSendCalls++; assert.equal(payload.prompt, '你好'); return await new Promise(resolve => { completeFirstSend = () => resolve({ok:true,reply:'你好，我能为你做什么？',reasoning:'',tools:[]}); }); });
   }
   try {
-    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".gate-actions")').catch(() => false), '启动项目选择页');
+    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && !!document.querySelector(".toolbar") && window.__codenodeUi.getState().booted').catch(() => false), '启动工作台首页');
     win.hide();
     assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), null);
-    assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".gate-logo[src]")'));
+    assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".project-navigation") && !!document.querySelector(".toolbar") && !document.querySelector(".canvas-wrap")'));
     const modelFixtures = require("../../electron/modelStore.cjs").seedModels({apiKey:'synthetic-ui-key'});
     fs.mkdirSync(app.getPath('userData'),{recursive:true});
     fs.writeFileSync(path.join(app.getPath('userData'),'models.json'),JSON.stringify({models:modelFixtures,activeId:modelFixtures[0].id}));
@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
     const alternateFile = path.join(alternateRoot, 'alternate.cnode');
     fs.writeFileSync(alternateFile, cnode.encodeCnode({graph:{nodes:[],edges:[]},canvases:{sessions:[{id:'alternate-session',label:'另一项目聊天',status:'active',createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}}],messages:[]}}));
     await win.webContents.executeJavaScript('localStorage.setItem("codenode.recentProjects", '+JSON.stringify(JSON.stringify([{root:alternateRoot,file:alternateFile,name:'alternate-project',openedAt:Date.now()}]))+')');
-    await win.webContents.executeJavaScript('document.querySelectorAll(".gate-actions button")[1].click()');
+    await win.webContents.executeJavaScript('document.querySelectorAll(".workspace-home-actions button")[1].click()');
     await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".app") && !!window.__codenodeProject.getState().root'), '新建后进入工作台');
     assert.equal(fs.existsSync(projectFile), true);
     assert.equal(cnode.decodeCnode(fs.readFileSync(projectFile)).ok, true);
@@ -590,7 +590,7 @@ app.whenReady().then(async () => {
       win.setSize(1300,850);
       await js(`window.__codenodeStore.getState().addNode({id:'menu-node',type:'task',position:{x:50,y:50},data:{label:'菜单验证'}});window.__codenodeStore.getState().setSelectedIds(['menu-node'])`);
       await sleep(100);
-      await js(`document.querySelector('.node-actions > button').click()`);
+      await js(`document.querySelector('.node-actions button[aria-expanded]').click()`);
       await sleep(80);
       await js(`document.querySelector('.node-action-list [data-action="duplicate"]').click()`);
       assert.equal(await js(`window.__codenodeStore.getState().nodes.length`),2);
@@ -898,15 +898,17 @@ app.whenReady().then(async () => {
       await sleep(100);
       await win.webContents.executeJavaScript(`(() => { const graph=window.__codenodeStore.getState(); graph.addNode({id:'phase-one',type:'task',position:{x:40,y:40},data:{label:'阶段一',prompt:'',status:'pending'}}); graph.addNode({id:'phase-two',type:'stage',position:{x:400,y:40},data:{label:'阶段二',prompt:'第二阶段原文',status:'pending'}}); graph.setSelectedIds(['phase-one']); })()`);
       await sleep(100);
-      assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".wf-prompt").length'), 0);
-      await win.webContents.executeJavaScript(`(() => { const input=document.querySelector('.pp-input'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'第一阶段任务'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".node-editor")'), null, '任务节点默认只有一个指令编辑区');
+      await win.webContents.executeJavaScript(`(() => { const input=document.querySelector('.react-flow__node[data-id="phase-one"] .wf-node-prompt'); input.focus(); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'第一阶段任务'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+      await win.webContents.executeJavaScript('document.querySelector(\'.node-actions [aria-label="展开输入框"]\').click()');
       await sleep(100);
-      await win.webContents.executeJavaScript('document.querySelector(".pp-send").click()');
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".node-editor textarea").value'), '第一阶段任务');
+      await win.webContents.executeJavaScript('document.querySelector(".node-editor button[aria-label=保存节点]").click()');
       await sleep(200);
       await waitFor(async () => cnode.decodeCnode(fs.readFileSync(projectFile)).canvases?.sessions.some(s=>s.root?.nodes.some(n=>n.id==='phase-one' && n.data.prompt==='第一阶段任务')), '节点 Prompt 写入工程');
       await win.webContents.executeJavaScript('window.__codenodeStore.getState().setSelectedIds(["phase-two"])');
       await sleep(100);
-      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".pp-input").value'), '第二阶段原文');
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".react-flow__node.selected .wf-node-prompt").value'), '第二阶段原文');
       await win.webContents.executeJavaScript('window.__codenodeStore.getState().updateNodeData("phase-one",{status:"running"})');
       await sleep(100);
       assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".wf-node-task.wf-status-running")'));
@@ -1009,10 +1011,10 @@ app.whenReady().then(async () => {
 
     fs.writeFileSync(invalidFile, 'invalid cnode file');
     await win.webContents.executeJavaScript('window.__codenodeProject.setState({root:null,projectFile:null})');
-    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".gate-actions")'), '返回启动项目选择页');
-    await win.webContents.executeJavaScript('document.querySelectorAll(".gate-actions button")[2].click()');
-    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".gate-status.err")'), '损坏文件错误提示');
-    const error = await win.webContents.executeJavaScript('document.querySelector(".gate-status.err").textContent');
+    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && window.__codenodeUi.getState().booted'), '返回启动工作台首页');
+    await win.webContents.executeJavaScript('document.querySelectorAll(".workspace-home-actions button")[2].click()');
+    await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".status-toast")?.textContent.includes("打开工程文件失败")'), '损坏文件错误提示');
+    const error = await win.webContents.executeJavaScript('document.querySelector(".status-toast:not(:empty)").textContent');
     assert.match(error, /打开工程文件失败/);
     assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), null);
     console.log('PROJECT UI TEST: PASS');

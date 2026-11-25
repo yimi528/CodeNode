@@ -2,8 +2,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { themeTokens, themeColorScheme } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
-import ProjectGate from './components/ProjectGate';
-import welcomeLogo from '../assets/branding/welcome-logo.png';
+import WorkspaceHome from './components/WorkspaceHome';
 import ActivityBar from './components/ActivityBar';
 import SidePanel from './components/side/SidePanel';
 import './components/side/nodeInspectorDock.css';
@@ -103,14 +102,14 @@ export default function App() {
   const sideTab = useUiStore(s => s.sideTab);
   const workflowId = useSessionStore(s => s.activeId) || 'canvas';
   const replayOpen = useUiStore(s => s.stageReplayOpen);
-  const replayVisible = appPage === 'workbench' && replayOpen && sideTab !== 'project';
+  const replayVisible = !!projectRoot && appPage === 'workbench' && replayOpen && sideTab !== 'project';
   const [replayLoaded, setReplayLoaded] = useState(false);
   useEffect(() => {
     if (replayVisible) setReplayLoaded(true);
   }, [replayVisible]);
   const workbenchView=useUiStore(s=>s.preferences.workbenchView);
   const overview=!replayVisible && workbenchView==='overview'&&sideTab !== 'project';
-  const canvasVisible = appPage === 'workbench' && !overview && !replayVisible && sideTab !== 'project';
+  const canvasVisible = !!projectRoot && appPage === 'workbench' && !overview && !replayVisible && sideTab !== 'project';
   useEffect(() => {
     if (!canvasVisible) useUiStore.getState().closeAddMenu();
   }, [canvasVisible]);
@@ -194,7 +193,6 @@ export default function App() {
       }
       const ui = useUiStore.getState();
       const replay = ui.stageReplayOpen && ui.sideTab !== 'project';
-      if (!replay && useUiStore.getState().preferences.workbenchView === 'overview' && useUiStore.getState().sideTab !== 'project') return;
 
       // 未打开工程时保留新建/打开快捷键，避免对空工作区执行工程操作。
       if (!useProjectStore.getState().root) {
@@ -207,6 +205,7 @@ export default function App() {
         }
         return;
       }
+      if (!replay && ui.preferences.workbenchView === 'overview' && ui.sideTab !== 'project') return;
 
       // 删除选中节点。
       // 与画布节点的分工：焦点落在画布节点内部（.vs-scope）时让位——由画布节点自己的快捷键删图形，
@@ -307,53 +306,51 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [undo, redo, duplicateNode, selectedId, deleteNodes, fitView, arrangeNodes, createScopeFromSelection]);
 
-  // 启动引导尚未结束：先显示占位，避免「门禁页 -> 工作台」之间闪一下
-  if (!booted) {
-    return (
-      <div className="gate gate-boot">
-        <div className="gate-card">
-          <img className="gate-logo" src={welcomeLogo} alt="" />
-          <h1>CodeNode</h1>
-          <p className="gate-sub">正在恢复上次工程…</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 强制门禁：没有工程根目录时只渲染启动页，必须先「打开工程」或「新建工程」
-  if (!projectRoot) return <ProjectGate />;
-
   return (
     <div className={`app ui-clean glass-theme theme-${theme}`}>
-      <div className="app-shell"><ActivityBar showTasks={trellisReady}/><div className="app-shell-main">
-      <div className="app-workbench-toolbar" hidden={appPage!=='workbench'}><Suspense fallback={null}><Toolbar /></Suspense></div>
-      <div inert={tutorialOpen} className={`app-body side-left${dockOpen && appPage==='workbench' ? ' has-dock' : ''}`}>
-        <Suspense fallback={null}>
-          {loadedPages.plugins && <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'} className="app-plugin-layer"><PluginWorkspace /></div>}
-          {loadedPages.tasks && <TaskWorkspace hidden={appPage!=='tasks'}/>}
-        </Suspense>
-        <div className="app-workbench-layer" data-inactive={appPage!=='workbench'} aria-hidden={appPage!=='workbench'} inert={appPage!=='workbench'}>
-        <div className="app-project-navigation"><ProjectNavigation /></div>
-        <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
-<div className="workspace-overview-layer" hidden={!overview}><Suspense fallback={null}><GoalOverview /></Suspense></div>
-<div className={`workspace-content${replayVisible ? ' is-replay-covered' : ''}`} hidden={overview}
-  aria-hidden={overview || replayVisible} inert={overview || replayVisible}>
-            {sideTab === 'project' && <Suspense fallback={null}><FileWorkspace /></Suspense>}
-            {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
-            <div className="workspace-canvas" aria-hidden={sideTab === 'project'}><Suspense fallback={null}><Canvas /></Suspense></div>
-            <ConversationPanel />
-          </div>
-          {(replayVisible || replayLoaded) && <div className="workspace-stage-replay" hidden={!replayVisible} inert={!replayVisible}>
-            <Suspense fallback={<p className="workspace-stage-empty" role="status">正在打开 3D 回放…</p>}>
-              <StageReplayWorkspace key={JSON.stringify([projectRoot, workflowId])} root={projectRoot} workflowId={workflowId} active={replayVisible} />
+      <div className="app-shell">
+        <ActivityBar showTasks={trellisReady} />
+        <div className="app-shell-main">
+          <div inert={tutorialOpen} className={`app-body side-left${dockOpen && appPage === 'workbench' ? ' has-dock' : ''}`}>
+            <Suspense fallback={null}>
+              {loadedPages.plugins && <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'} className="app-plugin-layer"><PluginWorkspace /></div>}
+              {loadedPages.tasks && <TaskWorkspace hidden={appPage !== 'tasks'} />}
             </Suspense>
-          </div>}
-        </main>
-        <div className="app-workbench-overlays" hidden={appPage!=='workbench'}>{canvasVisible && <AddMenu />}
-        <Suspense fallback={null}>{dockOpen && <WorkbenchDock />}</Suspense></div></div>
+            <div className="app-workbench-layer" data-inactive={appPage !== 'workbench'} aria-hidden={appPage !== 'workbench'} inert={appPage !== 'workbench'}>
+              <div className="app-project-navigation"><ProjectNavigation /></div>
+              <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
+                <div className="app-workbench-toolbar" hidden={appPage !== 'workbench'}>
+                  <Suspense fallback={null}><Toolbar /></Suspense>
+                </div>
+                {projectRoot ? <div className="workspace-views">
+                  <div className="workspace-overview-layer" hidden={!overview}>
+                    <Suspense fallback={null}><GoalOverview /></Suspense>
+                  </div>
+                  <div className={`workspace-content${replayVisible ? ' is-replay-covered' : ''}`} hidden={overview}
+                    aria-hidden={overview || replayVisible} inert={overview || replayVisible}>
+                    {sideTab === 'project' && <Suspense fallback={null}><FileWorkspace /></Suspense>}
+                    {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
+                    <div className="workspace-canvas" aria-hidden={sideTab === 'project'}><Suspense fallback={null}><Canvas /></Suspense></div>
+                    <ConversationPanel />
+                  </div>
+                  {(replayVisible || replayLoaded) && <div className="workspace-stage-replay" hidden={!replayVisible} inert={!replayVisible}>
+                    <Suspense fallback={<p className="workspace-stage-empty" role="status">正在打开 3D 回放…</p>}>
+                      <StageReplayWorkspace key={JSON.stringify([projectRoot, workflowId])} root={projectRoot} workflowId={workflowId} active={replayVisible} />
+                    </Suspense>
+                  </div>}
+                </div> : <WorkspaceHome ready={booted} />}
+              </main>
+              <div className="app-workbench-overlays" hidden={appPage !== 'workbench'}>
+                {canvasVisible && <AddMenu />}
+                <Suspense fallback={null}>{dockOpen && <WorkbenchDock />}</Suspense>
+              </div>
+            </div>
+          </div>
+          <div hidden={appPage !== 'workbench'} className="app-workbench-status" data-canvas={canvasVisible}>
+            <StatusBar showCanvasStatus={canvasVisible} />
+          </div>
+        </div>
       </div>
-      <div hidden={appPage!=='workbench'} className="app-workbench-status"><StatusBar showCanvasStatus={!replayVisible} /></div>
-      </div></div>
       {tutorialOpen && <Suspense fallback={null}><TutorialPage /></Suspense>}
       <ToolDialog />
       <GoalAutoAdvanceManager />

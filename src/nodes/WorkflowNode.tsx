@@ -45,17 +45,17 @@ function WorkflowNode({ id, data, selected }: NodeProps) {
   const isStart = nodeType === 'start';
   const isEnd = nodeType === 'end';
   const isObject = nodeType === 'object';
-  const nodeStyle = { borderColor: `${accent}b8`, '--wf-accent': accent } as CSSProperties;
+  const nodeStyle = { borderColor: promptable ? undefined : `${accent}b8`, '--wf-accent': accent } as CSSProperties;
 
   return (
-    <div className={`wf-node wf-node-${nodeType || 'default'} wf-status-${status} ${selected ? 'is-selected' : ''} ${isObject ? 'wf-object-node' : ''}`} style={nodeStyle}>
+    <div className={`wf-node wf-node-${nodeType || 'default'} wf-status-${status} ${selected ? 'is-selected' : ''} ${isObject ? 'wf-object-node' : ''} ${promptable ? 'wf-instruction-node' : ''}`} style={nodeStyle}>
       {!isStart && <Handle type="target" position={Position.Left} className="wf-handle" />}
       <div className="wf-node-title">
         <NodeIcon type={nodeType} />
         <span className="wf-node-label">{d.label}</span>
         {d.memberBadge ? <span className="wf-member-badge" title="所属范围">{d.memberBadge}</span> : null}
       </div>
-      <div className="wf-node-sub">{d.goal || d.subtitle || ''}</div>
+      {(d.goal || d.subtitle) && <div className="wf-node-sub">{d.goal || d.subtitle}</div>}
       {d.trellis && <div className="wf-node-sub" title={d.trellis.taskPath}>Trellis · {d.trellis.role} · 快照 {d.trellis.snapshotId.slice(0, 8)}</div>}
       {isObject ? (
         <input
@@ -65,14 +65,29 @@ function WorkflowNode({ id, data, selected }: NodeProps) {
           onChange={(e) => updateNodeData(id, { objectName: e.target.value })}
         />
       ) : promptable ? (
-        <div className="wf-prompt-preview" title={d.prompt || '选中节点，在底部输入任务'}>{d.prompt || '选中后在底部输入任务'}</div>
+        <textarea
+          className="wf-node-prompt nodrag nopan nowheel"
+          aria-label={`任务指令 · ${d.label}`}
+          value={d.prompt || ''}
+          placeholder="任务指令"
+          title={d.prompt}
+          rows={1}
+          readOnly={status === 'running'}
+          tabIndex={status === 'running' ? -1 : undefined}
+          onFocus={event => {
+            const graph = useGraphStore.getState();
+            if (!event.currentTarget.readOnly) graph.commit();
+            if (!graph.selectedIds.includes(id)) graph.setSelectedIds([id]);
+          }}
+          onChange={event => updateNodeData(id, { prompt: event.currentTarget.value })}
+        />
       ) : null}
-      <div className="wf-node-footer">
+      {(!promptable || status !== 'pending' || d.boundary || flowOut > 0) && <div className="wf-node-footer">
         <span className="wf-status-text" style={{ color: STATUS_COLOR[status] }}>
           {[STATUS_TEXT[status] || status, boundaryLabel(d.boundary)].filter(Boolean).join(' · ')}
         </span>
         {flowOut > 0 && <span className="wf-flow-badge" title={`输入 ${flowIn} 项 · 输出 ${flowOut} 项`}>↦{flowOut}</span>}
-      </div>
+      </div>}
       {!isEnd && <Handle type="source" position={Position.Right} className="wf-handle" />}
     </div>
   );

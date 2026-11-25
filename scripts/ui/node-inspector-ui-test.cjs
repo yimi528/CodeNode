@@ -65,7 +65,24 @@ app.whenReady().then(async () => {
         const task = { count: graph.getState().nodes.length, type: graph.getState().nodes.find(n => n.id === graph.getState().selectedId)?.type,
           open: ui.getState().sideOpen, panel: !!document.querySelector('.side-panel') };
 
-        click('.node-actions > button'); await sleep(50); click('.node-action-list [data-action=properties]');
+        const inlineEditor = document.querySelector('.react-flow__node.selected .wf-node-prompt');
+        if (!inlineEditor || document.querySelector('.node-editor')) throw Error('任务节点应显示内联编辑器');
+        click('.node-actions [aria-label="展开输入框"]'); await sleep(50);
+        const editor = document.querySelector('.node-editor textarea');
+        const editorBox = editor.closest('section').getBoundingClientRect();
+        const cardBox = document.querySelector('.react-flow__node.selected').getBoundingClientRect();
+        if (editorBox.top < cardBox.bottom - 1) throw Error('节点下方输入框位置错误');
+        editor.focus();
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(editor, '节点的独立指令');
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        await sleep(40);
+        if (graph.getState().nodes.find(n => n.id === graph.getState().selectedId).data.prompt !== editor.value || input.value !== before.draft)
+          throw Error('节点编辑未隔离对话草稿');
+        click('.node-actions [aria-label="引用到对话"]'); await sleep(50);
+        if (!input.value.startsWith(before.draft) || !input.value.includes(graph.getState().selectedId) || !input.value.endsWith(editor.value))
+          throw Error('对话引用缺少节点内容');
+        before.draft = input.value;
+        click('.node-actions [aria-label="编辑节点"]');
         await sleep(150);
         const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width }; };
         const layout = { panel: rect('.side-panel'), canvas: rect('.workspace-canvas'), conversation: rect('.conversation-right'),
@@ -73,7 +90,7 @@ app.whenReady().then(async () => {
         click('.sp-close'); await sleep(60);
         click('.canvas-add-trigger'); await sleep(60); click('.add-menu-item[data-node-type=vector]'); await sleep(300);
         const closed = { open: ui.getState().sideOpen, panel: !!document.querySelector('.side-panel'), tab: ui.getState().sideTab };
-        click('.node-actions > button'); await sleep(50); click('.node-action-list [data-action=properties]'); await sleep(100);
+        click('.node-actions [aria-label="编辑节点"]'); await sleep(100);
         const selected = graph.getState().selectedId;
         click('.canvas-add-trigger'); await sleep(60); click('.add-menu-item[data-node-type=vector]'); await sleep(300);
         const preservedOpen = { open: ui.getState().sideOpen, selectedChanged: selected !== graph.getState().selectedId };

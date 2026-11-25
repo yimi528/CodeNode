@@ -8,8 +8,9 @@ import './StageScene.css';
 
 const stateLabels = { added: '新增文件', affected: '受影响', historical: '历史 · 已回滚' };
 
-export default function StageScene({ open, stages, selectedId, timeline, evidence, upstream, status, onSelect }: {
+export default function StageScene({ open, projectName, stages, selectedId, timeline, evidence, upstream, status, onSelect }: {
   open: boolean;
+  projectName: string;
   stages: SceneStage[];
   selectedId: string;
   timeline: StageRecord[];
@@ -57,7 +58,7 @@ export default function StageScene({ open, stages, selectedId, timeline, evidenc
       frame = 0;
       if (width < 1 || height < 1 || !ctx) return;
       const progress = animate ? Math.max(0, Math.min(1, (now - start) / 390)) : 1;
-      hitTest.current = drawStageScene(ctx, width, height, viewRef.current, components, 1 - (1 - progress) ** 3);
+      hitTest.current = drawStageScene(ctx, width, height, viewRef.current, components, projectName, 1 - (1 - progress) ** 3);
       if (progress < 1) schedule();
     }
     const resize = () => {
@@ -83,7 +84,7 @@ export default function StageScene({ open, stages, selectedId, timeline, evidenc
       renderRef.current = () => {};
       hitTest.current = () => null;
     };
-  }, [components, evidence?.attemptId, open]);
+  }, [components, evidence?.attemptId, open, projectName]);
 
   const turn = (horizontal: number, vertical = 0) => {
     viewRef.current.azimuth = (viewRef.current.azimuth + horizontal) % (2 * Math.PI);
@@ -157,13 +158,13 @@ export default function StageScene({ open, stages, selectedId, timeline, evidenc
           <div className="stage-scene-view-footer">
             <span className="stage-scene-key"><i />本阶段变更</span>
             <div className="stage-scene-orbit" role="group" aria-label="调整视角">
-              <span>点选看变更 · 拖动旋转</span>
               <button type="button" aria-label="向左旋转 3D 场景" onClick={() => turn(-Math.PI / 7)}>↶</button>
               <button type="button" aria-label="向右旋转 3D 场景" onClick={() => turn(Math.PI / 7)}>↷</button>
             </div>
           </div>
         </div>
         <div className="stage-scene-record">
+          <h2>{stages.find(stage => stage.id === selectedId)?.title}</h2>
           {selectedComponent && <section className="stage-scene-selection" aria-label="选中的架构证据">
             <div>
               <strong>{selectedComponent.label}{selection?.type === 'connection' ? '关联连线' : ''}</strong>
@@ -179,8 +180,8 @@ export default function StageScene({ open, stages, selectedId, timeline, evidenc
             {verification.historical ? '回滚前的局部校验' : '运行时局部校验'} · 通过 {verification.passed} / {verification.total}
             {verification.failed > 0 ? ` · 失败 ${verification.failed}` : ''}
           </p>}
-          {changes.map(component => (
-            <details className="stage-scene-evidence" key={component.kind} data-change={component.state}>
+          {changes.filter(component => component.kind !== selectedComponent?.kind).map(component => (
+            <details className="stage-scene-evidence" key={selectedId + component.kind} data-change={component.state} open={changes.length === 1}>
               <summary><span>{component.label}</span><small>{stateLabels[component.state]} · {component.files.length}</small></summary>
               <StageFileList files={component.files} />
             </details>

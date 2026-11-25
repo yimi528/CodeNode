@@ -6,7 +6,7 @@
 @import './workbench-frame.css';
 @import './components/side/SidePanel.css';
 @import './workbench-dock.css';
-@import './components/ProjectGate.css';
 @import './components/ErrorBoundary.css';
 @import './components/RunReplayPanel.css';
 @import './workbench.css';
+@import './workbench-glass.css';

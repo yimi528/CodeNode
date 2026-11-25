@@ -75,7 +75,7 @@ app.whenReady().then(async () => {
 
     if (!fs.existsSync(DEMO)) throw new Error('缺少示例工程：' + DEMO);
 
-    // ① 种「最近打开」（真实链路入口），然后重载让门禁页读到它
+    // ① 种「最近打开」（真实链路入口），然后重载让工作台读到它
     await pollJs('!!window.__codenodeProject', 30000, '渲染层 bootstrap');
     const seed = JSON.stringify([
       { root: ROOT, file: DEMO, name: path.basename(DEMO), openedAt: Date.now() },
@@ -84,21 +84,20 @@ app.whenReady().then(async () => {
     await win.webContents.reload();
     await pollJs('!!window.__codenodeChat', 30000, '重载后渲染层 bootstrap');
 
-    // ② 若停在启动门禁页 → 点最近列表里的 .cnode 条目（走真实打开链路）；
-    //    若应用已自动恢复上次工程 → 直接进工作台即可。
-    const atGate = await js(`!!document.querySelector('.gate-card')`);
-    if (atGate) {
-      await pollJs(`!!document.querySelector('.gate-recent-item')`, 15000, '最近列表渲染');
+    // 从工作台侧栏打开示例工程。
+    const atHome = await js(`!!document.querySelector('.workspace-home')`);
+    if (atHome) {
+      await pollJs(`!!document.querySelector('.project-group-name')`, 15000, '最近列表渲染');
       const clicked = await js(`(()=>{
-        const items = [...document.querySelectorAll('.gate-recent-item')];
-        const hit = items.find((i) => i.textContent.includes('.cnode'));
+        const items = [...document.querySelectorAll('.project-group-name')];
+        const hit = items.find((i) => i.closest('[data-project-path]').dataset.projectPath.endsWith('.cnode'));
         if (!hit) return 'no-item';
         hit.click();
         return 'clicked';
       })()`);
-      console.log('gate-recent click → ' + clicked);
+      console.log('recent project click → ' + clicked);
     } else {
-      console.log('已在工作台（应用自动恢复上次工程），跳过门禁点击');
+      console.log('示例工程已打开');
     }
     await pollJs(`!!document.querySelector('.canvas-wrap')`, 60000, '进入工作台');
     await sleep(3000);
@@ -122,7 +121,7 @@ app.whenReady().then(async () => {
         const msgs = (sess && sess.messages) || [];
         const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
         return {
-          gate: !!document.querySelector('.gate-card'),
+          gate: !!document.querySelector('.workspace-home'),
           workspace: !!document.querySelector('.canvas-wrap'),
           nodes: nodes.length,
           inView,
@@ -141,7 +140,7 @@ app.whenReady().then(async () => {
 
     const before = await readState();
     console.log('BEFORE ' + JSON.stringify(before));
-    if (before.gate) failures.push('仍在启动门禁页（未进入工作台）');
+    if (before.gate) failures.push('示例工程尚未打开');
     if (!(before.nodes > 0)) failures.push('画布没有节点');
 
     if (PROMPT) {

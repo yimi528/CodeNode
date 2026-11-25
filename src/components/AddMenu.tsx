@@ -4,7 +4,6 @@ import { useUiStore } from '../store/uiStore';
 import { useGraphStore } from '../store/graphStore';
 import { placeCanvasNode, placeWorkflowNode } from '../lib/nodePlacement';
 import { NodeIcon } from '../nodes/NodeIcon';
-import { nodeModes } from '../nodes/presentation';
 
 const actionGroups = [
   { title: '执行步骤', actions: [
@@ -89,7 +88,6 @@ export default function AddMenu() {
       useGraphStore.getState().createScopeFromSelection();
     } else {
       placeWorkflowNode(api, type, menu.anchor === 'above' ? undefined : { x: menu.x, y: menu.y });
-      if (type !== 'task' && nodeModes(type)) useUiStore.getState().setSideTab('node');
     }
     closeAndRestoreFocus();
   };

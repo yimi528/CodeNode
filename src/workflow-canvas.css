@@ -19,31 +19,34 @@
 .canvas-raster-mode .react-flow__node.selected:has(.wf-vector),
 .canvas-raster-mode .react-flow__node.selected:has(.wf-image-node),
 .canvas-raster-mode .react-flow__node.selected:has(.wf-scope),
-.canvas-raster-mode .react-flow__node.selected:has(.wf-object-node) { opacity: 1; }
+.canvas-raster-mode .react-flow__node.selected:has(.wf-object-node),
+.canvas-raster-mode .react-flow__node.selected:has(.wf-instruction-node:not(.wf-status-running)) { opacity: 1; }
 
 /* Shared values for the raster previews and the live node editors. */
 .canvas-wrap {
-  --node-glass-top: rgba(77, 77, 77, .86);
-  --node-glass-center: rgba(61, 61, 61, .88);
-  --node-glass-bottom: rgba(54, 54, 54, .92);
-  --node-glass-rim: rgba(255, 255, 255, .22);
+  --node-glass-top: rgba(52, 52, 52, .88);
+  --node-glass-center: rgba(43, 43, 43, .9);
+  --node-glass-bottom: rgba(37, 37, 37, .95);
+  --node-glass-rim: rgba(255, 255, 255, .19);
   --node-glass-border: rgba(255, 255, 255, .12);
-  --node-glass-selection: #a8a8a8;
+  --node-glass-selection: #ececec;
+  --node-glass-input: rgba(0, 0, 0, .22);
   --node-glass-shadow: rgba(0, 0, 0, .25);
   --node-glass-filter: blur(10px);
   --edge-color: #777777;
+  --canvas-dot: #646464;
 }
 
 .theme-dark .canvas-wrap {
-  --node-glass-top: rgba(72, 72, 72, .86);
-  --node-glass-center: rgba(57, 57, 57, .88);
-  --node-glass-bottom: rgba(51, 51, 51, .92);
+  --node-glass-top: rgba(48, 48, 48, .88);
+  --node-glass-center: rgba(39, 39, 39, .9);
+  --node-glass-bottom: rgba(34, 34, 34, .95);
 }
 
 .theme-bright .canvas-wrap {
-  --node-glass-top: rgba(83, 83, 83, .86);
-  --node-glass-center: rgba(65, 65, 65, .88);
-  --node-glass-bottom: rgba(57, 57, 57, .92);
+  --node-glass-top: rgba(57, 57, 57, .88);
+  --node-glass-center: rgba(47, 47, 47, .9);
+  --node-glass-bottom: rgba(40, 40, 40, .95);
 }
 
 .glass-theme .workspace-canvas .canvas-wrap .wf-node {
@@ -51,6 +54,51 @@
   border-radius: 10px;
   animation: none;
 }
+
+.glass-theme .workspace-canvas .canvas-wrap .wf-instruction-node {
+  width: 210px;
+  padding: 0 10px 10px;
+  border-radius: 14px;
+}
+
+.wf-instruction-node::before { display: none; }
+.glass-theme .workspace-canvas .wf-instruction-node .wf-node-title {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+}
+
+.wf-instruction-node .node-kind-icon { flex: none; stroke: currentColor; }
+.wf-instruction-node .wf-node-sub { margin: 0 0 5px; }
+.wf-instruction-node .wf-handle {
+  width: 8px;
+  height: 8px;
+  border: 1px solid #bdbdbd;
+  background: var(--workbench-canvas);
+  box-shadow: none;
+}
+
+.wf-node-prompt {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  max-height: 90px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--node-glass-border);
+  border-radius: 6px;
+  background: var(--node-glass-input);
+  color: var(--glass-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  user-select: text;
+}
+.wf-node-prompt::placeholder { color: var(--glass-muted); }
+.wf-node-prompt:focus-visible { outline: 1px solid var(--node-glass-selection); outline-offset: 1px; }
+.wf-node-prompt:read-only { pointer-events: none; }
 
 .glass-theme .workspace-canvas .canvas-wrap .wf-node:not(.is-dragover) {
   border-color: var(--node-glass-border) !important;

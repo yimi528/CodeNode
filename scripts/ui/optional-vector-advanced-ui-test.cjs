@@ -53,12 +53,14 @@ app.whenReady().then(async () => {
     await win.webContents.capturePage().then(image=>fs.writeFileSync(path.join(project,'plugin-enabled.png'),image.toPNG()));
     // Save while the plugin is disabled; reopening must preserve opaque vector nodes and drawings.
     await js(`window.__codenodeUi.getState().updatePreferences({vectorEditorEnabled:false})`);
-    await js(`window.__codenodeProject.getState().setProjectFile(${JSON.stringify(path.join(project,'legacy.cnode'))});document.querySelector('.toolbar-dropdown').open=true;document.querySelector('.toolbar-menu-section button').click()`);
+    await js(`window.__codenodeProject.getState().setProjectFile(${JSON.stringify(path.join(project,'legacy.cnode'))})`);
+    await wait(`!!document.querySelector('.project-row-menu [data-action="save"]')`,'project save action');
+    await js(`document.querySelector('.project-row-menu [data-action="save"]').click()`);
     await wait(`localStorage.getItem('codenode.lastProjectFile')===${JSON.stringify(path.join(project,'legacy.cnode'))}`,'project saved');
-    win.webContents.reload();await wait(`!!document.querySelector('.gate-actions')`,'reload gate');
-    await wait(`!!document.querySelector('.gate-recent-list button')`,'saved recent project');
-    await js(`document.querySelector('.gate-recent-list button').click()`);
-    await wait(`!!document.querySelector('.toolbar')`,'reload workbench');
+    win.webContents.reload();await wait(`!!document.querySelector('.workspace-home')`,'reload workspace home');
+    await wait(`!!document.querySelector('.project-group-name')`,'saved recent project');
+    await js(`document.querySelector('.project-group-name').click()`);
+    await wait(`!!document.querySelector('.workbench-view-switch')`,'reload workbench');
     assert.deepEqual(await js(`(()=>{const p=window.__codenodeUi.getState().preferences;return[p.advancedMode,p.vectorEditorEnabled]})()`),[true,false]);
     assert.equal(await js(`typeof window.__codenodeVectorNode`),'undefined');
     await wait(`window.__codenodeStore.getState().nodes.some(n=>n.id==='legacy' && n.type==='vector')`,'saved .cnode vector restored');

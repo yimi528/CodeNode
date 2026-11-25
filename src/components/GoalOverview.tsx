@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useGoalControlStore } from '../store/goalControlStore';
 import { useProjectStore } from '../store/projectStore';
 import { useUiStore } from '../store/uiStore';
+import { CanvasIcon } from './CanvasIcons';
 import GoalControlPanel from './side/GoalControlPanel';
 import { goalAttention } from '../lib/goalAttention';
 const stateName:Record<string,string>={active:'进行中',completed:'已完成',paused:'已暂停',stopped:'已停止',archived:'已归档'};
@@ -24,12 +25,48 @@ export default function GoalOverview(){
   document.addEventListener('keydown',onKey);return()=>document.removeEventListener('keydown',onKey);
  },[editor]);
  return <section className="goal-overview" aria-label="目标总览">
-  <header className="overview-project-header"><span>{root?.split(/[\\/]/).pop()||'当前项目'}</span><div><button className="overview-refresh" aria-label="刷新目标总览" title="刷新目标" onClick={()=>void refresh(root)}>↻</button><button className="overview-create" onClick={()=>openEditor(null)}>＋ 新建目标</button></div></header>
-  <div className="overview-brief"><div className="overview-brief-icon" aria-hidden="true">✦</div><div><span>项目简报</span><h1>{attention.length?'有一些事项需要你处理':visible.length?'继续推进你的目标':'从一个目标开始'}</h1><p>{attention.length?`${attention.length} 项待处理事项，先核对预算、处理决定或运行复核，再跟进阻塞与等待。`:visible.length?`${visible.filter(g=>g.status==='active').length} 个目标正在进行，任务与验收进度都在这里。`:'描述你想完成的事，CodeNode 会帮你管理任务和验收。'}</p></div></div>
-  {!!attention.length&&<section className="overview-attention"><h2>需要你处理 <span>{attention.length}</span></h2>{attention.slice(0,6).map(item=><button key={item.key} data-owner={item.owner} data-action={item.action} data-priority={item.priority} aria-label={`需要你处理：${item.label} · ${item.text} · ${item.goal.title}`} onClick={()=>openEditor(item.goalId,item.taskId)}><span className="overview-attention-label">{item.label}</span><span><strong>{item.text}</strong><small>{item.goal.title}</small></span><span aria-hidden="true">›</span></button>)}{attention.length>6&&<div className="overview-attention-overflow"><button type="button" data-action="open-full-attention" data-owner="user" data-goal-id={attention[6].goalId} data-goal-title={attention[6].goal.title} aria-label={`在目标编辑器查看剩余 ${attention.length-6} 项待办`} onClick={()=>openEditor(attention[6].goalId,attention[6].taskId)}>查看剩余 {attention.length-6} 项</button></div>}</section>}
-  <section className="overview-goals"><div className="overview-list-heading"><h2>全部目标{visible.length>0&&<span>{visible.length}</span>}</h2></div>
-   {visible.length===0?<div className="overview-empty"><p>还没有目标</p><span>可以从一个功能、一项修复或一个项目计划开始。</span><button onClick={()=>openEditor(null)}>创建第一个目标</button></div>:<div className="overview-goal-list" aria-label="项目目标列表">{visible.map(g=>{const done=g.tasks.filter(t=>t.status==='completed').length;return <button key={g.id} data-goal-id={g.id} onClick={()=>openEditor(g.id)}><span className={'overview-state-dot status-'+g.status}/><span className="overview-row-copy"><strong>{g.title}</strong><small>{g.objective}</small></span><span className="overview-row-progress">{done}/{g.tasks.length} 任务</span><span className="overview-row-status">{g.status==='completed'&&g.complete===false?'需重新核验':stateName[g.status]||g.status}</span><span aria-hidden="true">›</span></button>;})}</div>}
-  </section>
+  <header className="overview-project-header">
+   <h1>项目目标</h1>
+   <div>
+    <button className="overview-refresh" aria-label="刷新目标总览" title="刷新目标" onClick={() => void refresh(root)}><CanvasIcon name="refresh" /></button>
+    <button className="overview-create" onClick={() => openEditor(null)}><CanvasIcon name="plus" />新建目标</button>
+   </div>
+  </header>
+  {attention.length > 0 && <section className="overview-attention">
+   <h2>需要你处理 <span>{attention.length}</span></h2>
+   <div className="overview-attention-list">
+    {attention.slice(0, 6).map(item => <button key={item.key} data-owner={item.owner} data-action={item.action} data-priority={item.priority}
+      aria-label={`需要你处理：${item.label} · ${item.text} · ${item.goal.title}`} onClick={() => openEditor(item.goalId, item.taskId)}>
+     <i className="overview-attention-dot" aria-hidden="true" />
+     <span className="overview-row-copy"><strong>{item.text}</strong><small>{item.goal.title} · {item.label}</small></span>
+     <CanvasIcon name="chevron" />
+    </button>)}
+   </div>
+   {attention.length > 6 && <div className="overview-attention-overflow">
+    <button type="button" data-action="open-full-attention" data-owner="user" data-goal-id={attention[6].goalId} data-goal-title={attention[6].goal.title}
+      aria-label={`在目标编辑器查看剩余 ${attention.length - 6} 项待办`} onClick={() => openEditor(attention[6].goalId, attention[6].taskId)}>查看剩余 {attention.length - 6} 项</button>
+   </div>}
+  </section>}
+  {visible.length === 0 ? <div className="overview-empty"><CanvasIcon name="target" /><p>还没有目标</p></div> :
+   <section className="overview-goals">
+    <h2>全部目标</h2>
+    <div className="overview-goal-list" aria-label="项目目标列表">{visible.map(goal => {
+     const total = goal.tasks.length;
+     const done = goal.tasks.filter(task => task.status === 'completed').length;
+     const status = goal.status === 'completed' && goal.complete === false ? '需重新核验' : stateName[goal.status] || goal.status;
+     return <button key={goal.id} data-goal-id={goal.id} onClick={() => openEditor(goal.id)}>
+      <span className="overview-row-copy">
+       <strong>{goal.title}</strong>
+       {goal.objective.trim() !== goal.title.trim() && <small>{goal.objective}</small>}
+      </span>
+      <span className="overview-row-progress">
+       <span className="overview-progress-track" aria-hidden="true"><i style={{ width: total ? `${done / total * 100}%` : 0 }} /></span>
+       <span aria-label={`${done} / ${total} 项任务`}>{done}/{total}</span>
+      </span>
+      <span className="overview-row-status">{status}</span>
+     </button>;
+    })}</div>
+   </section>}
   {error&&<p role="status">{error}</p>}
   <div className="overview-editor-mask" hidden={!editor} onPointerDown={e=>{if(e.target===e.currentTarget)close();}}><section ref={editorRef} className={`overview-goal-editor${creating?'':' with-goal-graph'}`} role="dialog" aria-modal="true" aria-label={creating?'新建目标':'目标详情'}>
    <header><div><h2>{creating?'新建目标':detail?.title||'目标详情'}</h2><span>{creating?'先写清目标与完成标准':'任务、决定与验收'}</span></div><button aria-label="关闭目标编辑" onClick={close}>×</button></header>

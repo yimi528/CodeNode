@@ -50,6 +50,7 @@ function ProjectSessions({ target, liveSessions, activeId, busy, onSelect, onArc
 export default function ProjectNavigation() {
   const appPage = useUiStore(s => s.appPage);
   const root = useProjectStore(s => s.root);
+  const booted = useUiStore(s => s.booted);
   const projectError = useProjectStore(s => s.error);
   const file = useProjectStore(s => s.projectFile);
   const sessions = useSessionStore(s => s.sessions);
@@ -104,7 +105,7 @@ export default function ProjectNavigation() {
     }
   };
   const isCurrent = (project: ProjectEntry) => sameRecentProject(project, { root: root || '', file: file || undefined });
-  const recent = readRecentProjects();
+  const recent = booted ? readRecentProjects() : [];
   const projects = [
     ...(root ? [{ root, file: file || undefined, name: projectNameOf(file || root) }] : []),
     ...recent.filter(project => !isCurrent(project)),
@@ -141,7 +142,7 @@ export default function ProjectNavigation() {
   return <aside ref={panel} className="project-navigation" aria-label="项目与会话" style={{'--navigation-width':width+'px'} as CSSProperties}>
     <div className="navigation-resize" role="separator" aria-label="调整项目栏宽度" aria-orientation="vertical" aria-valuemin={180} aria-valuemax={400} aria-valuenow={width} tabIndex={0} onPointerDown={startResize} onDoubleClick={()=>setWidth(216)} onKeyDown={event => { if(event.key==='ArrowLeft'||event.key==='ArrowRight') { event.preventDefault(); setWidth(width+(event.key==='ArrowRight'?16:-16)); } }} />
     <div className="project-nav-head"><strong>CodeNode</strong></div>
-    <button className="project-nav-new" disabled={busy || streaming} onClick={() => { useSessionStore.getState().newConversation(); showConversation(); if (root) void saveProject(); }}>＋ 新对话</button>
+    {root && <button className="project-nav-new" disabled={busy || streaming} onClick={() => { useSessionStore.getState().newConversation(); showConversation(); void saveProject(); }}>＋ 新对话</button>}
     <div className="project-nav-title"><span>项目</span><details className="project-actions"><summary aria-label="项目操作">＋</summary><div><button disabled={streaming || busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(newProject); }}>新建项目</button><button disabled={streaming || busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(openProject); }}>打开项目</button><button disabled={streaming || busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void act(openProjectFile); }}>打开工程文件</button></div></details></div>
     <div className="project-nav-scroll">
       {projects.map(project => {
@@ -150,7 +151,11 @@ export default function ProjectNavigation() {
         const folded = collapsed[key] ?? !current;
         return <section className="project-group" key={key} data-project-path={key}>
           <div className="project-group-row">
-            <button className="project-group-name" aria-expanded={!folded} title={project.root} onClick={() => { setCollapsed(state => ({ ...state, [key]: !folded })); }}><span aria-hidden="true">{folded ? '›' : '⌄'}</span><CanvasIcon name="folder" /><span >{name}</span>{meta[key]?.pinned && <small>置顶</small>}</button>
+            <button className="project-group-name" aria-expanded={root ? !folded : undefined}
+              title={project.root} disabled={!root && busy} onClick={() => {
+                if (!root) void act(() => openRecentProject(project));
+                else setCollapsed(state => ({ ...state, [key]: !folded }));
+              }}>{root && <span aria-hidden="true">{folded ? '›' : '⌄'}</span>}<CanvasIcon name="folder" /><span>{name}</span>{meta[key]?.pinned && <small>置顶</small>}</button>
             <button className="project-new-chat" aria-label={`在 ${name} 新建聊天`} disabled={streaming || busy} onClick={() => void act(async () => {
               if (!current && !await openRecentProject(project)) return false;
               setCollapsed(state => ({ ...state, [key]: false }));
@@ -179,7 +184,7 @@ export default function ProjectNavigation() {
             </div></details>
           </div>
           {renaming === key && <input className="project-rename" aria-label="项目显示名称" autoFocus defaultValue={name} onKeyDown={event => { if(event.key === 'Enter') { changeMeta(key, { name: event.currentTarget.value.trim() || project.name }); setRenaming(null); } if(event.key === 'Escape') setRenaming(null); }} onBlur={event => { changeMeta(key, { name: event.currentTarget.value.trim() || project.name }); setRenaming(null); }} />}
-          {!folded && <ProjectSessions
+          {root && !folded && <ProjectSessions
             target={key}
             liveSessions={current ? order.map(id => sessions[id]).filter(Boolean) : null}
             activeId={current ? activeId : null}
@@ -202,7 +207,7 @@ export default function ProjectNavigation() {
 
         </section>;
       })}
-      {!projects.length && <p className="project-nav-empty">添加项目文件夹，在项目下管理聊天。</p>}
+      {booted && !projects.length && <p className="project-nav-empty">还没有项目</p>}
       {!root && !!order.length && <section className="project-group"><div className="project-nav-title">未分组</div><div className="project-nav-sessions">{order.map(id => sessions[id]).filter(session => session && !session.archived).map(session => <div className="project-session-row" key={session.id}><button className={session.id === activeId ? 'active' : ''} disabled={streaming || busy} onClick={() => { useSessionStore.getState().switchSession(session.id); showConversation(); }}>{session.prompt || session.label}</button></div>)}</div></section>}
     </div>
 {(error || projectError) && <div className="project-nav-error" role="alert">{error || projectError}</div>}
