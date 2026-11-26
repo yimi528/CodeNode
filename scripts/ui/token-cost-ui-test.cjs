@@ -35,8 +35,11 @@ app.whenReady().then(async () => {
       window.__codenodeUi.getState().openSettings('costs');
       const select=await costWait(()=>document.querySelector('.cost-settings select'));
       await costWait(()=>!select.disabled);
+      select.closest('details').querySelector('summary').click();
       select.value='cheap-ui';select.dispatchEvent(new Event('change',{bubbles:true}));
       await new Promise(r=>setTimeout(r,40));
+      document.querySelectorAll('.cost-settings > .settings-disclosure > summary')[1].click();
+      await costWait(()=>document.querySelector('.role-budget summary'));
       document.querySelector('.role-budget summary').click();
       document.querySelector('.role-budget button').click();
       await new Promise(r=>setTimeout(r,40));
@@ -62,6 +65,7 @@ app.whenReady().then(async () => {
         const ui=window.__codenodeUi;ui.getState().openSettings('general');await new Promise(r=>setTimeout(r,60));
         if(ui.getState().theme!==${JSON.stringify(theme)}){const s=document.querySelector('[data-theme-select]');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(s,${JSON.stringify(theme)});s.dispatchEvent(new Event('change',{bubbles:true}));}
         ui.getState().openSettings('costs');await costWait(()=>document.querySelector('.cost-settings select')?.value==='cheap-ui');
+        document.querySelectorAll('.cost-settings > .settings-disclosure > summary')[1].click();await costWait(()=>document.querySelector('.task-cost-list'));
         return {controls:[...document.querySelectorAll('.cost-settings input,.cost-settings select')].map(el=>({label:el.getAttribute('aria-label'),value:el.value,checked:el.checked,type:el.type})),
           text:document.querySelector('.task-cost-list').textContent,theme:ui.getState().theme,sessionId:window.__codenodeSession.getState().activeId,
           activeId:(await window.codenode.modelsList()).activeId,draft:document.querySelector('.pp-composer textarea').value,navigation:ui.getState().navigationOpen,side:ui.getState().sideTab};

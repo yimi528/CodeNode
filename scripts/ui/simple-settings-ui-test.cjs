@@ -10,11 +10,12 @@ app.whenReady().then(async()=>{
  const win=new BrowserWindow({show:false,width:1280,height:850,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false,preload:path.join(appRoot,'electron/preload.cjs')}});
  let frame=null;win.webContents.on('paint',(_e,_d,img)=>{frame=img.toPNG()});win.webContents.startPainting();
  const js=code=>win.webContents.executeJavaScript(code),wait=async code=>{for(let i=0;i<100;i++){if(await js(code))return;await sleep(80)}throw Error('UI wait: '+code)};
- const open=async tab=>{await js(`window.__codenodeUi.getState().openSettings(${JSON.stringify(tab)})`);await wait(`document.querySelector('.settings-layout nav [aria-pressed=true]')?.textContent===${JSON.stringify({general:'常规',layout:'界面',agents:'Agent 连接',execution:'执行',project:'项目设置'}[tab])}`)};
+ const open=async tab=>{await js(`window.__codenodeUi.getState().openSettings(${JSON.stringify(tab)})`);await wait(`document.querySelector('.settings-layout nav [aria-pressed=true]')?.textContent===${JSON.stringify({general:'常规与界面',layout:'常规与界面',agents:'模型与执行',execution:'模型与执行',project:'项目与工具'}[tab])}`)};
  try{
   await win.loadFile(path.join(appRoot,'dist/index.html'));await js(`window.__codenodeSession.getState().initProject();window.__codenodeProject.getState().loadRoot(${JSON.stringify(project)})`);await wait('!!document.querySelector(".pp-input")');
   const state=()=>js(`JSON.stringify({session:window.__codenodeSession.getState().activeId,conversation:window.__codenodeSession.getState().memoryConversationId,model:document.querySelector('.model-connection-trigger')?.title,navigation:window.__codenodeUi.getState().navigationOpen})`),before=await state();
   await open('general');
+  assert.deepEqual(await js(`[...document.querySelectorAll('.settings-layout nav button')].map(el=>el.textContent)`),['常规与界面','模型与执行','项目与工具']);
   assert.equal(await js(`!!document.querySelector('.backend-settings-panel')`),false);assert.equal(await js(`!!document.querySelector('[aria-label="主导航图标栏宽度"]')`),false);assert.equal(await js(`!!document.querySelector('.trellis-cli-settings')`),false);
   const snapshot=()=>js(`JSON.stringify([...document.querySelectorAll('.settings-content input,.settings-content select,.settings-content button,.settings-content summary')].filter(n=>n.getClientRects().length).map(n=>[n.tagName,n.getAttribute('aria-label'),n.dataset.themeSelect?'theme':n.textContent]))`),controls=await snapshot();
   const shots=path.resolve(__dirname,'../../release/simple-settings-previews');fs.mkdirSync(shots,{recursive:true});win.showInactive();

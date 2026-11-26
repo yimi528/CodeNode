@@ -60,8 +60,8 @@ app.whenReady().then(async () => {
     await shot('empty-canvas');
     const before = await snapshot();
     await click('.global-settings-trigger');
-    await clickText('.settings-layout nav button', '界面');
-    await clickText('.settings-content button', '帮助与教程');
+    await clickText('.settings-layout nav button', '常规与界面');
+    await clickText('.settings-content summary', '帮助与教程');
     await clickText('.settings-content button', '打开使用教程');
     await wait(`document.querySelector('.tutorial-page h1')?.textContent==='创建第一个节点'`);
     await shot('tutorial-create');
@@ -104,8 +104,8 @@ app.whenReady().then(async () => {
 
     await click('.global-settings-trigger');
     await wait('!!document.querySelector(".global-settings")');
-    await clickText('.settings-layout nav button', '界面');
-    await clickText('.settings-content button', '帮助与教程');
+    await clickText('.settings-layout nav button', '常规与界面');
+    await clickText('.settings-content summary', '帮助与教程');
     await shot('settings-help');
     await clickText('.settings-content button', '打开快捷键速查');
     await wait(`document.querySelector('.tutorial-page h1')?.textContent==='快捷键速查'`);
@@ -117,8 +117,8 @@ app.whenReady().then(async () => {
     await sleep(200);
     const populated = await snapshot();
     await click('.global-settings-trigger');
-    await clickText('.settings-layout nav button', '界面');
-    await clickText('.settings-content button', '帮助与教程');
+    await clickText('.settings-layout nav button', '常规与界面');
+    await clickText('.settings-content summary', '帮助与教程');
     await clickText('.settings-content button', '打开使用教程');
     await wait(`document.querySelector('.tutorial-page h1')?.textContent==='创建第一个节点'`);
     await js(`document.querySelector('.tutorial-page h1').focus()`);

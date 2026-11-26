@@ -20,7 +20,8 @@
 
 .glass-theme.ui-clean .activity-bar {
   border: 0;
-  padding-block: 14px;
+  padding-block: 7px 12px;
+  gap: 7px;
 }
 
 .glass-theme.ui-clean .project-navigation {
@@ -104,22 +105,19 @@
 }
 .workbench-view-switch + .toolbar-spacer { margin-left: 0; }
 
-.workspace-overview-layer, .workspace-stage-replay {
+.workspace-overview-layer {
   position: absolute;
   inset: 0;
   overflow: auto;
 }
-.workspace-overview-layer[hidden], .workspace-stage-replay[hidden] { display: none; }
-.workspace-stage-replay { padding: 12px clamp(9px, 1.65vw, 24px); }
-.workspace-stage-empty {
-  display: grid;
-  min-height: calc(100% - 32px);
-  place-items: center;
-  margin: 16px;
-  color: var(--glass-muted);
-  font-size: 13px;
-  text-align: center;
+.workspace-overview-layer[hidden] { display: none; }
+.workspace-stage-replay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, #2c3b47, #1a242d 55%, #151c23);
 }
+.workspace-stage-replay[hidden] { display: none; }
 
 .glass-theme.ui-clean .workspace-main .conversation-workspace.conversation-right {
   border: 1px solid var(--workbench-rim);

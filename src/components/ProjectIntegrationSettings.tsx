@@ -31,7 +31,6 @@ function ProjectIntegrations({ root }: { root: string }) {
 
   return <div className="project-integration-settings">
     <header className="project-settings-heading">
-      <h2>项目设置</h2>
       <p>{root.split(/[/\\]/).filter(Boolean).pop() || root}</p>
     </header>
     <h3>工具集成</h3>

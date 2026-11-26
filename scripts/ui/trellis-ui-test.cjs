@@ -114,8 +114,8 @@ app.whenReady().then(async () => {
     await waitFor(win,`window.__codenodeUi.getState().appPage==='workbench'`);
     assert.equal(await js(`!!document.querySelector('.activity-bar [aria-label="任务"]')`),false,'switching to an unconnected project removes the previous task entry');
     await js(`document.querySelector('.global-settings-trigger').click()`);
-    await waitFor(win,`[...document.querySelectorAll('.settings-layout nav button')].some(b=>b.textContent==='项目设置')`);
-    await js(`[...document.querySelectorAll('.settings-layout nav button')].find(b=>b.textContent==='项目设置').click()`);
+    await waitFor(win,`[...document.querySelectorAll('.settings-layout nav button')].some(b=>b.textContent==='项目与工具')`);
+    await js(`[...document.querySelectorAll('.settings-layout nav button')].find(b=>b.textContent==='项目与工具').click()`);
     await waitFor(win,`document.querySelector('.project-integration-row button')?.textContent==='接入 Trellis'`);
     for (const theme of ['light','dark']) await screenshot('project-settings-',theme);
     await js(`document.querySelector('.project-integration-row button').click()`);

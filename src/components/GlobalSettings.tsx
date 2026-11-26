@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { CANVAS_ACTIONS } from '../lib/uiPreferences';
 import { useUiStore } from '../store/uiStore';
+import SettingsDisclosure from './SettingsDisclosure';
+import { CanvasIcon } from './CanvasIcons';
 import ArchivedChatsSettings from './ArchivedChatsSettings';
 import RagSettingsPanel from './RagSettingsPanel';
 import EditingSettingsPanel from './EditingSettingsPanel';
@@ -35,11 +37,16 @@ export default function GlobalSettings() {
     return () => { window.removeEventListener('keydown', onKey); previous?.focus(); };
   }, [open, close]);
   if (!open) return null;
-  return <div className="settings-mask" onClick={close}><section className="global-settings" role="dialog" aria-modal="true" aria-label="全局设置" onClick={event => event.stopPropagation()}>
-    <header><strong>设置</strong><button className="settings-close" aria-label="关闭设置" onClick={close}>×</button></header>
-    <div className="settings-layout"><nav aria-label="设置分类">{([['general','常规'],['layout','界面'],['project','项目设置'],['agents','Agent 连接'],['execution','执行'],['costs','成本与模型'],['rag','检索'],['editing','安全编辑'],['archived','已归档聊天']] as const).map(([id,label]) => <button key={id} aria-pressed={tab === id} onClick={() => openSettings(id)}>{label}</button>)}</nav>
+  const archived = tab === 'archived';
+  const category = ['agents', 'execution', 'costs'].includes(tab) ? 'costs'
+    : ['project', 'rag', 'web', 'editing'].includes(tab) ? 'project' : 'general';
+  return <div className="settings-mask" onClick={close}><section className="global-settings" role="dialog" aria-modal="true" aria-label={archived ? '已归档聊天' : '全局设置'} onClick={event => event.stopPropagation()}>
+    <header><strong>{archived ? '已归档聊天' : '设置'}</strong><button className="settings-close" aria-label={archived ? '关闭归档聊天' : '关闭设置'} onClick={close}>×</button></header>
+    <div className="settings-layout">{!archived && <nav aria-label="设置分类">{([
+      ['general', '常规与界面', 'properties'], ['costs', '模型与执行', 'box'], ['project', '项目与工具', 'folder'],
+    ] as const).map(([id, label, icon]) => <button key={id} aria-pressed={category === id} onClick={() => openSettings(id)}><CanvasIcon name={icon} />{label}</button>)}</nav>}
     <div className="settings-content" key={tab}>
-      {tab === 'general' && <><h2>常规</h2>
+      {!archived && category === 'general' && <><h2>常规与界面</h2>
         <section className="settings-group"><label className="settings-row" htmlFor="settings-theme"><span>主题<small className="settings-theme-hint">{THEME_HINTS[theme]}</small></span>
           <select id="settings-theme" data-theme-select aria-label="主题" value={theme} onChange={event => setTheme(event.target.value as Theme)}>
             {THEMES.map(id => <option key={id} value={id}>{THEME_LABELS[id]}</option>)}
@@ -51,9 +58,7 @@ export default function GlobalSettings() {
         <details className="settings-advanced"><summary>保存选项</summary><label className="settings-row"><span>保存延迟</span><input aria-label="自动保存延迟" type="range" min="500" max="5000" step="100" disabled={!preferences.autoSaveEnabled} value={preferences.autoSaveDelayMs} onChange={e=>updatePreferences({autoSaveDelayMs:Number(e.target.value)})}/><output>{(preferences.autoSaveDelayMs/1000).toFixed(1)}秒</output></label></details></section>
         <section className="settings-group"><label className="settings-row"><span>逐字显示回复</span><input aria-label="逐字显示 Agent 回复" type="checkbox" checked={preferences.typewriterEnabled} onChange={event=>updatePreferences({typewriterEnabled:event.target.checked})}/></label>
         <details className="settings-advanced"><summary>显示选项</summary><label className="settings-row"><span>显示速度</span><input aria-label="回复显示速度" type="range" min={outputUi.charactersPerSecond.min} max={outputUi.charactersPerSecond.max} step="10" value={preferences.typewriterCharsPerSecond} disabled={!preferences.typewriterEnabled} onChange={event=>updatePreferences({typewriterCharsPerSecond:Number(event.target.value)})}/><output>{preferences.typewriterCharsPerSecond} 字/秒</output></label></details></section>
-        <footer className="settings-save-note">设置自动保存</footer>
-      </>}
-      {tab === 'layout' && <><h2>界面</h2><section className="settings-group"><h3>侧栏</h3><label className="settings-row"><span>图标栏宽度</span><input aria-label="主导航图标栏宽度" type="range" min="40" max="64" value={preferences.activityBarWidth} onChange={e=>updatePreferences({activityBarWidth:Number(e.target.value)})}/><output>{preferences.activityBarWidth}px</output></label>
+        <SettingsDisclosure title="侧栏与画布" initialOpen={tab === 'layout'}><section className="settings-group"><h3>侧栏</h3><label className="settings-row"><span>图标栏宽度</span><input aria-label="主导航图标栏宽度" type="range" min="40" max="64" value={preferences.activityBarWidth} onChange={e=>updatePreferences({activityBarWidth:Number(e.target.value)})}/><output>{preferences.activityBarWidth}px</output></label>
       <label className="settings-row"><span>左侧栏宽度</span><input aria-label="左侧栏宽度" type="range" min="180" max="400" value={navigationWidth} onChange={e => setNavigationWidth(Number(e.target.value))}/><output>{navigationWidth}px</output></label>
       <label className="settings-row"><span>对话栏宽度</span><input aria-label="对话栏宽度" type="range" min="320" max="640" value={conversationWidth} onChange={e => setConversationWidth(Number(e.target.value))}/><output>{conversationWidth}px</output></label>
       {([['navigationOpen','显示左侧栏'],['conversationOpen','显示对话栏'],['autoCollapseSidebars','窄窗口收起侧栏']] as const).map(([key,label]) => <label className="settings-row" key={key}><span>{label}</span><input type="checkbox" checked={preferences[key]} onChange={e => updatePreferences({[key]:e.target.checked})}/></label>)}
@@ -62,21 +67,28 @@ export default function GlobalSettings() {
       <label className="settings-row"><span>菜单行高</span><input aria-label="菜单行高" type="range" min="28" max="44" value={preferences.menuRowHeight} onChange={e => updatePreferences({menuRowHeight:Number(e.target.value)})}/><output>{preferences.menuRowHeight}px</output></label>
       {([['showShortcuts','显示快捷键提示'],['showGroupLabels','显示分组标题'],['hideDisabledActions','隐藏不可用操作']] as const).map(([key,label]) => <label className="settings-row" key={key}><span>{label}</span><input type="checkbox" checked={preferences[key]} onChange={e => updatePreferences({[key]:e.target.checked})}/></label>)}
       <fieldset className="settings-menu-actions"><legend>工具栏和菜单中显示的操作</legend>{CANVAS_ACTIONS.map(action => <label key={action.id}><input type="checkbox" checked={preferences.visibleActions.includes(action.id)} onChange={e => updatePreferences({visibleActions:e.target.checked ? [...preferences.visibleActions,action.id] : preferences.visibleActions.filter(id => id !== action.id)})}/>{action.label}</label>)}</fieldset>
-</details><details className="settings-advanced settings-group"><summary>矢量编辑器</summary><VectorPluginCard /></details><div className="settings-reset"><button onClick={() => openSettings('help')}>帮助与教程</button><button onClick={resetPreferences}>恢复默认偏好</button></div></>}
-      {tab === 'agents' && <><div className="settings-page-title"><h2>Agent 连接</h2><button onClick={()=>useUiStore.getState().openModelManager()}>管理模型</button></div><BackendSettingsPanel /></>}
-      {tab === 'execution' && <><h2>执行</h2><AgentExecutionSettings /><details className="settings-advanced settings-group"><summary>并发与任务额度</summary><SchedulingSettingsPanel /></details></>}
-      {tab === 'project' && <ProjectIntegrationSettings />}
-      {tab === 'rag' && <><h2>检索</h2><p className="settings-scope">应用于当前项目</p><RagSettingsPanel /><div className="settings-reset"><button onClick={() => openSettings('web')}>联网搜索</button></div></>}
-      {tab === 'web' && <><h2>联网搜索</h2><WebSearchSettingsPanel /></>}
-      {tab === 'editing' && <><h2>安全编辑与校验</h2><EditingSettingsPanel /></>}
-      {tab === 'costs' && <><h2>成本与模型</h2><CostSettingsPanel /></>}
-      {tab === 'archived' && <ArchivedChatsSettings/>}
-      {tab === 'help' && <><h2>帮助与教程</h2><p className="settings-scope">直接提出任务，或查阅高级编排与插件操作。</p>
+</details><details className="settings-advanced settings-group"><summary>矢量编辑器</summary><VectorPluginCard /></details>
+      <div className="settings-reset"><button onClick={resetPreferences}>恢复默认偏好</button></div></SettingsDisclosure>
+      <SettingsDisclosure title="帮助与教程" initialOpen={tab === 'help'}>
         <section className="settings-group">
           <div className="settings-row"><span>使用教程<small className="settings-theme-hint">创建、编辑与连接节点，学习画布和绘图工具。</small></span><button onClick={() => useUiStore.getState().openTutorial('create')}>打开使用教程</button></div>
           <div className="settings-row"><span>快捷键速查<small className="settings-theme-hint">按场景分类，支持搜索操作名称与按键。</small></span><button onClick={() => useUiStore.getState().openTutorial('shortcuts')}>打开快捷键速查</button></div>
         </section>
+      </SettingsDisclosure></>}
+      {category === 'costs' && <><h2>模型与执行</h2><CostSettingsPanel advancedOpen={tab === 'agents' || tab === 'execution'}>
+        <SettingsDisclosure title="Agent 连接" initialOpen={tab === 'agents'}>
+          <button onClick={() => useUiStore.getState().openModelManager()}>管理模型</button><BackendSettingsPanel />
+        </SettingsDisclosure>
+        <SettingsDisclosure title="工具执行与并发" initialOpen={tab === 'execution'}>
+          <AgentExecutionSettings /><details className="settings-advanced"><summary>并发与任务额度</summary><SchedulingSettingsPanel /></details>
+        </SettingsDisclosure>
+      </CostSettingsPanel></>}
+      {category === 'project' && <><h2>项目与工具</h2><ProjectIntegrationSettings />
+        <SettingsDisclosure title="项目检索" initialOpen={tab === 'rag'}><RagSettingsPanel /></SettingsDisclosure>
+        <SettingsDisclosure title="联网搜索" initialOpen={tab === 'web'}><WebSearchSettingsPanel /></SettingsDisclosure>
+        <SettingsDisclosure title="安全编辑与校验" initialOpen={tab === 'editing'}><EditingSettingsPanel /></SettingsDisclosure>
       </>}
+      {archived && <ArchivedChatsSettings />}
     </div></div>
   </section></div>;
 }

@@ -2,32 +2,13 @@ import type { ComponentKind, SceneComponent } from './stageScene';
 
 type Point = [number, number, number];
 type Projected = { x: number; y: number; depth: number };
-type ScreenPoint = { x: number; y: number };
-type Face = { points: Projected[]; depth: number; fill: CanvasGradient; kind?: ComponentKind; highlight: boolean };
-type View = { azimuth: number; elevation: number };
-export type StageSceneTarget = { kind: ComponentKind; type: 'component' | 'connection' };
-type HitRegion = StageSceneTarget & { points: ScreenPoint[] };
-
-function hits(region: HitRegion, x: number, y: number) {
-  let inside = false;
-  for (let index = 0; index < region.points.length; index++) {
-    const a = region.points[index];
-    const b = region.points[(index + 1) % region.points.length];
-    if (region.type === 'component') {
-      if ((a.y > y) !== (b.y > y) && x < a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y)) inside = !inside;
-    } else if (index < region.points.length - 1) {
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)));
-      if ((x - a.x - t * dx) ** 2 + (y - a.y - t * dy) ** 2 <= 25) return true;
-    }
-  }
-  return inside;
-}
-
-export const initialStageView: View = { azimuth: -.28, elevation: .64 };
+type FaceDetail = () => void;
+type Face = { points: Projected[]; depth: number; fill: CanvasGradient; detail?: FaceDetail; highlight: boolean };
+type View = { azimuth: number; elevation: number; zoom: number };
+export const initialStageView: View = { azimuth: -.14, elevation: .79, zoom: 1 };
 const positions: Record<ComponentKind, [number, number]> = {
-  frontend: [-2.42, 1.54], api: [2.32, .06], database: [-2.32, .02],
-  cache: [2.12, -1.53], config: [.27, -1.65], tests: [.29, 1.58], files: [-2.46, -1.51],
+  frontend: [-3, 0], api: [3, 0], database: [0, -1.47],
+  cache: [1.65, -1.4], config: [-1.65, -1.4], tests: [1.65, 1.4], files: [-1.65, 1.4],
 };
 
 const colors = {
@@ -35,19 +16,20 @@ const colors = {
   shadow: '#20272e',
   neutral: '#555e65',
   trim: '#a0a5aa',
-  active: '#67869b',
   accent: '#b5e0fa',
 };
 
-export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, height: number, view: View, components: SceneComponent[], projectName: string, entrance: number) {
+const activeMaterials: Record<ComponentKind, string> = {
+  frontend: '#7192a9', api: '#7585a4', database: '#8295aa',
+  cache: '#5b9892', config: '#8385ab', tests: '#7395ad', files: '#b29a6c',
+};
+
+export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, height: number, view: View, components: SceneComponent[], entrance: number) {
   const faces: Face[] = [];
-  const labels: { kind: ComponentKind; text: string; point: Projected; change: SceneComponent['change'] }[] = [];
-  const regions: HitRegion[] = [];
-  let drawingKind: ComponentKind | undefined;
   const sin = Math.sin(view.azimuth), cos = Math.cos(view.azimuth);
   const rise = Math.sin(view.elevation), tilt = Math.cos(view.elevation);
   const projectedBoardWidth = 7.5 * Math.abs(cos) + 4.68 * Math.abs(sin);
-  const unit = Math.min(Math.max(1, width - 24) / Math.max(8.5, projectedBoardWidth), Math.max(1, height - 22) / (4.2 + rise * 3));
+  const unit = view.zoom * Math.min(Math.max(1, width - 24) / Math.max(7.8, projectedBoardWidth), Math.max(1, height - 22) / (3.85 + Math.abs(rise) * 2.2));
   const project = ([x, y, z]: Point): Projected => {
     const back = x * sin + z * cos;
     return { x: width / 2 + (x * cos - z * sin) * unit,
@@ -73,7 +55,7 @@ export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, hei
     const toward = light > 0 ? colors.light : colors.shadow;
     return `color-mix(in srgb, ${base} ${100 - Math.abs(light)}%, ${toward})`;
   };
-  const face = (vertices: Point[], fill: string, highlight = false) => {
+  const face = (vertices: Point[], fill: string, highlight = false, detail?: FaceDetail) => {
     const points = vertices.map(project);
     // Outward winding lets the camera discard surfaces on the back of the solid.
     const [a, b, c] = points;
@@ -83,12 +65,13 @@ export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, hei
     const lighting = ctx.createLinearGradient(0, min, 0, max + .1);
     lighting.addColorStop(0, shade(fill, 12));
     lighting.addColorStop(1, shade(fill, -19));
-    faces.push({ points, fill: lighting, highlight, kind: drawingKind, depth: points.reduce((sum, point) => sum + point.depth, 0) / points.length });
+    faces.push({ points, fill: lighting, highlight, detail, depth: points.reduce((sum, point) => sum + point.depth, 0) / points.length });
   };
-  const box = (x: number, y: number, z: number, w: number, h: number, d: number, fill: string, highlight = false) => {
+  const box = (x: number, y: number, z: number, w: number, h: number, d: number, fill: string, highlight = false, marks?: { top?: FaceDetail; front?: FaceDetail }) => {
     const l = x - w / 2, r = x + w / 2, f = z + d / 2, b = z - d / 2, t = y + h;
-    face([[l, t, f], [r, t, f], [r, t, b], [l, t, b]], shade(fill, 44), highlight);
-    face([[l, y, f], [r, y, f], [r, t, f], [l, t, f]], fill);
+    face([[l, y, b], [r, y, b], [r, y, f], [l, y, f]], shade(fill, -32));
+    face([[l, t, f], [r, t, f], [r, t, b], [l, t, b]], shade(fill, 44), highlight, marks?.top);
+    face([[l, y, f], [r, y, f], [r, t, f], [l, t, f]], fill, false, marks?.front);
     face([[r, y, b], [l, y, b], [l, t, b], [r, t, b]], shade(fill, -18));
     face([[r, y, f], [r, y, b], [r, t, b], [r, t, f]], shade(fill, -28));
     face([[l, y, b], [l, y, f], [l, t, f], [l, t, b]], shade(fill, 13));
@@ -104,17 +87,26 @@ export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, hei
       const light = Math.cos(i / 36 * Math.PI * 2 + 1.8);
       face([rim[next], a, top[i], top[next]], shade(fill, Math.round(light * 26 + Math.max(0, light) ** 10 * 31)));
     });
+    face(rim, shade(fill, -32));
     face(top.slice().reverse(), shade(fill, 48), highlight);
   };
 
   ctx.clearRect(0, 0, width, height);
-  if (components.length === 0) return () => null;
+
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   const paintFaces = () => {
     faces.sort((a, b) => a.depth - b.depth);
-    faces.forEach(({ points, fill, kind, highlight }) => {
+    faces.forEach(({ points, fill, highlight, detail }) => {
       polygon(points, fill);
+      if (detail) {
+        // Map the unit square onto the visible face so markings rotate and occlude with it.
+        const [origin, right, , up] = points;
+        ctx.save();
+        ctx.transform(right.x - origin.x, right.y - origin.y, up.x - origin.x, up.y - origin.y, origin.x, origin.y);
+        detail();
+        ctx.restore();
+      }
       if (highlight) {
         ctx.save();
         ctx.strokeStyle = colors.accent;
@@ -124,7 +116,6 @@ export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, hei
         ctx.stroke();
         ctx.restore();
       }
-      if (kind) regions.push({ kind, type: 'component', points });
     });
     faces.length = 0;
   };
@@ -142,7 +133,7 @@ export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, hei
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(-.22);
-    ctx.scale(unit * radius, unit * radius * (.30 + rise * .38));
+    ctx.scale(unit * radius, unit * radius * (.30 + Math.abs(rise) * .38));
     ctx.fillStyle = shadow;
     ctx.fillRect(-1, -1, 2, 2);
     ctx.restore();
@@ -158,27 +149,20 @@ export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, hei
     ctx.lineWidth = active ? 1.7 : 1.1;
     ctx.strokeStyle = active ? colors.accent : '#888';
     ctx.stroke();
-    const points = Array.from({ length: 21 }, (_, index) => {
-      const t = index / 20, s = 1 - t;
-      return {
-        x: s ** 3 * start.x + 3 * s ** 2 * t * start.x + 3 * s * t ** 2 * middle.x + t ** 3 * end.x,
-        y: s ** 3 * start.y + 3 * s ** 2 * t * middle.y + 3 * s * t ** 2 * end.y + t ** 3 * end.y,
-      };
-    });
-    regions.push({ kind, type: 'connection', points });
   };
 
   for (const { kind, change } of [...components].sort((a, b) => Number(Boolean(a.change)) - Number(Boolean(b.change)))) {
     connection(kind, Boolean(change));
   }
+  if (!components.length) return;
   contact(0, .24, 1.4);
-  box(0, .02, .24, 1.15, 1.15, 1.12, '#656565');
+  box(0, .02, .24, 1.04, .21, .94, '#546576');
+  box(0, .23, .24, .85, .12, .75, '#738998');
   components.forEach(component => {
-    drawingKind = component.kind;
     const [x, z] = positions[component.kind];
     const active = component.change !== null;
     const lift = component.change === 'added' ? (1 - entrance) * .32 : 0;
-    const base = active ? colors.active : colors.neutral;
+    const base = active ? activeMaterials[component.kind] : colors.neutral;
     const detail = active ? colors.accent : colors.trim;
     contact(x, z, component.kind === 'database' ? 1.45 : 1.18);
     if (component.kind === 'database') {
@@ -206,48 +190,64 @@ export function drawStageScene(ctx: CanvasRenderingContext2D, width: number, hei
         box(x - .13, y + .115, z + .468, .49, .034, .019, detail);
         box(x + .32, y + .102, z + .469, .11, .063, .019, detail);
       }
-    } else {
-      box(x, .025 + lift, z, 1.25, .08, 1, base);
-      box(x, .105 + lift, z, 1.10, .13, .84, base);
-      box(x, .235 + lift, z, .91, .40, .66, shade(base, 16), active);
-      box(x, .635 + lift, z, .75, .07, .53, detail);
-      box(x, .705 + lift, z, .34, .055, .26, base);
-      for (const offset of [-.39, -.23, -.07, .09, .25, .41]) {
-        box(x + offset, .198 + lift, z + .397, .063, .09, .142, detail);
+    } else if (component.kind === 'cache') {
+      // Offset the three cache blocks to expose each layer and the fast-access mark.
+      for (let layer = 0; layer < 3; layer++) {
+        const offset = (layer - 1) * .12;
+        box(x + offset, .025 + lift + layer * .26, z - offset, 1.05, .19, .82, base, active, {
+          top: layer === 2 ? () => {
+            ctx.fillStyle = detail;
+            ctx.beginPath();
+            ctx.moveTo(.59, .91);
+            ctx.lineTo(.29, .43);
+            ctx.lineTo(.48, .43);
+            ctx.lineTo(.39, .09);
+            ctx.lineTo(.74, .58);
+            ctx.lineTo(.54, .58);
+            ctx.closePath();
+            ctx.fill();
+          } : undefined,
+        });
       }
+    } else if (component.kind === 'config') {
+      box(x, .025 + lift, z, 1.35, .23, 1.02, base, active, {
+        top: () => {
+          [.35, .68, .48].forEach((position, index) => {
+            const track = .23 + index * .27;
+            ctx.fillStyle = colors.shadow;
+            ctx.fillRect(track - .025, .12, .05, .76);
+            ctx.fillStyle = detail;
+            ctx.fillRect(track - .085, position - .065, .17, .13);
+          });
+        },
+      });
+    } else if (component.kind === 'tests') {
+      box(x, .025 + lift, z, .94, 1.15, .13, base, active, {
+        front: () => {
+          ctx.fillStyle = '#e1e5e8';
+          ctx.fillRect(.07, .06, .86, .85);
+          ctx.strokeStyle = colors.shadow;
+          ctx.lineWidth = .043;
+          for (const row of [.71, .48, .25]) {
+            ctx.beginPath();
+            ctx.moveTo(.15, row);
+            ctx.lineTo(.22, row - .065);
+            ctx.lineTo(.32, row + .085);
+            ctx.stroke();
+            ctx.fillStyle = base;
+            ctx.fillRect(.41, row - .025, .39, .05);
+          }
+        },
+      });
+      box(x, 1.07 + lift, z + .035, .42, .19, .16, detail);
+    } else if (component.kind === 'files') {
+      box(x, .025 + lift, z - .22, 1.25, .86, .09, base);
+      box(x - .37, .88 + lift, z - .22, .51, .16, .09, base);
+      box(x, .025 + lift, z, 1.25, .09, .5, base);
+      box(x, .12 + lift, z - .08, 1.11, .69, .05, '#e1e5e8');
+      box(x + .025, .12 + lift, z + .055, 1.08, .62, .046, detail);
+      box(x, .025 + lift, z + .23, 1.25, .59, .09, base, active);
     }
-    const suffix = component.change === 'added' ? ' 新增' : component.change ? ' 修改' : '';
-    labels.push({ kind: component.kind, text: component.label + suffix, point: project([x, 0, z + .58]), change: component.change });
   });
   paintFaces();
-
-  ctx.font = `500 ${width > 500 ? 13 : 11}px system-ui, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const hub = project([0, 0, .88]);
-  ctx.fillStyle = '#d2d2d2';
-  ctx.fillText(projectName, hub.x, hub.y + 14, Math.max(36, unit * 1.65));
-  const placed: { x: number; y: number; width: number }[] = [];
-  for (const { kind, text, point, change } of labels) {
-    const size = Math.ceil(ctx.measureText(text).width) + 10;
-    const x = Math.max(size / 2 + 2, Math.min(width - size / 2 - 2, point.x));
-    let y = Math.min(height - 12, point.y + 14);
-    while (placed.some(label => Math.abs(label.y - y) < 18 && Math.abs(label.x - x) < (label.width + size) / 2 + 3)) y += 19;
-    if (y > height - 9) continue;
-    placed.push({ x, y, width: size });
-    ctx.beginPath();
-    if (change) {
-      ctx.roundRect(x - size / 2, y - 9, size, 18, 5);
-      ctx.fillStyle = '#293a46';
-      ctx.fill();
-    }
-    ctx.fillStyle = change ? '#d7efff' : '#c4c4c4';
-    ctx.fillText(text, x, y);
-    regions.push({ kind, type: 'component', points: [
-      { x: x - size / 2, y: y - 9 }, { x: x + size / 2, y: y - 9 },
-      { x: x + size / 2, y: y + 9 }, { x: x - size / 2, y: y + 9 },
-    ] });
-  }
-  regions.reverse();
-  return (x: number, y: number): StageSceneTarget | null => regions.find(region => hits(region, x, y)) ?? null;
 }

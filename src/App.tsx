@@ -183,6 +183,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (useUiStore.getState().tutorialOpen || useUiStore.getState().appPage !== 'workbench') return;
       if (useUiStore.getState().settingsOpen || useUiStore.getState().modelManagerOpen) return;
+      if (e.key === 'Escape' && useUiStore.getState().stageReplayOpen) {
+        e.preventDefault();
+        useUiStore.getState().closeStageReplay();
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (mod && key === 'p') {
@@ -333,11 +338,12 @@ export default function App() {
                     <div className="workspace-canvas" aria-hidden={sideTab === 'project'}><Suspense fallback={null}><Canvas /></Suspense></div>
                     <ConversationPanel />
                   </div>
-                  {(replayVisible || replayLoaded) && <div className="workspace-stage-replay" hidden={!replayVisible} inert={!replayVisible}>
-                    <Suspense fallback={<p className="workspace-stage-empty" role="status">正在打开 3D 回放…</p>}>
+                  {(replayVisible || replayLoaded) && <section className="workspace-stage-replay" hidden={!replayVisible} inert={!replayVisible} aria-label="阶段 3D 回放"
+                    onDoubleClick={() => useUiStore.getState().closeStageReplay()}>
+                    <Suspense fallback={null}>
                       <StageReplayWorkspace key={JSON.stringify([projectRoot, workflowId])} root={projectRoot} workflowId={workflowId} active={replayVisible} />
                     </Suspense>
-                  </div>}
+                  </section>}
                 </div> : <WorkspaceHome ready={booted} />}
               </main>
               <div className="app-workbench-overlays" hidden={appPage !== 'workbench'}>

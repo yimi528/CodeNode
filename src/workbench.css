@@ -782,12 +782,51 @@
   backdrop-filter: none;
   box-shadow: none;
 }
-.activity-bar-links { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.activity-bar-links {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.activity-bar-links::before, .activity-bar-footer::before {
+  content: '';
+  display: block;
+  width: 18px;
+  height: 1px;
+  margin: 0 auto 6px;
+  background: var(--glass-border);
+}
 .activity-bar-footer { margin-top: auto; }
-.glass-theme.ui-clean .activity-bar button { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0 !important; margin: 0; border: 0; background: transparent; color: var(--glass-muted); border-radius: 9px; cursor: pointer; }
-.glass-theme.ui-clean .activity-bar button:hover:not(:disabled),.glass-theme.ui-clean .activity-bar button[aria-current="page"] { background: var(--glass-selected); color: var(--glass-text); }
+.glass-theme.ui-clean .activity-bar button {
+  display: grid;
+  place-items: center;
+  width: min(38px, calc(var(--activity-bar-width) - 8px));
+  height: 38px;
+  padding: 0 !important;
+  margin: 0;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--glass-muted);
+  cursor: pointer;
+}
+.glass-theme.ui-clean .activity-bar button:hover:not(:disabled) {
+  background: var(--glass-control);
+  color: var(--glass-text);
+}
+.glass-theme.ui-clean .activity-bar button[aria-current="page"],
+.glass-theme.ui-clean .activity-bar button[aria-current="page"]:hover {
+  background: #c9dfed;
+  color: #1e3543;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+}
+.activity-bar button[aria-expanded="true"] .rail-panel-arrow {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scaleX(-1);
+}
 .glass-theme.ui-clean .activity-bar button:disabled { opacity: .45; cursor: default; }
-.activity-bar button:focus-visible { outline: 2px solid var(--glass-accent); outline-offset: 1px; }
+.activity-bar button:focus-visible { outline: 2px solid var(--glass-text); outline-offset: 1px; }
 .app-project-navigation,.app-workbench-overlays { display: contents; }
 .app .app-project-navigation[hidden],.app .app-workbench-toolbar[hidden],.app .app-workbench-overlays[hidden],.app .app-workbench-status[hidden],.app .workspace-main[hidden] { display: none; }
 .app-workbench-toolbar,.app-workbench-status { flex: none; }
@@ -918,3 +957,34 @@
 .pm-tree button.pm-row { width: 100%; border: 1px solid transparent; background-color: transparent; font-family: inherit; font-size: inherit; text-align: start; }
 .pm-tree button.pm-row:disabled { opacity: 1; cursor: default; }
 .pm-tree button.pm-row:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+
+/* Compact settings categories and on-demand configuration. */
+.glass-theme .settings-layout > nav button {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+}
+.glass-theme .settings-layout > nav button[aria-pressed="true"] {
+  color: var(--glass-text); background: color-mix(in srgb, #72ace4 24%, var(--workbench-frame));
+}
+.settings-disclosure { margin: 0; border-bottom: 1px solid var(--glass-border); }
+.settings-disclosure > summary { cursor: pointer; padding: 13px 0; font-size: 13px; }
+.settings-disclosure > summary small { float: right; color: var(--glass-muted); font-size: 12px; }
+.settings-disclosure[open] > :not(summary) { margin-inline: 8px; }
+.global-settings .cost-settings > h3 { margin-top: 22px; }
+.cost-settings .settings-row > small { color: var(--glass-muted); }
+.cost-settings > .settings-row input[type="checkbox"] {
+  appearance: none; width: 32px; height: 18px; border-radius: 12px; margin: 0;
+  background: var(--glass-muted); position: relative; cursor: pointer;
+}
+.cost-settings > .settings-row input[type="checkbox"]:checked { background: #2778bd; }
+.cost-settings > .settings-row input[type="checkbox"]::before {
+  content: ''; position: absolute; width: 12px; height: 12px; top: 3px; left: 3px;
+  border-radius: 50%; background: white;
+}
+.cost-settings > .settings-row input[type="checkbox"]:checked::before { left: 17px; }
+.cost-settings > .settings-row input[type="checkbox"]:disabled { opacity: .5; cursor: default; }
+.cost-settings-save { margin-top: 14px; }
+.glass-theme .project-navigation .project-nav-archive {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 8px;
+  border: 0; border-top: 1px solid var(--glass-border); color: var(--glass-muted); background: transparent;
+}
+.glass-theme .project-navigation .project-nav-archive:hover { color: var(--glass-text); background: var(--glass-control); }

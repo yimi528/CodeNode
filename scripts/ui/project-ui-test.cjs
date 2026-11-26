@@ -161,13 +161,14 @@ app.whenReady().then(async () => {
       return;
     }
     if(process.env.CODENODE_BATCH_ARCHIVE_TEST==='1'){
-      const js=code=>win.webContents.executeJavaScript(code);win.showInactive();win.setSize(1300,850);
+      const js=async code=>{try{return await win.webContents.executeJavaScript(code)}catch(error){throw new Error(code,{cause:error})}};win.showInactive();win.setSize(1300,850);
       await js(`window.__codenodeUi.getState().updatePreferences({autoSaveEnabled:false})`);
       const archivedIds=await js(`(()=>{const ids=[];for(let i=0;i<3;i++){const ss=window.__codenodeSession.getState();ss.newCanvas();const id=window.__codenodeSession.getState().activeId;window.__codenodeSession.setState(s=>({sessions:{...s.sessions,[id]:{...s.sessions[id],label:'已归档聊天 '+(i+1)}}}));window.__codenodeSession.getState().pushUser('旧消息 '+i);window.__codenodeSession.getState().setArchived(id,true);ids.push(id)}return ids})()`);
       const activeId=await js(`window.__codenodeSession.getState().activeId`);
       assert.equal(await js(`window.__codenodeSession.getState().deleteArchivedSessions([${JSON.stringify(archivedIds[0])},${JSON.stringify(activeId)}])`),false);
       assert.equal(await js(`Object.values(window.__codenodeSession.getState().sessions).filter(session=>session.archived).length`),3);
-      await js(`window.__codenodeUi.getState().openSettings('archived')`);await sleep(100);
+      await js(`document.querySelector('.project-nav-archive').click()`);
+      await waitFor(async()=>await js(`!!document.querySelector('[aria-label="全选归档聊天"]')`),'已归档聊天列表');
       await js(`document.querySelector('[aria-label="全选归档聊天"]').click()`);await sleep(80);
       assert.equal(await js(`document.querySelectorAll('.archived-chat-choice input:checked').length`),3);
       await js(`document.querySelector('[aria-label="删除选中的归档聊天"]').click()`);await sleep(60);
@@ -825,18 +826,17 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript(`[...(${projectGroup(projectFile)}).querySelectorAll('.project-row-menu button')].find(button=>button.textContent==='打开项目').click()`);
       await waitFor(async () => await win.webContents.executeJavaScript(`!!document.querySelector('.pp-input') && window.__codenodeSession?.getState().sessions['${originalSession}']?.archived === true`).catch(()=>false), '重启后保留归档');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'project order must survive reload and reopening');
-      await win.webContents.executeJavaScript('document.querySelector(".global-settings-trigger").click()');
-      await waitFor(async () => await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-layout nav button')).some(b=>b.textContent==='已归档聊天')`), '按需加载设置');
-      await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-layout nav button')).find(b=>b.textContent==='已归档聊天').click()`);
+      await win.webContents.executeJavaScript('document.querySelector(".project-nav-archive").click()');
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".archived-chat-row")'), '从聊天侧栏打开归档');
       await sleep(100);
       assert.ok(await win.webContents.executeJavaScript('document.querySelector(".settings-content").textContent.includes("画布1")'));
       await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-content button')).find(b=>b.textContent==='恢复').click()`);
       await waitFor(async () => cnode.decodeCnode(fs.readFileSync(projectFile)).canvases?.sessions.some(s=>s.id===originalSession && !s.archived), '恢复写入工程');
-      for (const [setting, heading] of [['项目检索', '检索']]) {
-        await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-layout nav button')).find(b=>b.textContent==='${setting}').click()`);
-        await sleep(100);
-        assert.ok(await win.webContents.executeJavaScript('document.querySelector(".settings-content h2").textContent === '+JSON.stringify(heading)));
-      }
+      await win.webContents.executeJavaScript('document.querySelector(".settings-close").click();document.querySelector(".global-settings-trigger").click()');
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".settings-layout nav")'), '打开设置');
+      await win.webContents.executeJavaScript(`[...document.querySelectorAll('.settings-layout nav button')].find(b=>b.textContent==='项目与工具').click()`);
+      await win.webContents.executeJavaScript(`[...document.querySelectorAll('.settings-content summary')].find(el=>el.textContent==='项目检索').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".dock-rag-settings")'), '展开项目检索');
       win.showInactive(); await sleep(150);
       fs.mkdirSync(path.join(__dirname,"../../out"),{recursive:true});
       const settingsShot = await Promise.race([win.webContents.capturePage(),sleep(5000).then(()=>{throw new Error('capture timeout');})]);

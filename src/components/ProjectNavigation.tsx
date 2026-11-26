@@ -210,6 +210,7 @@ export default function ProjectNavigation() {
       {booted && !projects.length && <p className="project-nav-empty">还没有项目</p>}
       {!root && !!order.length && <section className="project-group"><div className="project-nav-title">未分组</div><div className="project-nav-sessions">{order.map(id => sessions[id]).filter(session => session && !session.archived).map(session => <div className="project-session-row" key={session.id}><button className={session.id === activeId ? 'active' : ''} disabled={streaming || busy} onClick={() => { useSessionStore.getState().switchSession(session.id); showConversation(); }}>{session.prompt || session.label}</button></div>)}</div></section>}
     </div>
+    <button className="project-nav-archive" onClick={() => useUiStore.getState().openSettings('archived')}><CanvasIcon name="checkpoints" />已归档聊天</button>
 {(error || projectError) && <div className="project-nav-error" role="alert">{error || projectError}</div>}
   </aside>;
 }

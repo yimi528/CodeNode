@@ -20,8 +20,8 @@ app.whenReady().then(async()=>{
     await js(`window.__codenodeSession.getState().initProject();window.__codenodeProject.getState().loadRoot(${JSON.stringify(project)})`);
     await wait(`!!document.querySelector('.global-settings-trigger')`);
     await js(`document.querySelector('.global-settings-trigger').click()`);
-    await wait(`[...document.querySelectorAll('.settings-layout nav button')].some(b=>b.textContent==='项目设置')`);
-    await js(`[...document.querySelectorAll('.settings-layout nav button')].find(b=>b.textContent==='项目设置').click()`);
+    await wait(`[...document.querySelectorAll('.settings-layout nav button')].some(b=>b.textContent==='项目与工具')`);
+    await js(`[...document.querySelectorAll('.settings-layout nav button')].find(b=>b.textContent==='项目与工具').click()`);
     await wait(`document.querySelector('.project-integration-row button')?.textContent==='接入 Trellis'`);
     assert.equal(await js(`!!document.querySelector('.activity-bar [aria-label="任务"]')`),false);
     await js(`document.querySelector('.project-integration-row button').click()`);
