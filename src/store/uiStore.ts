@@ -20,7 +20,7 @@ function savedTheme(): Theme {
   } catch { return DEFAULT_THEME; }
 }
 
-const initialPreferences = loadUiPreferences();
+const initialPreferences = { ...loadUiPreferences(), workbenchView: 'conversation' as const, conversationOpen: true };
 
 interface UiState {
   appPage: 'workbench' | 'plugins' | 'tasks';

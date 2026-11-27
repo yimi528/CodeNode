@@ -46,10 +46,10 @@ app.whenReady().then(async () => {
     ipcMain.handle('agent:chat', async (_event, payload) => { firstSendCalls++; assert.equal(payload.prompt, '你好'); return await new Promise(resolve => { completeFirstSend = () => resolve({ok:true,reply:'你好，我能为你做什么？',reasoning:'',tools:[]}); }); });
   }
   try {
-    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && !!document.querySelector(".toolbar") && window.__codenodeUi.getState().booted').catch(() => false), '启动工作台首页');
+    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".canvas-wrap") && !!document.querySelector(".pp-input") && window.__codenodeUi.getState().booted').catch(() => false), '启动工作台首页');
     win.hide();
     assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), null);
-    assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".project-navigation") && !!document.querySelector(".toolbar") && !document.querySelector(".canvas-wrap")'));
+    assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".project-navigation") && document.querySelector(\'.workbench-view-switch [aria-current="page"]\')?.textContent === "画布" && !document.querySelector(".conversation-right").hidden'));
     const modelFixtures = require("../../electron/modelStore.cjs").seedModels({apiKey:'synthetic-ui-key'});
     fs.mkdirSync(app.getPath('userData'),{recursive:true});
     fs.writeFileSync(path.join(app.getPath('userData'),'models.json'),JSON.stringify({models:modelFixtures,activeId:modelFixtures[0].id}));
@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
     const alternateFile = path.join(alternateRoot, 'alternate.cnode');
     fs.writeFileSync(alternateFile, cnode.encodeCnode({graph:{nodes:[],edges:[]},canvases:{sessions:[{id:'alternate-session',label:'另一项目聊天',status:'active',createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}}],messages:[]}}));
     await win.webContents.executeJavaScript('localStorage.setItem("codenode.recentProjects", '+JSON.stringify(JSON.stringify([{root:alternateRoot,file:alternateFile,name:'alternate-project',openedAt:Date.now()}]))+')');
-    await win.webContents.executeJavaScript('document.querySelectorAll(".workspace-home-actions button")[1].click()');
+    await win.webContents.executeJavaScript('[...document.querySelectorAll(".project-actions button")].find(button=>button.textContent==="新建项目").click()');
     await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".app") && !!window.__codenodeProject.getState().root'), '新建后进入工作台');
     assert.equal(fs.existsSync(projectFile), true);
     assert.equal(cnode.decodeCnode(fs.readFileSync(projectFile)).ok, true);
@@ -189,8 +189,8 @@ app.whenReady().then(async () => {
       const remaining=await js(`window.__codenodeSession.getState().order`);
       assert.ok(!remaining.includes(archivedIds[0])&&!remaining.includes(archivedIds[1]));assert.ok(remaining.includes(archivedIds[2])&&remaining.includes(activeId));
       for(const theme of ['light','dark']){await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`);await sleep(350);assert.ok(await js(`document.querySelector('.archive-bulk-toolbar')!==null`));}
-      await js(`window.__codenodeUi.getState().closeSettings()`);win.webContents.reload();await sleep(350);await js(`Array.from(document.querySelectorAll('.project-row-menu button')).find(button => button.closest('.project-group').dataset.projectPath === ${JSON.stringify(projectFile)} && button.textContent === '打开项目').click()`);
-      await waitFor(async()=>await js(`!!document.querySelector('.activity-bar')`),'批量删除后重开项目');
+      await js(`window.__codenodeUi.getState().closeSettings()`);win.webContents.reload();
+      await waitFor(async()=>await js(`window.__codenodeUi?.getState().booted && window.__codenodeProject?.getState().projectFile === ${JSON.stringify(projectFile)}`).catch(()=>false),'恢复已保存的归档项目');
       const saved=cnode.decodeCnode(fs.readFileSync(projectFile));assert.ok(!saved.canvases.sessions.some(session=>archivedIds.slice(0,2).includes(session.id)));assert.ok(saved.canvases.sessions.some(session=>session.id===archivedIds[2]));
       console.log('BATCH ARCHIVE UI: PASS (select/all/partial, count confirmation, cancel, all-or-nothing guard, failure rollback, preserve unselected/active, reload persistence, both themes)');
     }
@@ -765,7 +765,7 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript(`(${projectGroup(alternateFile)}).querySelector('.project-session-row button').click()`);
       await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().projectFile === '+JSON.stringify(alternateFile)+' && window.__codenodeSession.getState().activeId==="alternate-session"'), '进入其他项目对话');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
-      await win.webContents.executeJavaScript(`[...(${projectGroup(projectFile)}).querySelectorAll('.project-row-menu button')].find(button=>button.textContent==='打开项目').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript(`window.__codenodeUi.getState().booted && window.__codenodeProject.getState().projectFile === ${JSON.stringify(projectFile)}`), '恢复上次打开的工程');
       await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().root === '+JSON.stringify(root)+' && window.__codenodeProject.getState().projectFile === '+JSON.stringify(projectFile)), '返回原项目');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
       await win.webContents.executeJavaScript('(() => { const button=document.querySelector(".project-group-name"); if (button.getAttribute("aria-expanded") === "true") button.click(); })()');
@@ -823,7 +823,7 @@ app.whenReady().then(async () => {
       assert.notEqual(await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId'), originalSession);
       win.webContents.reload();
       await waitFor(async () => await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name").length > 1').catch(()=>false), '重启后的最近工程');
-      await win.webContents.executeJavaScript(`[...(${projectGroup(projectFile)}).querySelectorAll('.project-row-menu button')].find(button=>button.textContent==='打开项目').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript(`window.__codenodeUi.getState().booted && window.__codenodeProject.getState().projectFile === ${JSON.stringify(projectFile)}`), '恢复上次打开的工程');
       await waitFor(async () => await win.webContents.executeJavaScript(`!!document.querySelector('.pp-input') && window.__codenodeSession?.getState().sessions['${originalSession}']?.archived === true`).catch(()=>false), '重启后保留归档');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'project order must survive reload and reopening');
       await win.webContents.executeJavaScript('document.querySelector(".project-nav-archive").click()');
@@ -1011,8 +1011,8 @@ app.whenReady().then(async () => {
 
     fs.writeFileSync(invalidFile, 'invalid cnode file');
     await win.webContents.executeJavaScript('window.__codenodeProject.setState({root:null,projectFile:null})');
-    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && window.__codenodeUi.getState().booted'), '返回启动工作台首页');
-    await win.webContents.executeJavaScript('document.querySelectorAll(".workspace-home-actions button")[2].click()');
+    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".canvas-wrap") && window.__codenodeUi.getState().booted'), '返回启动工作台首页');
+    await win.webContents.executeJavaScript('[...document.querySelectorAll(".project-actions button")].find(button=>button.textContent==="打开工程文件").click()');
     await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".status-toast")?.textContent.includes("打开工程文件失败")'), '损坏文件错误提示');
     const error = await win.webContents.executeJavaScript('document.querySelector(".status-toast:not(:empty)").textContent');
     assert.match(error, /打开工程文件失败/);

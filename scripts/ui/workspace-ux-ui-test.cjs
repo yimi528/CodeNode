@@ -18,7 +18,8 @@ app.whenReady().then(async()=>{
   await win.loadFile(path.join(appRoot,'dist/index.html'));await wait(()=>js('!!window.__codenodeProject'),'stores');
   await js('window.__codenodeUi.getState().updatePreferences({autoSaveEnabled:false})');await js(`window.__codenodeProject.getState().loadRoot(${JSON.stringify(project)})`);
   await js('window.__codenodeSession.getState().newCanvas()');await js(`window.__codenodeSession.getState().pushUser('帮我完善这个画布的节点编辑体验。')`);await js(`(()=>{const input=document.querySelector('.pp-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'我还想检查一下撤销操作。');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);await wait(()=>js('!!document.querySelector(".canvas-add-trigger")'),'toolbar');
-  await js('document.querySelector(".canvas-add-trigger").click()'); await sleep(80); await js('document.querySelector(".add-menu-item[data-node-type=vector]").click()');win.showInactive();win.webContents.focus();await sleep(450);
+  await js('document.querySelector(".canvas-add-trigger").click()'); await sleep(80); await js('document.querySelector(".add-menu-item[data-node-type=vector]").click()');win.showInactive();win.webContents.focus();
+  await wait(()=>js("!document.querySelector('.startup-splash')"), 'startup animation finished');
   const id=await js('window.__codenodeStore.getState().selectedId');assert(id);
   const node=`.react-flow__node[data-id="${id}"]`;
   // Start with no outer selection, then enter its editing body using real pointer events.
@@ -54,22 +55,21 @@ app.whenReady().then(async()=>{
   const chatBefore=await js(`({session:window.__codenodeSession.getState().activeId,draft:document.querySelector('.pp-input').value,messages:window.__codenodeSession.getState().messages.length,side:window.__codenodeUi.getState().sideTab})`);
   const output=process.env.CODENODE_WORKSPACE_UX_SHOTS||path.resolve(__dirname,'../../out/workspace-ux');fs.mkdirSync(output,{recursive:true});
   await js("document.querySelector('[aria-label=\"切换到总览\"]').click()");
-  assert.equal(await js("document.querySelector('.overview-editor-mask').hidden"),true,'empty overview has no visible form');assert.equal(await js("!!document.querySelector('.overview-metrics')"),false,'no empty statistical cards');
+  assert.equal(await js("document.querySelector('.with-goal-graph').hidden"),true,'empty overview has no visible form');assert.equal(await js("!!document.querySelector('.overview-metrics')"),false,'no empty statistical cards');
   for(const theme of ['light','dark']){win.showInactive();win.focus();await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`);await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');await sleep(350);fs.writeFileSync(path.join(output,'empty-'+theme+'.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());}
-  await js("document.querySelector('.overview-create').click()");assert.equal(await js("document.querySelector('.overview-editor-mask').hidden"),false);assert.equal(await js("document.querySelector('.goal-create-advanced').open"),false,'optional fields collapsed');
+  await js("document.querySelector('.overview-create').click()");assert.equal(await js("!document.querySelector('.overview-create-panel')"),false);assert.equal(await js("document.querySelector('.goal-create-advanced').open"),false,'optional fields collapsed');
   await js(`(()=>{const set=(label,value)=>{const e=document.querySelector('[aria-label="'+label+'"]');Object.getOwnPropertyDescriptor(e.tagName==='INPUT'?HTMLInputElement.prototype:HTMLTextAreaElement.prototype,'value').set.call(e,value);e.dispatchEvent(new Event('input',{bubbles:true}));};set('Goal 标题','完善画布编辑体验');set('Goal 目标','让节点编辑、删除和撤销操作清晰可靠。');set('验收条件',${JSON.stringify('节点删除与撤销通过\n对话内容不被管理表单挤占')});})()`);
-  await js("document.querySelector('[aria-label=\"关闭目标编辑\"]').click();document.querySelector('.overview-create').click()");assert.equal(await js("document.querySelector('[aria-label=\"Goal 标题\"]').value"),'完善画布编辑体验','cancel/reopen retains new goal draft');
-  await js("document.querySelector('.goal-create-submit').click()");
-  // 5c236ea（turn plans and Goals into editable task graphs）起，创建成功**不再关闭**窗口，
-  // 而是把编辑器切到新 Goal 的详情，便于接着预览任务图、加任务。这条期望写于它之前的
-  // f82946f，之后没跟着更新，属于过期断言；这里改成断言当前契约：
-  // 创建表单消失 + 编辑器进入「目标详情」+ 选中的就是刚建的 Goal + 目标列表里出现该条目。
-  await wait(()=>js("!document.querySelector('.goal-create-form')&&!!document.querySelector('.overview-goal-editor[aria-label=\"目标详情\"]')&&document.querySelector('.overview-goal-list button')"),'created Goal opens its detail');
-  assert.equal(await js("document.querySelector('.overview-goal-editor header h2').textContent"),'完善画布编辑体验','created Goal is selected in the editor');
+  await js(`document.querySelector('[aria-label="切换到画布"]').click()`);
+  await js(`document.querySelector('[aria-label="切换到总览"]').click()`);
+  assert.equal(await js(`document.querySelector('[aria-label="Goal 标题"]').value`), '完善画布编辑体验', 'switching views preserves the draft');
+  await js("document.querySelector('.overview-create-panel .goal-create-submit').click()");
+  await wait(()=>js("!document.querySelector('.overview-create-panel') && !!document.querySelector('.overview-goal-card')"), 'created goal appears in the board');
+  await js("document.querySelector('.overview-goal-card').click()");
+  assert.equal(await js("document.querySelector('.with-goal-graph .overview-goal-name').value"), '完善画布编辑体验');
   const goalList=await js(`window.codenode.goalList(${JSON.stringify(project)})`);const goal={ok:true,value:goalList.value.goals[0]};assert.equal(goal.value.title,'完善画布编辑体验');assert.equal(goal.value.criteria.length,2,'criteria are separate rows');
   const task=await js(`window.codenode.goalTaskCreate(${JSON.stringify(project)},${JSON.stringify(goal.value.id)},{title:'修正节点删除交互',objective:'区分删除节点与删除内部图形。'})`);assert.equal(task.ok,true);
   await js(`window.codenode.goalTaskUpdate(${JSON.stringify(project)},${JSON.stringify(goal.value.id)},${JSON.stringify(task.value.id)},{status:'blocked'})`);
-  await js("document.querySelector('[aria-label=\"切换到总览\"]').click()");await js("document.querySelector('.overview-refresh').click()");await wait(()=>js("document.querySelector('.overview-attention').textContent.includes('1')"),'attention badge');
+  await js("document.querySelector('[aria-label=\"切换到总览\"]').click()");await js("document.querySelector('.overview-refresh').click()");await wait(()=>js("document.querySelector('.overview-attention')?.textContent.includes('1')"),'attention badge');
   await wait(()=>js("!document.querySelector('.workspace-overview-layer').hidden"),'drawer');
   await js(`document.querySelectorAll('.goal-management-section').forEach(d=>d.open=true)`);
   await js(`document.querySelector('.overview-goal-list button').click()`);

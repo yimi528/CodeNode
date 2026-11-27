@@ -57,9 +57,8 @@ app.whenReady().then(async () => {
     await wait(`!!document.querySelector('.project-row-menu [data-action="save"]')`,'project save action');
     await js(`document.querySelector('.project-row-menu [data-action="save"]').click()`);
     await wait(`localStorage.getItem('codenode.lastProjectFile')===${JSON.stringify(path.join(project,'legacy.cnode'))}`,'project saved');
-    win.webContents.reload();await wait(`!!document.querySelector('.workspace-home')`,'reload workspace home');
-    await wait(`!!document.querySelector('.project-group-name')`,'saved recent project');
-    await js(`document.querySelector('.project-group-name').click()`);
+    win.webContents.reload();
+    await wait(`window.__codenodeUi.getState().booted && window.__codenodeProject.getState().projectFile === ${JSON.stringify(path.join(project,'legacy.cnode'))}`,'restore recent project');
     await wait(`!!document.querySelector('.workbench-view-switch')`,'reload workbench');
     assert.deepEqual(await js(`(()=>{const p=window.__codenodeUi.getState().preferences;return[p.advancedMode,p.vectorEditorEnabled]})()`),[true,false]);
     assert.equal(await js(`typeof window.__codenodeVectorNode`),'undefined');

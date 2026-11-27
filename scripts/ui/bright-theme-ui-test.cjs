@@ -97,7 +97,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(Object.keys(packagedThemes), ['light', 'dark']);
     assert.deepEqual(Object.keys(packagedThemes.light).sort(), Object.keys(packagedThemes.dark).sort());
 
-    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".app") && window.__codenodeUi?.getState().booted').catch(() => false), '启动页');
+    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".canvas-wrap") && window.__codenodeUi.getState().booted').catch(() => false), '启动页');
     const js = (code) => win.webContents.executeJavaScript(code);
     win.setBounds({ x: 200, y: 110, width: 900, height: 620 });
 
@@ -144,7 +144,7 @@ app.whenReady().then(async () => {
     const checkerboard = 'data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><body style="margin:0;width:100vw;height:100vh;background-image:repeating-linear-gradient(45deg,#000 0 8px,#fff 8px 16px)"></body>');
     backdrop = new BrowserWindow({ ...win.getBounds(), show: false, frame: false, focusable: false, skipTaskbar: true, backgroundColor: '#000000' });
     await backdrop.loadURL(checkerboard);
-    backdrop.setAlwaysOnTop(true, 'screen-saver');
+    backdrop.setAlwaysOnTop(true, 'floating');
     backdrop.showInactive();
     await sleep(500);
 
@@ -175,7 +175,6 @@ app.whenReady().then(async () => {
     const opaqueOf = async (theme) => {
       await js(`window.__codenodeUi.getState().setTheme(${JSON.stringify(theme)})`);
       await sleep(250);
-      backdrop.showInactive();
       win.setAlwaysOnTop(true, 'screen-saver');
       win.showInactive();
       win.moveTop();

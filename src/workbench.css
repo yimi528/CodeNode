@@ -118,8 +118,8 @@
 .glass-theme.ui-clean .pp-input::placeholder { color: var(--glass-muted); }
 .glass-theme.ui-clean .pp-send { background: var(--glass-selected); color: var(--glass-text); border: 1px solid var(--glass-border); box-shadow: inset 0 1px 0 var(--glass-edge); }
 .glass-theme.ui-clean .pp-send:disabled { background: var(--glass-control); color: var(--glass-faint); box-shadow: none; }
-.glass-theme :is(.mm-mask,.tool-dialog-mask) { background: var(--glass-scrim); backdrop-filter: blur(7px); }
-.glass-theme :is(.mm-dialog,.tool-dialog,.dock-recovery-plan,.dock-extension-card,.ap-plan,.ap-resume-review,.dock-recovery-review) { background: var(--glass-sheet); color: var(--glass-text); border-color: var(--glass-border); backdrop-filter: blur(30px) saturate(145%); box-shadow: inset 0 1px 0 var(--glass-edge),var(--glass-shadow); }
+.glass-theme .mm-mask { background: var(--glass-scrim); backdrop-filter: blur(7px); }
+.glass-theme :is(.mm-dialog,.tool-dialog,.dock-recovery-plan,.dock-extension-card,.ap-resume-review,.dock-recovery-review) { background: var(--glass-sheet); color: var(--glass-text); border-color: var(--glass-border); backdrop-filter: blur(30px) saturate(145%); box-shadow: inset 0 1px 0 var(--glass-edge),var(--glass-shadow); }
 .glass-theme :is(.mm-head,.mm-foot,.dock-tabs,.dock-file-head,.dock-run-toolbar,.dock-terminal-head,.dock-problems,.dock-editor-tabs) { background: var(--glass-control); color: var(--glass-text); border-color: var(--glass-border); }
 .glass-theme :is(.mm-choice,.mm-provider-row button,.mm-input,.mm-btn,.dock-search input,.dock-terminal-input input,.tool-dialog-input,.tool-dialog-opt,.inspector-field input,.inspector-field textarea,.inspector-field select,.pm-search input) { background: var(--glass-control); color: var(--glass-text); border-color: var(--glass-border); }
 .glass-theme :is(.mm-choice[aria-selected="true"],.mm-btn.primary,.tool-dialog-btn.allow) { background: var(--glass-selected); color: var(--glass-accent); border-color: var(--glass-border); }
@@ -136,8 +136,8 @@
 .glass-theme .dock-code-editor { color: var(--glass-text); caret-color: var(--glass-text); }
 .glass-theme .dock-code-highlight { color: var(--glass-text); }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { .glass-theme { --glass-surface: var(--glass-base); --glass-sheet: var(--glass-base); } .glass-theme :is(.toolbar,.side-panel,.workbench-dock,.mm-dialog,.tool-dialog,.wf-node,.pp-composer) { backdrop-filter: none; } }
-.glass-theme :is(.tool-dialog-detail,.tool-dialog-level,.tool-dialog-options,.tool-dialog-free,.tool-dialog-btn,.dock-run-item pre,.dock-replay-main,.dock-replay-kind,.dock-replay-ts) { color: var(--glass-text); border-color: var(--glass-border); }
-.glass-theme :is(.dock-run-item,.dock-checkpoint,.dock-tool-row,.tool-dialog-options,.pm-preview-head) { background: var(--glass-control); border-color: var(--glass-border); }
+.glass-theme :is(.tool-dialog-detail,.tool-dialog-options,.tool-dialog-btn,.dock-run-item pre,.dock-replay-main,.dock-replay-kind,.dock-replay-ts) { color: var(--glass-text); border-color: var(--glass-border); }
+.glass-theme :is(.dock-run-item,.dock-checkpoint,.dock-tool-row,.pm-preview-head) { background: var(--glass-control); border-color: var(--glass-border); }
 @media (max-width: 480px) { .glass-theme.ui-clean .toolbar { gap: 2px; padding-inline: 7px; } .glass-theme.ui-clean .toolbar-theme { width: 28px; padding-inline: 3px; } .glass-theme.ui-clean .toolbar button,.glass-theme.ui-clean .toolbar summary { padding-inline: 5px; } }
 
 /* Independent project navigation and conversation column. */
@@ -483,7 +483,7 @@
 .conversation-right :is(.cs-msg-compaction-hint, .cs-msg-compaction-detail > summary, .cs-msg-text a) {
   color: var(--glass-muted);
 }
-.conversation-right :is(.cs-msg-compaction, .ap-plan, .ap-resume-review) { filter: grayscale(1); }
+.conversation-right :is(.cs-msg-compaction, .ap-resume-review) { filter: grayscale(1); }
 .conversation-right :is(.rag-grounding, .cs-msg-image) {
   color: var(--glass-text);
   background: var(--glass-control);
@@ -827,8 +827,8 @@
 }
 .glass-theme.ui-clean .activity-bar button[aria-current="page"],
 .glass-theme.ui-clean .activity-bar button[aria-current="page"]:hover {
-  background: #c9dfed;
-  color: #1e3543;
+  background: #fff;
+  color: #222;
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
 }
 .activity-bar button[aria-expanded="true"] .rail-panel-arrow {
@@ -956,13 +956,8 @@
 /* Separate workbench overview and conversation pages; mounted views retain drafts. */
 .workspace-content[hidden],.workspace-overview-layer[hidden] { display:none !important; }
 .workspace-content.is-replay-covered { opacity: 0; pointer-events: none; }
-.overview-attention-overflow{display:flex;justify-content:flex-end;padding-top:4px}.overview-attention-overflow button{border:0;background:transparent;color:var(--glass-muted);font-size:11px;padding:8px 2px;cursor:pointer}.overview-attention-overflow button:hover{color:var(--glass-text)}.overview-attention-overflow button:focus-visible{outline:2px solid var(--glass-border);outline-offset:2px;border-radius:4px}
-.overview-editor-mask{position:fixed;inset:0;z-index:960;background:var(--glass-surface);backdrop-filter:blur(5px);display:flex;justify-content:center;align-items:flex-start;padding:72px 16px 20px}.overview-editor-mask[hidden]{display:none!important}.overview-goal-editor{width:min(580px,100%);max-height:calc(100vh - 92px);display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--glass-border);border-radius:12px;background:var(--glass-sheet);color:var(--glass-text);box-shadow:var(--glass-shadow);backdrop-filter:blur(22px)}.overview-goal-editor>header{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:18px 22px;border-bottom:1px solid var(--glass-border)}.overview-goal-editor h2{font-size:16px;margin:0 0 5px}.overview-goal-editor header span{font-size:11px;color:var(--glass-muted)}.overview-goal-editor header button{border:0;background:transparent;color:var(--glass-muted);font-size:22px;padding:0 4px}.overview-editor-scroll{min-height:0;overflow:auto;padding:18px 22px}.overview-goal-editor .goal-control-panel{margin:0;padding:0;border:0;background:transparent}.overview-goal-editor .goal-control-body{max-height:none;overflow:visible;padding:0}.goal-toolbar[hidden]{display:none!important}
-.overview-goal-editor.with-goal-graph { width:min(900px,100%); }
-.ap-plan-canvas-action { margin:8px 0 0; padding:5px 9px; border:1px solid var(--glass-border); border-radius:6px; background:var(--glass-control); color:var(--glass-text); font:inherit; cursor:pointer; }
-.ap-plan-canvas-action:disabled { opacity:.58; cursor:default; }
+.goal-toolbar[hidden] { display: none !important; }
 .goal-create-form label{display:grid;gap:8px;font-size:12px;margin-bottom:12px}.goal-create-advanced{font-size:12px;color:var(--glass-muted)}.goal-create-advanced[open]{display:grid;gap:8px}.goal-create-advanced summary{cursor:pointer;margin-bottom:12px}.goal-create-form .goal-create-submit{background:var(--glass-selected);padding:10px;font-size:12px}
-@media(max-width:650px){.overview-editor-mask{padding-top:20px}.overview-goal-editor{max-height:calc(100vh - 40px)}}
 
 .files-workspace .pm-search input { background: transparent; }
 .pm-tree button.pm-row { width: 100%; border: 1px solid transparent; background-color: transparent; font-family: inherit; font-size: inherit; text-align: start; }

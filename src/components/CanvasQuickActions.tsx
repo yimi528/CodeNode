@@ -1,4 +1,5 @@
 import { useUiStore } from '../store/uiStore';
+import { useProjectStore } from '../store/projectStore';
 import { CanvasIconButton } from './CanvasIcons';
 
 export default function CanvasQuickActions({ hand, setHand }: { hand: boolean; setHand: (active: boolean) => void }) {
@@ -10,6 +11,10 @@ export default function CanvasQuickActions({ hand, setHand }: { hand: boolean; s
       aria-controls={addMenuOpen ? 'canvas-add-menu' : undefined} title={showShortcuts ? '添加节点 · Shift + A' : '添加节点'}
       onClick={event => {
         const ui = useUiStore.getState();
+        if (!useProjectStore.getState().root) {
+          ui.setToast('请先打开或新建项目');
+          return;
+        }
         if (ui.addMenu) {
           ui.closeAddMenu();
           return;

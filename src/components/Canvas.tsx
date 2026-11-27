@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   useReactFlow,
@@ -6,12 +6,16 @@ import {
   type NodeChange,
   type EdgeChange,
   type Connection,
+  type Dimensions,
   type Node,
   type Edge,
 } from '@xyflow/react';
 import { useGraphStore } from '../store/graphStore';
+import { useProjectStore } from '../store/projectStore';
 import { useUiStore } from '../store/uiStore';
 import { useSessionStore } from '../store/sessionStore';
+import { projectPlanOnCanvas } from '../lib/planCanvas';
+import { useCanvasPlan } from '../lib/useCanvasPlan';
 import { readMaterial } from '../lib/materialFile';
 import { newNodeId } from '../lib/nodePlacement';
 import { nodeTypes } from '../nodes';
@@ -144,6 +148,11 @@ export default function Canvas() {
   const panning = spacePressed || hand;
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
+  const { plan, sourceId } = useCanvasPlan();
+  const [planMeasurements, setPlanMeasurements] = useState<{ sourceId: string | null; sizes: Record<string, Dimensions> }>();
+  const planSizes = planMeasurements?.sourceId === sourceId ? planMeasurements?.sizes : undefined;
+  const planCanvas = useMemo(() => projectPlanOnCanvas(plan, sourceId, nodes, edges, planSizes), [plan, sourceId, nodes, edges, planSizes]);
+  const hasPlanNodes = planCanvas.previewIds.size > 0;
   const onNodesChange = useGraphStore((s) => s.onNodesChange);
   const onEdgesChange = useGraphStore((s) => s.onEdgesChange);
   const onConnect = useGraphStore((s) => s.onConnect);
@@ -191,7 +200,7 @@ export default function Canvas() {
     const refit = () => {
       if (timer != null) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        if (useGraphStore.getState().nodes.length > 0) {
+        if (useGraphStore.getState().nodes.length > 0 || hasPlanNodes) {
           fitView({ padding: 0.2, duration: 220 });
         }
       }, 180);
@@ -202,7 +211,7 @@ export default function Canvas() {
       observer.disconnect();
       if (timer != null) window.clearTimeout(timer);
     };
-  }, [fitView, sideOpen, sideWidth, dockOpen]);
+  }, [fitView, sideOpen, sideWidth, dockOpen, hasPlanNodes]);
 
   // Agent 进度扫描：沿画布连线逐条推进高亮
   useEffect(() => {
@@ -213,9 +222,9 @@ export default function Canvas() {
   }, [progress?.index, progress?.running]);
 
   const hiddenIds = collectHiddenIds(nodes);
-  const visibleNodes = nodes.filter((n) => !hiddenIds.has(n.id));
-  const visibleEdges = edges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target));
-  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const visibleNodes = planCanvas.nodes.filter((n) => !hiddenIds.has(n.id));
+  const visibleEdges = planCanvas.edges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target));
+  const byId = new Map(planCanvas.nodes.map((n) => [n.id, n]));
   const visibleNodeIds = new Set(visibleNodes.map((n) => n.id));
   const renderableEdges = links ? visibleEdges.filter((edge) => {
     const endpointIds = visualEdgeNodeIds(edge, byId, visibleEdges);
@@ -280,6 +289,10 @@ export default function Canvas() {
         const files = Array.from(event.dataTransfer.files);
         if (!files.length || event.defaultPrevented) return;
         event.preventDefault();
+        if (!useProjectStore.getState().root) {
+          useUiStore.getState().setToast('请先打开或新建项目');
+          return;
+        }
         const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
         const sessions = useSessionStore.getState();
         if (!sessions.current()) sessions.newCanvas();
@@ -353,7 +366,19 @@ export default function Canvas() {
         edges={displayEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange as (changes: NodeChange[]) => void}
+        onNodesChange={(changes: NodeChange[]) => {
+          const graphChanges = [];
+          const previewSizes: Record<string, Dimensions> = {};
+          for (const change of changes) {
+            if (!('id' in change) || !planCanvas.previewIds.has(change.id)) graphChanges.push(change);
+            else if (change.type === 'dimensions' && change.dimensions) previewSizes[change.id] = change.dimensions;
+          }
+          if (graphChanges.length) onNodesChange(graphChanges);
+          if (Object.keys(previewSizes).length) setPlanMeasurements((current) => ({
+            sourceId,
+            sizes: { ...(current?.sourceId === sourceId ? current?.sizes : {}), ...previewSizes },
+          }));
+        }}
         onEdgesChange={onEdgesChange as (changes: EdgeChange[]) => void}
         onConnect={onConnect as (conn: Connection) => void}
         panOnDrag={panning ? true : [1]}
@@ -455,7 +480,7 @@ export default function Canvas() {
         // 而且它会与「写回 selected 标志」形成 [] → [x] → [] 的往复更新环。
         // 选中改由 onNodeClick / onPaneClick（事件期，非渲染期）同步。
         onNodeClick={(e, node: Node) => {
-          if (panning) return;
+          if (panning || planCanvas.previewIds.has(node.id)) return;
           const target=e.target as HTMLElement;
           // Inner editing has its own selection and key handler; Ctrl-click must not deselect its owner.
           if(target.closest?.('.vs-scope'))return;
@@ -477,7 +502,7 @@ export default function Canvas() {
           }
         }}
         onNodeDoubleClick={(event, node) => {
-          if (panning) return;
+          if (panning || planCanvas.previewIds.has(node.id)) return;
           const ui = useUiStore.getState();
           if (event.altKey || event.shiftKey || event.ctrlKey || event.metaKey || !isWorkflowStage(node.type)) return;
           useGraphStore.getState().setSelectedIds([node.id]);
@@ -499,7 +524,7 @@ export default function Canvas() {
         }}
       >
       </ReactFlow>
-      <CanvasActions minimap={minimap} links={links} snap={snap}
+      <CanvasActions minimap={minimap} links={links} snap={snap} hasPlanNodes={hasPlanNodes}
         toggleMinimap={() => setMinimap(active => !active)}
         toggleLinks={() => setLinks(active => !active)}
         toggleSnap={() => setSnap(active => !active)} />

@@ -1,225 +1,181 @@
-/**
- * plan-ui-test.cjs —— 在**真实渲染进程**里验收「任务清单卡片」
- *
- * 为什么必须有这一层：主进程侧的用例（scripts/core/agent-plan-test.cjs 的 E 段）只能证明
- * 「kind:'plan' 增量发出去了」，证明不了：
- *   ① 卡片真的渲染出来了（DOM 存在、样式生效、位置在对话面板顶部）；
- *   ② 状态色阶/进度条/完成态这些**视觉语义**真的按计划走（不是只在 state 里存着）；
- *   ③ 没有计划时不留空壳（返回 null），未知状态不会渲染成空白步骤。
- */
 'use strict';
 
 const { app, BrowserWindow } = require('electron');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codenode-plan-ui-'));
+function installRequestFixture() {
+  const { contextBridge } = require('electron');
+  let listener;
+  const responses = [];
+  contextBridge.exposeInMainWorld('toolFixture', {
+    emit: (request) => listener(request),
+    responses: () => responses,
+  });
+  contextBridge.exposeInMainWorld('codenode', {
+    onToolRequest: (handle) => { listener = handle; return () => { listener = undefined; }; },
+    respondToolRequest: (id, result) => responses.push({ id, result }),
+    agentReadPlan: async () => ({ ok: false }),
+    agentConfig: async () => ({ configured: false }),
+  });
+}
+
+async function exercise(root, window) {
+  const { document, KeyboardEvent, HTMLInputElement } = window;
+  const check = (condition, reason) => { if (!condition) throw new Error(reason); };
+  const waitFor = async (read, reason) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const result = read();
+      if (result) return result;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    throw new Error(reason);
+  };
+  const session = window.__codenodeSession;
+  const ui = window.__codenodeUi;
+  const graph = window.__codenodeStore;
+  const select = (selector) => document.querySelector(selector);
+  const preview = () => [...document.querySelectorAll('.canvas-wrap .wf-agent-plan')];
+  const statuses = () => preview().map((node) => node.querySelector('.wf-plan-status').dataset.status);
+  const active = () => select('.wf-agent-plan.is-working');
+  const emitPlan = (items, sessionId) => session.getState().streamDelta({ kind: 'plan', runId: 'run-ui', items, sessionId });
+
+  await window.__codenodeProject.getState().loadRoot(root, null, []);
+  ui.getState().updatePreferences({ workbenchView: 'conversation', conversationOpen: true });
+  session.getState().startOnCurrent('');
+  const firstId = session.getState().activeId;
+  await waitFor(() => select('.canvas-wrap') && select('.pp-composer') && !select('.startup-splash'), 'workbench did not render');
+  check(!preview().length && !select('.ap-plan'), 'empty plan should not reserve space');
+
+  const read = { id: 'read', step: '检查现有实现', acceptanceCriteria: '核对文件和已有流程', status: 'completed' };
+  const update = { id: 'update', step: '落地第一批改动', acceptanceCriteria: '保留现有工作流程', status: 'in_progress', dependsOn: ['read'] };
+  const verify = { id: 'verify', step: '验证交互', acceptanceCriteria: '相关检查通过', status: 'pending', dependsOn: ['update'] };
+  session.getState().beginTurn();
+  emitPlan([read, update, verify]);
+  await waitFor(() => preview().length === 3 && select('.react-flow__edge'), 'plan did not generate connected canvas nodes');
+  check(!select('.conversation-right .ap-plan'), 'plan should not occupy the conversation');
+  check(graph.getState().nodes.length === 0 && graph.getState().edges.length === 0, 'plan display changed the executable graph');
+  check(statuses().join() === 'completed,in_progress,pending', 'plan status labels are out of sync');
+  check(active()?.textContent.includes(update.step), 'current step is not highlighted');
+  check(window.getComputedStyle(active(), '::after').animationName === 'agent-plan-glow', 'current step has no breathing animation');
+  check(preview().filter((node) => window.getComputedStyle(node, '::after').animationName === 'agent-plan-glow').length === 1, 'only the active step should animate');
+  check(document.querySelectorAll('.react-flow__edge').length === 2, 'only declared dependencies should produce edges');
+  const ids = preview().map((node) => node.closest('.react-flow__node').dataset.id);
+
+  const ask = { id: 'ask', type: 'ask', question: '下一步先验证哪部分？', options: ['先验证画布', '先验证对话'] };
+  const confirm = { id: 'confirm', type: 'confirm', what: '写入项目文件\n'.repeat(50), detail: '将修改项目内容', level: 'HIGH', rememberActions: ['file.write'] };
+  window.toolFixture.emit(ask);
+  window.toolFixture.emit(confirm);
+  const card = await waitFor(() => select('.tool-dialog-slot .tool-dialog'), 'request not mounted above composer');
+  const rect = card.getBoundingClientRect();
+  const composer = select('.pp-composer').getBoundingClientRect();
+  check(rect.bottom <= composer.top && composer.top - rect.bottom <= 20 && Math.abs(rect.right - composer.right) < 2,
+    'request card does not align with the composer: ' + JSON.stringify({ rect, composer }));
+  check(!card.hasAttribute('aria-modal') && !select('.tool-dialog-mask'), 'request obscures the workbench');
+  check(card.contains(document.activeElement), 'request is not keyboard accessible when shown');
+  const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+  card.querySelector('.tool-dialog-btn.allow').dispatchEvent(tab);
+  check(!tab.defaultPrevented, 'Tab should be able to leave the request');
+  card.querySelector('.tool-dialog-opt').click();
+  await waitFor(() => select('.tool-dialog .lv-high'), 'queued confirmation did not open');
+  check(select('.tool-dialog-content').scrollHeight > select('.tool-dialog-content').clientHeight, 'long confirmation must scroll separately');
+  const allow = select('.tool-dialog-btn.allow');
+  check(allow.getBoundingClientRect().bottom <= select('.tool-dialog').getBoundingClientRect().bottom, 'actions should remain visible with long commands');
+  allow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await waitFor(() => !select('.tool-dialog'), 'Escape did not dismiss the confirmation');
+  check(JSON.stringify(window.toolFixture.responses()) === JSON.stringify([{ id: 'ask', result: { answer: '先验证画布' } }, { id: 'confirm', result: { ok: false } }]), 'ask or confirmation response changed');
+
+  ui.getState().toggleConversation();
+  window.toolFixture.emit({ id: 'free', type: 'ask', question: '请输入补充说明', options: [] });
+  await waitFor(() => select('.tool-dialog-floating .tool-dialog-input'), 'request is inaccessible when conversation is hidden');
+  const input = select('.tool-dialog-input');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '  继续验证  ');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !select('.tool-dialog-btn.allow').disabled, 'free answer did not update');
+  ui.getState().toggleConversation();
+  const inlineInput = await waitFor(() => select('.tool-dialog-slot .tool-dialog-input'), 'request did not move with restored conversation');
+  check(inlineInput.value === '  继续验证  ', 'moving a request discarded its draft');
+  inlineInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  check(window.toolFixture.responses().at(-1)?.result.answer === '继续验证', 'free answer was not sent');
+
+  emitPlan([read, { ...update, status: 'completed' }, { ...verify, status: 'in_progress' }]);
+  await waitFor(() => active()?.textContent.includes(verify.step), 'breathing effect did not move to the next step');
+  check(preview().map((node) => node.closest('.react-flow__node').dataset.id).join() === ids.join(), 'plan updates regenerated node IDs');
+  session.getState().stopTurn();
+  await waitFor(() => !active(), 'interrupted work is still animating');
+  check(select('.wf-plan-status[data-status="in_progress"]').textContent.includes('已暂停'), 'interrupted task appears to be running');
+
+  session.getState().beginWorkSession('第二个会话');
+  await waitFor(() => preview().length === 0, 'old plan leaked into new conversation');
+  emitPlan([{ ...verify, status: 'blocked', reason: '缺少输入' }], firstId);
+  check(!preview().length, 'background plan replaced the selected conversation');
+  session.getState().switchSession(firstId);
+  await waitFor(() => statuses().join() === 'blocked', 'switching back did not restore plan');
+  check(select('.wf-plan-status').textContent.includes('缺少输入'), 'blocked reason was lost');
+
+  graph.getState().addNode({
+    id: 'legacy-plan', type: 'task', position: { x: 65, y: 110 },
+    data: { label: verify.step, prompt: verify.step, planSourceId: firstId + ':run-ui', status: 'pending' },
+  });
+  await waitFor(() => select('[data-id="legacy-plan"] .wf-agent-plan'), 'previously imported nodes did not pick up plan status');
+  check(preview().length === 1, 'previously imported step was duplicated');
+  const styledTask = select('[data-id="legacy-plan"] .wf-node');
+  check(styledTask.querySelector('.wf-node-kind').textContent === '◆' &&
+    window.getComputedStyle(styledTask).borderLeftColor === 'rgb(59, 130, 246)', 'task node did not pick up the reference shape and accent');
+  check(!!styledTask.querySelector('textarea.wf-node-prompt'), 'reference styling removed the editable task prompt');
+  emitPlan([{ ...verify, status: 'completed' }]);
+  await waitFor(() => statuses().join() === 'completed', 'completed status not displayed');
+
+  graph.getState().clear();
+  session.getState().beginTurn();
+  const longStep = {
+    ...update,
+    step: '提出改进方案，覆盖页面路由、二维交互、地图状态和问答流程',
+    acceptanceCriteria: '逐项核对关键交互，并记录可复现的验证结果。'.repeat(4),
+  };
+  const parallel = { ...verify, id: 'parallel', step: '核对地图交互', dependsOn: ['read'] };
+  emitPlan([read, longStep, parallel]);
+  window.toolFixture.emit({ ...ask, id: 'snapshot' });
+  await waitFor(() => active() && select('.tool-dialog-slot .tool-dialog'), 'final state did not render');
+  await waitFor(() => {
+    const source = active()?.querySelector('.wf-plan-summary');
+    const next = preview().find((node) => node.textContent.includes(parallel.step));
+    return source?.offsetHeight > 48 && next?.getBoundingClientRect().top > active()?.getBoundingClientRect().bottom;
+  }, 'long plan text did not wrap, or neighboring cards overlap');
+}
 
 app.whenReady().then(async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codenode-plan-ui-'));
+  const preload = path.join(root, 'plan-ui-preload.cjs');
+  fs.writeFileSync(preload, '(' + installRequestFixture.toString() + ')()');
   const win = new BrowserWindow({
-    width: 1200,
-    height: 760,
-    show: false,
-    webPreferences: { sandbox: true },
+    width: 1200, height: 760, show: false,
+    webPreferences: { sandbox: true, preload, backgroundThrottling: false, offscreen: !!process.env.CODENODE_PLAN_UI_SCREENSHOT },
   });
   try {
-    await win.loadFile(path.join(__dirname, "../../dist/index.html"));
-    await sleep(600);
-    const result = await win.webContents.executeJavaScript(`(async () => {
-      let step = 'start';
-      try {
-        const session = window.__codenodeSession;
-        const project = window.__codenodeProject;
-        const ui = window.__codenodeUi;
-        if (!session || !project) return { error: 'stores unavailable' };
-        const waitFor = async (fn, ms) => {
-          const deadline = Date.now() + (ms || 3000);
-          while (Date.now() < deadline) {
-            const v = fn();
-            if (v) return v;
-            await new Promise((r) => setTimeout(r, 50));
-          }
-          return null;
-        };
-
-        step = 'loadRoot';
-        await project.getState().loadRoot(${JSON.stringify(projectRoot)});
-        await waitFor(() => document.querySelector('.side-panel'), 5000);
-        if (ui) {
-          ui.getState().setSideOpen(true);
-          ui.getState().setSideTab('agent');
-        }
-
-        const out = {};
-
-        // ① 没有计划：不留空壳
-        step = 'empty';
-        session.getState().reset();
-        session.getState().startOnCurrent('');
-        out.emptyCard = document.querySelectorAll('.ap-plan').length;
-
-        // ② 走真实的增量分支（主进程发的就是这一条）
-        step = 'planDelta';
-        session.getState().streamDelta({
-          kind: 'plan',
-          runId: 'run-ui-1',
-          updatedAt: new Date().toISOString(),
-          items: [
-            { id: 'read', step: '读 a.txt 并统计行数', acceptanceCriteria: '读取内容已核实', status: 'completed' },
-            { id: 'write', step: '写 b.txt 的结论', acceptanceCriteria: '文件内容符合目标', status: 'in_progress' },
-            { id: 'verify', step: '跑一次 npm run verify', acceptanceCriteria: '命令成功且无失败用例', status: 'pending', dependsOn: ['write'], ownerTaskId: 'verify-task-1' },
-          ],
-        });
-        const card = await waitFor(() => document.querySelector('.ap-plan'), 3000);
-        out.hasCard = !!card;
-        out.items = card ? card.querySelectorAll('.ap-plan-item').length : 0;
-        out.countText = card ? (card.querySelector('.ap-plan-count') || {}).textContent : '';
-        out.states = card ? Array.from(card.querySelectorAll('.ap-plan-item')).map((li) => li.className) : [];
-        out.statusTexts = card ? Array.from(card.querySelectorAll('.ap-plan-status')).map((s) => s.textContent) : [];
-        out.dependencies = card ? Array.from(card.querySelectorAll('.ap-plan-dependencies')).map((s) => s.textContent) : [];
-        out.owners = card ? Array.from(card.querySelectorAll('.ap-plan-owner')).map((s) => s.textContent) : [];
-        out.barWidth = card && card.querySelector('.ap-plan-progress-bar') ? card.querySelector('.ap-plan-progress-bar').style.width : '';
-        out.inAgentPane = !!document.querySelector('.sp-pane-agent .ap-plan');
-        out.beforeBody = !!(card && card.nextElementSibling && card.nextElementSibling.classList.contains('ap-body'));
-        const style = card ? getComputedStyle(card) : null;
-        out.hasBorder = style ? style.borderTopWidth !== '0px' && style.borderTopStyle === 'solid' : false;
-        out.radius = style ? style.borderTopLeftRadius : '';
-        out.ariaLabel = card ? card.getAttribute('aria-label') : null;
-        out.completedLineThrough = (() => {
-          const done = card && card.querySelector('.ap-plan-item.st-completed .ap-plan-step');
-          return done ? getComputedStyle(done).textDecorationLine : '';
-        })();
-
-        // ③ 全部完成 → is-done 态（进度条变成完成色）
-        step = 'allDone';
-        session.getState().streamDelta({
-          kind: 'plan',
-          runId: 'run-ui-1',
-          updatedAt: new Date().toISOString(),
-          items: [
-            { step: '读 a.txt 并统计行数', status: 'completed' },
-            { step: '写 b.txt 的结论', status: 'completed' },
-          ],
-        });
-        const done = await waitFor(() => document.querySelector('.ap-plan.is-done'), 3000);
-        out.doneClass = !!done;
-        out.doneBarColor = done && done.querySelector('.ap-plan-progress-bar') ? getComputedStyle(done.querySelector('.ap-plan-progress-bar')).backgroundColor : '';
-        // 注意：改完 store 要**等一次渲染**再读 DOM —— React 提交是异步的，
-        // 同步读会读到上一版（第一次跑就是这样，三个断言全栽在时序上）
-        session.getState().streamDelta({ kind: 'plan', runId: 'run-ui-1', updatedAt: new Date().toISOString(), items: [{ step: '未开始的一步', status: 'pending' }] });
-        await waitFor(() => document.querySelector('.ap-plan') && !document.querySelector('.ap-plan.is-done'), 3000);
-        out.pendingBarColor = (() => {
-          const c = document.querySelector('.ap-plan');
-          return c && c.querySelector('.ap-plan-progress-bar') ? getComputedStyle(c.querySelector('.ap-plan-progress-bar')).backgroundColor : '';
-        })();
-        out.pendingIsDone = !!document.querySelector('.ap-plan.is-done');
-
-        // ④ 未知状态归一成 pending（不渲染空白步骤）；上游字段脏了也不炸
-        step = 'dirty';
-        session.getState().streamDelta({
-          kind: 'plan',
-          runId: 'run-ui-1',
-          updatedAt: new Date().toISOString(),
-          items: [{ step: '诡异状态', status: '乱写' }, null, { status: 'completed' }],
-        });
-        await waitFor(() => document.querySelectorAll('.ap-plan-item').length === 3, 3000);
-        const dirty = document.querySelector('.ap-plan');
-        out.dirtyStates = dirty ? Array.from(dirty.querySelectorAll('.ap-plan-item')).map((li) => li.className) : [];
-        out.dirtySteps = dirty ? Array.from(dirty.querySelectorAll('.ap-plan-step')).map((s) => s.textContent) : [];
-        out.storeStatuses = session.getState().plan.map((i) => i.status);
-
-        step = 'stalledStatuses';
-        session.getState().streamDelta({
-          kind: 'plan', runId: 'run-ui-1', updatedAt: new Date().toISOString(),
-          items: [
-            { id: 'blocked', step: '等待接口权限', acceptanceCriteria: '接口调用成功', status: 'blocked', reason: '缺少测试凭据' },
-            { id: 'cancelled', step: '已取消的优化', acceptanceCriteria: '不再执行', status: 'cancelled', reason: '用户改了方向' },
-          ],
-        });
-        await waitFor(() => document.querySelectorAll('.ap-plan-item').length === 2, 3000);
-        const stalled = document.querySelector('.ap-plan');
-        out.stalledStatuses = stalled ? Array.from(stalled.querySelectorAll('.ap-plan-status')).map((s) => s.textContent) : [];
-        out.stalledReasons = stalled ? Array.from(stalled.querySelectorAll('.ap-plan-reason')).map((s) => s.textContent) : [];
-
-        // ⑤ 计划按画布会话隔离，非活动会话的增量不能覆盖当前卡片
-        step = 'sessionIsolation';
-        const firstSessionId = session.getState().activeId;
-        session.getState().beginWorkSession('第二个会话');
-        const secondSessionId = session.getState().activeId;
-        out.secondSessionInitiallyEmpty = session.getState().plan === null;
-        session.getState().streamDelta({
-          kind: 'plan', sessionId: firstSessionId, runId: 'run-ui-first', updatedAt: new Date().toISOString(),
-          items: [{ id: 'first', step: '第一个会话的任务', acceptanceCriteria: '结果已检查', status: 'pending' }],
-        });
-        out.inactivePlanHidden = session.getState().plan === null && !!session.getState().plansBySessionId[firstSessionId];
-        session.getState().switchSession(firstSessionId);
-        out.sessionPlanRestored = session.getState().plan?.[0]?.id === 'first';
-        session.getState().beginPlanRun(secondSessionId);
-        out.newRunClearsVisiblePlan = session.getState().plan === null;
-
-        // ⑥ reset 清空计划（不留上一轮的清单）
-        step = 'reset';
-        session.getState().reset();
-        await waitFor(() => document.querySelectorAll('.ap-plan').length === 0, 3000);
-        out.afterReset = document.querySelectorAll('.ap-plan').length;
-        out.storePlanAfterReset = session.getState().plan;
-
-        return out;
-      } catch (error) {
-        return { error: String((error && error.stack) || error), step };
-      }
-    })()`);
-
-    if (result && result.error) {
-      console.log('FAIL  [plan-ui] 渲染进程脚本异常（step=' + result.step + '）：' + result.error);
-      console.log('\nPLAN UI TEST: FAIL');
-      app.exit(1);
-      return;
+    const appRoot = process.env.CODENODE_PACKAGED_ASAR || path.resolve(__dirname, '../..');
+    await win.loadFile(path.join(appRoot, 'dist/index.html'));
+    await win.webContents.executeJavaScript('(' + exercise.toString() + ')(' + JSON.stringify(root) + ', window)');
+    const { debugger: devtools } = win.webContents;
+    devtools.attach('1.3');
+    await devtools.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    const animation = await win.webContents.executeJavaScript('window.getComputedStyle(document.querySelector(".wf-agent-plan.is-working"), "::after").animationName');
+    if (animation !== 'none') throw new Error('reduced motion should disable breathing animation');
+    if (process.env.CODENODE_PLAN_UI_SCREENSHOT) {
+      await devtools.sendCommand('Emulation.setEmulatedMedia', { features: [] });
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      fs.writeFileSync(process.env.CODENODE_PLAN_UI_SCREENSHOT, (await win.webContents.capturePage()).toPNG());
     }
-
-    let failures = 0;
-    const check = (label, ok, detail) => {
-      if (!ok) failures++;
-      console.log((ok ? 'PASS  ' : 'FAIL  ') + label + (detail ? ' :: ' + detail : ''));
-    };
-
-    check('[UI] 没有计划时不渲染卡片（不留空壳）', result.emptyCard === 0, String(result.emptyCard));
-    check('[UI] 计划增量 → 卡片渲染出 3 步', result.hasCard === true && result.items === 3, JSON.stringify({ has: result.hasCard, items: result.items }));
-    check('[UI] 头部显示完成进度与进行中项', String(result.countText).includes('1/3') && String(result.countText).includes('写 b.txt'), String(result.countText));
-    check('[UI] 三种状态各自带类名（色阶靠它）', result.states.join('|') === 'ap-plan-item st-completed|ap-plan-item st-in_progress|ap-plan-item st-pending', JSON.stringify(result.states));
-    check('[UI] 状态文案可读（已完成/进行中/待办）', result.statusTexts.join(',') === '已完成,进行中,待办', JSON.stringify(result.statusTexts));
-    check('[UI] 显示步骤依赖关系', result.dependencies.join(',') === '前置步骤：write', JSON.stringify(result.dependencies));
-    check('[UI] 显示负责该步骤的子代理任务', result.owners.join(',') === '子代理：verify-task-1', JSON.stringify(result.owners));
-    check('[UI] 进度条按 1/3 计算宽度（33%）', String(result.barWidth).startsWith('33'), String(result.barWidth));
-    check('[UI] 卡片在对话面板内、且在消息列表之上', result.inAgentPane === true && result.beforeBody === true, JSON.stringify({ inPane: result.inAgentPane, beforeBody: result.beforeBody }));
-    check('[UI] 样式真的生效（边框 + 圆角）', result.hasBorder === true && parseFloat(String(result.radius)) > 0, JSON.stringify({ hasBorder: result.hasBorder, radius: result.radius }));
-    check('[UI] 无障碍标注', result.ariaLabel === '任务清单', String(result.ariaLabel));
-    check('[UI] 已完成项划掉（视觉语义，不只是数据）', String(result.completedLineThrough).includes('line-through'), String(result.completedLineThrough));
-
-    check('[UI] 全部完成 → is-done 态', result.doneClass === true);
-    check('[UI] 未完成态的进度条不是完成色（换色阶，不是同一色）', result.pendingIsDone === false && result.doneBarColor && result.pendingBarColor && result.doneBarColor !== result.pendingBarColor, JSON.stringify({ done: result.doneBarColor, pending: result.pendingBarColor, pendingIsDone: result.pendingIsDone }));
-
-    check('[UI] 未知状态归一成 pending（不渲染空白步骤）', result.storeStatuses.join(',') === 'pending,pending,completed', JSON.stringify(result.storeStatuses));
-    check('[UI] 脏输入不炸：3 条都渲染出来（null/缺 step 也被容错）', result.dirtySteps.length === 3 && result.dirtyStates.join('|') === 'ap-plan-item st-pending|ap-plan-item st-pending|ap-plan-item st-completed', JSON.stringify(result.dirtySteps));
-    check('[UI] 受阻/取消状态和原因都清楚展示', result.stalledStatuses.join(',') === '受阻,已取消' && result.stalledReasons.length === 2, JSON.stringify({ statuses: result.stalledStatuses, reasons: result.stalledReasons }));
-
-    check('[UI] 新会话没有旧计划卡', result.secondSessionInitiallyEmpty === true);
-    check('[UI] 后台旧会话计划只更新归属会话，不覆盖当前卡片', result.inactivePlanHidden === true);
-    check('[UI] 切回画布会话能恢复它自己的计划', result.sessionPlanRestored === true);
-    check('[UI] 新 Run 开始时先清掉当前卡片的旧任务计划', result.newRunClearsVisiblePlan === true);
-
-    check('[UI] reset 后卡片消失、store 里的计划也清空', result.afterReset === 0 && result.afterReset === 0 && result.storePlanAfterReset === null, JSON.stringify({ afterReset: result.afterReset, plan: result.storePlanAfterReset }));
-
-    console.log('\n' + (failures === 0 ? 'PLAN UI TEST: PASS' : 'PLAN UI TEST: FAIL (' + failures + ')'));
-    try {
-      fs.rmSync(projectRoot, { recursive: true, force: true });
-    } catch {}
-    app.exit(failures === 0 ? 0 : 1);
+    console.log('PLAN UI TEST: PASS');
+    app.exit(0);
   } catch (error) {
-    console.error('PLAN UI TEST: FAIL');
-    console.error(error && error.stack ? error.stack : error);
+    console.error('PLAN UI TEST: FAIL', error);
     app.exit(1);
+  } finally {
+    win.destroy();
+    fs.unlinkSync(preload);
+    fs.rmdirSync(root);
   }
 });

@@ -85,8 +85,8 @@ app.whenReady().then(async () => {
     await pollJs('!!window.__codenodeChat', 30000, '重载后渲染层 bootstrap');
 
     // 从工作台侧栏打开示例工程。
-    const atHome = await js(`!!document.querySelector('.workspace-home')`);
-    if (atHome) {
+    await pollJs('window.__codenodeUi?.getState().booted', 15000, '初始化最近项目');
+    if (!await js('window.__codenodeProject.getState().root')) {
       await pollJs(`!!document.querySelector('.project-group-name')`, 15000, '最近列表渲染');
       const clicked = await js(`(()=>{
         const items = [...document.querySelectorAll('.project-group-name')];
@@ -121,7 +121,7 @@ app.whenReady().then(async () => {
         const msgs = (sess && sess.messages) || [];
         const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
         return {
-          gate: !!document.querySelector('.workspace-home'),
+          projectOpen: !!window.__codenodeProject.getState().root,
           workspace: !!document.querySelector('.canvas-wrap'),
           nodes: nodes.length,
           inView,
@@ -140,7 +140,7 @@ app.whenReady().then(async () => {
 
     const before = await readState();
     console.log('BEFORE ' + JSON.stringify(before));
-    if (before.gate) failures.push('示例工程尚未打开');
+    if (!before.projectOpen) failures.push('示例工程尚未打开');
     if (!(before.nodes > 0)) failures.push('画布没有节点');
 
     if (PROMPT) {

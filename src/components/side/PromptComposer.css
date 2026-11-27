@@ -1,7 +1,7 @@
 /* The chat occupies a separate reading surface alongside the canvas. */
 .conversation-right {
-  --chat-panel: #252628;
-  --chat-paper: #333537;
+  --chat-panel: #202020;
+  --chat-paper: #333;
   --chat-ink: #f0f0ed;
   --chat-detail: #b8bab8;
   --chat-hairline: rgba(255, 255, 255, .13);

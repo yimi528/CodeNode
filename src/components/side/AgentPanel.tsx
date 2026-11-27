@@ -20,7 +20,6 @@ import backendConfig from '../../../config/agent.backends.json';
 import {useBackendSwitchStore} from '../../store/backendSwitchStore';
 import { ALLOWED_IMAGE_MIME, MAX_ATTACHMENTS_PER_MESSAGE, TEXT_FILE_ACCEPT, fileToAttachment, fileToResourceAttachment, filesFromDataTransfer, fmtBytes, imagesFromDataTransfer, readAsDataUrl } from '../../lib/imageAttach';
 import { MessageViewMemo } from './MessageList';
-import { PlanCard } from '../PlanCard';
 import ResumePlanNotice from './ResumePlanNotice';
 import HoverPopover from './HoverPopover';
 import ModelPicker from './ModelPicker';
@@ -139,7 +138,7 @@ function UsageMeter() {
 /**
  * 对话面板底部的输入区。
  */
-function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
+function PromptComposer({ optionsHost, requestHostRef }: { optionsHost?: HTMLElement | null; requestHostRef?: React.Ref<HTMLDivElement> }) {
   const [acceptanceDraft,setAcceptanceDraft] = useState(emptyAcceptanceDraft);
   const [acceptanceError,setAcceptanceError] = useState('');
   const [text, setText] = useState('');
@@ -318,6 +317,10 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
     if (composing.current || projectChanging) return;
     const prompt = text.trim();
     if ((!prompt && !attachments.length) || busy) return;
+    if (!projectRoot) {
+      useUiStore.getState().setToast('请先选择对话项目');
+      return;
+    }
     let acceptance;
     try { acceptance=buildAcceptance(acceptanceDraft);setAcceptanceError(''); } catch(e) { const message = e instanceof Error ? e.message : String(e); setAcceptanceError(message); useUiStore.getState().setToast(message); return; }
     const toSend = attachments;
@@ -370,6 +373,7 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
           </div>
         </details>
       </div>
+      {requestHostRef && <div className="tool-dialog-slot" ref={requestHostRef} />}
       <div
         className={`pp-composer${dragOver ? ' is-dragover' : ''}`}
         onDragOver={(e) => {
@@ -508,9 +512,9 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
             <button
               className="pp-send"
               onClick={() => void send()}
-              disabled={(!text.trim() && !attachments.length) || busy || projectChanging}
+              disabled={!projectRoot || (!text.trim() && !attachments.length) || busy || projectChanging}
               aria-label="发送 Prompt"
-              title="发送 (Enter)"
+              title={projectRoot ? '发送 (Enter)' : '请先选择对话项目'}
             >
               <CanvasIcon name="send" />
             </button>
@@ -523,7 +527,7 @@ function PromptComposer({ optionsHost }: { optionsHost?: HTMLElement | null }) {
 }
 
 /** 主工作区对话：记录滚动，输入框固定在底部。 */
-export default function AgentPanel({ optionsHost }: { optionsHost?: HTMLElement | null } = {}) {
+export default function AgentPanel({ optionsHost, requestHostRef }: { optionsHost?: HTMLElement | null; requestHostRef?: React.Ref<HTMLDivElement> } = {}) {
   const messages = useSessionStore((s) => s.messages);
   const streaming = useSessionStore((s) => s.streaming);
   const streamingMessage = streaming ? messages.map((message) => message.role).lastIndexOf('assistant') : -1;
@@ -573,10 +577,7 @@ export default function AgentPanel({ optionsHost }: { optionsHost?: HTMLElement 
         </div>
       </div>
 
-      {/* 计划卡：任务清单来自主进程的 kind:'plan' 增量（update_plan 工具）。
-          没有计划时它自己返回 null —— 不占位、不留空壳。 */}
       {streaming && <div className="agent-run-status" role="status">正在回复…</div>}
-      <PlanCard />
 
 {/* #25(b)：流式正文 / 「思考中」 / 已停止 / 失败原因都发生在这里，必须是 live region，
           否则键盘/读屏用户完全得不到「正在生成 / 已中断」的播报。 */}
@@ -595,7 +596,7 @@ export default function AgentPanel({ optionsHost }: { optionsHost?: HTMLElement 
       </div>
 
       <ResumePlanNotice />
-      <PromptComposer optionsHost={optionsHost} />
+      <PromptComposer optionsHost={optionsHost} requestHostRef={requestHostRef} />
     </div>
   );
 }

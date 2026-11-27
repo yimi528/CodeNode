@@ -449,7 +449,7 @@ async function main() {
   await startBrowser();
   const targets = /** @type {any[]} */ (await fetch(`http://127.0.0.1:${PORT}/json`).then((r) => r.json()));
   // 必须挑「被测应用」那个 target：Edge 启动时可能先开自己的内部页（#app-root + 混淆类名 + Edge logo），
-  // 直接取第一个 page target 会连到它上面，表现是一直等不到应用自己的元素（.workspace-home / .toolbar）。
+  // 直接取第一个 page target 会连到它上面，表现是一直等不到应用自己的元素（.canvas-wrap / .toolbar）。
   const pages = targets.filter((t) => t.type === 'page');
   const page = pages.find((t) => String(t.url || '').startsWith(BASE)) || pages[0];
   if (!page) throw new Error('没有可用的 page target（Edge 未起来？）');
@@ -469,10 +469,10 @@ async function main() {
   try {
     /* ========== 0. 基础加载 ========== */
     /* 无项目时直接显示工作台首页，项目操作在首页可用。 */
-    await waitFor(cdp, `!!document.querySelector('.workspace-home')`, 9000, '工作台首页出现');
-    ok('无项目时显示工作台工具栏', await cdp.eval(`!!document.querySelector('.toolbar') && !document.querySelector('.react-flow')`));
-    const gateBtns = await cdp.eval(`[...document.querySelectorAll('.workspace-home-actions button')].map((b) => b.textContent)`);
-    ok(`首页提供打开和新建项目入口（${JSON.stringify(gateBtns)}）`, gateBtns.length >= 2 && gateBtns[0].includes('打开项目') && gateBtns[1].includes('新建项目'));
+    await waitFor(cdp, `!!document.querySelector('.canvas-wrap') && !!document.querySelector('.pp-input')`, 9000, '启动直接显示画布和对话');
+    ok('无项目时显示工作台工具栏', await cdp.eval(`!!document.querySelector('.toolbar') && !!document.querySelector('.react-flow')`));
+    const gateBtns = await cdp.eval(`[...document.querySelectorAll('.project-actions button')].map((b) => b.textContent)`);
+    ok(`首页提供打开和新建项目入口（${JSON.stringify(gateBtns)}）`, gateBtns.includes('打开项目') && gateBtns.includes('新建项目'));
     // 等价于「打开工程」：直接把工程根目录载入画布
     await cdp.eval(`window.__codenodeProject.getState().loadRoot('E:\\\\demo')`);
     await cdp.eval(`window.__codenodeUi.getState().updatePreferences({advancedMode:true,vectorEditorEnabled:true})`);

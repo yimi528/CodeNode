@@ -4,6 +4,10 @@
 
 CodeNode 桌面端：Electron 主进程（`electron/`）+ React 渲染层（`src/`）+ 一整套可执行的回归/门禁脚本（`scripts/`）。
 
+## 分支命名
+
+工作分支统一使用 `<性质>-YYYYMMDD-<内容>`。性质可用 `feat`（功能）、`fix`（修复）或 `docs`（文档），日期取建分支当天，内容用短横线连接的小写英文词描述。例如 `feat-20261127-merge-desktop-workbench` 表示本次桌面工作台集成。拉取请求的目标分支为 `main`。
+
 ## 环境
 
 | 项 | 要求 |

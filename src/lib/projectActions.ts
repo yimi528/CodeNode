@@ -344,21 +344,20 @@ export async function saveProject():Promise<boolean> {
   catch(error){useProjectSaveStore.setState({status:'error',error:String(error)});useUiStore.getState().setToast('保存失败：'+String(error));return false;}
 }
 
-/**
- * 启动时初始化最近工程列表。
- *
- * 工作台直接显示；这里只加载最近工程供侧栏选择，并结束启动初始化。
- */
-export async function restoreLastProject(): Promise<void> {
-  try {
-    if (!window.codenode) return;
-    // 兼容旧版本：把单条"上次打开"迁移进最近列表（只做迁移，不自动打开）
-    await loadRecentProjects();
-  } catch (e) {
-    console.error('[CodeNode] 读取最近工程失败:', e);
-  } finally {
-    useUiStore.getState().setBooted(true);
-  }
+let startupRestore: Promise<void> | undefined;
+
+export function restoreLastProject(): Promise<void> {
+  return startupRestore ??= (async () => {
+    try {
+      if (!window.codenode) return;
+      const [recent] = await loadRecentProjects();
+      if (recent && !useProjectStore.getState().root) await openRecentProject(recent);
+    } catch (error) {
+      console.error('[CodeNode] 恢复最近工程失败:', error);
+    } finally {
+      useUiStore.getState().setBooted(true);
+    }
+  })();
 }
 
 /**

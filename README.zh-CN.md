@@ -1,110 +1,38 @@
 # CodeNode
 
-**把本地代码工程、Agent 对话和可视化工作流放在同一个桌面窗口。**
-
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-[文档导航](docs/README.md)
+CodeNode 是一款在本地代码仓库中使用编程智能体的桌面工作台。你可以在对话里提问，查看智能体读取了哪些文件、调用了哪些工具，再把后续任务放到画布上安排。`.cnode` 工程文件保存工作区，源码仍在原来的目录中。
 
-[![CI](https://github.com/yimi528/CodeNode/actions/workflows/ci.yml/badge.svg)](https://github.com/yimi528/CodeNode/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+![项目画布旁的智能体对话面板](docs/screenshots/agent-chat.png)
 
-![CodeNode Agent 对话与画布](docs/screenshots/agent-chat.png)
+## 从源码启动
 
-CodeNode 是一个基于 Electron 和 React 的本地开发工作台。Agent 在桌面主进程中读取、检索和修改你打开的工程，画布负责组织任务、依赖和可以事后核对的运行记录。工程保存在单个 `.cnode` 文件里，源代码仍留在原目录。
+在有桌面环境的电脑上安装 Node.js 22.12 或更高版本，然后运行以下命令。
 
-**项目状态：** 1.0 之前的活跃开发版本，目前为单人维护。运行时依赖刻意保持很少——React、Zustand 和 `@xyflow/react`。
-
-## 为什么是 CodeNode
-
-多数 Agent 项目追求能力上限。CodeNode 还要求一次运行必须能挺过崩溃、取消或错误改动，并且不谎报结果：
-
-- **可续跑的运行** —— 每次工具调用都落检查点，写入以规范参数的内容哈希为幂等键、作用域钉在原 Run 上：续跑跳过已提交的操作，并拒绝盲目重放结果未知的操作。→ [运行安全与恢复](docs/run-recovery.zh-CN.md)
-- **可核对的委派** —— 子 Agent 的回答先是候选结果，声明的产物在进入下游前会与磁盘重新比对哈希。→ [多 Agent 协作](docs/multi-agent.zh-CN.md)
-- **会失败的目标** —— 验收证据带文件指纹、提交和环境，条件一变即失效。→ [画布、工作流与目标](docs/canvas-and-goals.zh-CN.md)
-- **可替换的后端** —— 自研 Agent 与外部 Agent 共用同一份 ACP v1 契约。→ [Agent 后端](docs/backends.zh-CN.md)
-
-## 快速开始
-
-需要 Node.js 22.12 或更新版本，以及可运行 Electron 的桌面环境（CI 用 `.nvmrc` 固定 22 系列）。
-
-```powershell
+```sh
 git clone https://github.com/yimi528/CodeNode.git
 cd CodeNode
 npm ci
 npm run dev
 ```
 
-`npm run dev` 会同时启动 Vite 和 Electron。已打包的 Windows 桌面版可直接运行 `release/win-unpacked/CodeNode.exe`；macOS 与 Linux 的打包目标已配置（`npm run dist:mac`、`npm run dist:linux`），但目前未作为发行版发布。
+命令会启动 Vite 并打开 Electron 窗口。在项目侧栏打开已有工程，或为现有源码目录新建工程。在对话面板选择模型并连接服务商。第一次可以试试：“找到应用入口，列出启动时会经过的文件。”
 
-### 第一次使用
+## 在项目中工作
 
-1. 选择**新建工程**、**打开工程**或**打开工程文件**——已有 `.cnode` 文件可以直接打开。
-2. 在 **Agent → 管理模型…**选择供应商，粘贴 API Key，点击**获取模型**，再点**连接并使用**。无需手填模型 ID、API 地址、上下文或价格。
-3. 先试只读任务，例如「找到项目入口文件，说明启动流程，并给出文件路径」。按 **Enter** 发送，**Shift+Enter** 换行。
-4. 需要修改时说明范围和验收条件，查看工具调用，按界面提示处理需要确认的操作。运行中可以插话或停止。
-5. 使用 **Ctrl+S** 保存工程；任务中断后，底部「运行」页会显示恢复计划。
-
-## 核心能力
-
-| 能力 | 说明 |
+| 你想做什么 | 从哪里开始 |
 | --- | --- |
-| 面向工程的 Agent | 读取、检索、编辑项目文件，执行获准的工具和命令，并展示调用过程。 |
-| 单 Agent ReAct 运行 | 以一次 Run 为边界处理模型响应、工具调用、审批、取消、失败和预算终止。 |
-| 可恢复的运行记录 | 保存事件、检查点和副作用账本；中断后区分可续跑步骤与需要复核的外部操作。 |
-| 可视化工作流 | 用 `start`、`task`、`stage`、`tool`、`scope` 等节点组织任务和依赖。 |
-| 多 Agent 分工 | 主 Agent 可委派探查、实现、验证和审查任务；结果经核对后才能传给下游。 |
-| [兼容 Trellis](docs/trellis-compatibility.md) | 加载已有任务的 PRD 与规范、恢复任务/运行关联，并在预览与冲突检查后写回状态、日志和规范。 |
-| 流式回复 | SSE 增量逐字呈现，可在常规设置中开关和调速。 |
-| 可选项目检索 | 本地词法与结构检索源码和文档；向量检索、重排与严格答案校验按场景显式启用。 |
-| 多模型接入 | 支持 OpenAI 兼容、Anthropic、Gemini、Azure 等端点及本地服务。 |
+| 理解或修改代码 | 对话支持 Markdown 表格和代码块。你可以在对话中审核工具请求，随后查看文件变更。 |
+| 把计划拆成任务 | 在工作流画布上排列节点、连接依赖。在目标总览中新建草稿、查看子任务，或处理需要你确认的事项。[画布与目标](docs/canvas-and-goals.zh-CN.md) |
+| 继续中断的任务 | 打开运行记录，检查断点。恢复视图会区分已经写入的内容和仍需确认的操作。[运行恢复](docs/run-recovery.zh-CN.md) |
+| 更换执行任务的智能体 | 使用内置后端，或通过 ACP 接入外部智能体。[后端配置](docs/backends.zh-CN.md) |
 
-## 架构
+## 参与开发
 
-一套 Agent 循环、一个 Run 边界、一条执行链：对话、画布和 Goal 自动推进都走它。检索保持本地且可选（BM25 + 可选向量），引用必须来自本轮实际读取的来源。
+`npm run build` 检查渲染进程的类型并构建界面，`npm run check:js` 检查 Electron 主进程和脚本。运行 `npm test` 执行核心回归，或用 `npm run test:list` 查找单项检查。
 
-![单 Agent ReAct 运行状态与恢复](docs/architecture/single-agent-react-state.png)
-
-![多 Agent 协作调度与结果确认](docs/architecture/multi-agent-collaboration.png)
-
-内部机制：[运行安全与恢复](docs/run-recovery.zh-CN.md) · [多 Agent 协作](docs/multi-agent.zh-CN.md) · [画布、工作流与目标](docs/canvas-and-goals.zh-CN.md)。
-
-## Agent 评测
-
-2026-11-01 使用 `agent-eval-v2` 完成离线回归：**14 个场景 × 3 轮，42 次试验全部通过**，观测到的 pass@1、pass@3、pass^3 均为 100%。场景覆盖编辑与测试执行、检索引用、工具边界、取消、恢复、预算及工作流变更。
-
-模型回复和工具选择由脚本预设，工具、文件、命令与 Run 事件真实执行。这些结果验证了已测场景下的框架行为，不能据此推断模型自主解题能力或与其他 Agent 的排名。本轮未进行真实模型评测。
-
-```bash
-npm run eval:agent:repeat -- --trials=3
-```
-
-每次运行保存逐轮轨迹、工作区终态与断言。详见[评测方法、结果与局限](docs/agent-evals-anthropic.zh-CN.md)，方法参考 [Anthropic Agent 评测教程](https://www.anthropic.com/research/demystifying-evals-for-ai-agents)。
-
-**2026-11-02 真实模型评测：**使用冻结源码副本与 `deepseek-chat`，11 个任务三轮共 **32/33 次通过现有断言（96.97%）**，其中 10/11 个任务三轮全过，整体门禁未通过。轨迹复核发现长文本题有统计答案错误却被判通过的情况，因此这些数字表示断言通过率，不代表通用答案正确率。详见[真实模型报告与评分局限](docs/eval-reports/deepseek-live-2026-11-02.md)。
-
-## 开发与验证
-
-```powershell
-npm run build       # TypeScript 检查、Vite 构建和图标检查
-npm run check:js    # Electron 主进程与脚本的 JS 类型检查
-npm test            # 核心回归测试（离线，无需显示环境）
-npm run verify      # build + check:js + 核心测试
-npm run dist:win    # Windows 打包；另有 dist:mac / dist:linux
-```
-
-| 位置 | 内容 |
-| --- | --- |
-| `src/` | React 界面、画布和状态管理 |
-| `electron/` | 主进程：Agent 循环、工具、沙箱、检查点、成本 |
-| `scripts/` | 回归与门禁脚本；`npm run test:list` 打印当前集合 |
-| `docs/` | 设计说明、架构图片和评测数据 |
-
-执行器：自研 CodeNode Agent，以及 Codex、DeepSeek Harness、Hermes、OpenCode、OpenClaw 和自定义 ACP Agent，统一走 ACP v1 stdio（[详见](docs/backends.zh-CN.md)）。
-
-测试理念、门禁清单与发布流程见[参与开发](CONTRIBUTING.zh-CN.md)。
+改动合入 `main`。工作分支按 `<性质>-YYYYMMDD-<内容>` 命名，例如 `feat-20261127-merge-desktop-workbench`。环境配置与验证流程见[贡献指南](CONTRIBUTING.zh-CN.md)，架构、评测与开发记录见[文档索引](docs/README.md)。
 
 ## 许可证
 

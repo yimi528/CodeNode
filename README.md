@@ -1,112 +1,38 @@
 # CodeNode
 
-**Your local codebase, an agent that can act on it, and a visual workflow canvas — in one desktop window.**
-
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-[Documentation index](docs/README.md)
+CodeNode is a desktop workbench for working with a coding agent in a local repository. Ask a question in chat, inspect the files and tool calls behind the answer, then use the canvas to organise follow-up tasks. A `.cnode` project saves the workspace alongside your source files.
 
-[![CI](https://github.com/yimi528/CodeNode/actions/workflows/ci.yml/badge.svg)](https://github.com/yimi528/CodeNode/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+![Agent conversation beside the project canvas](docs/screenshots/agent-chat.png)
 
-![CodeNode agent chat and workflow canvas](docs/screenshots/agent-chat.png)
+## Run from source
 
-CodeNode is a local development workbench built with Electron and React. The agent runs in the desktop main process and reads, searches and edits the project you open, while the canvas organises tasks, dependencies and runs you can audit afterwards. A project lives in a single `.cnode` file; your source code stays where it is.
+Install Node.js 22.12 or newer on a machine with a desktop environment, then run the following commands.
 
-**Status:** pre-1.0, actively developed by a single maintainer. Runtime dependencies are deliberately few — React, Zustand and `@xyflow/react`.
-
-## Why CodeNode
-
-Most agent projects optimise for capability. CodeNode also makes a run survive a crash, a cancelled request or a wrong edit without lying about the outcome:
-
-- **Durable runs** — every tool call is checkpointed, and a write is keyed by a content hash scoped to the original run, so resuming skips what already committed and refuses to blind-replay an unknown result. → [run safety and recovery](docs/run-recovery.md)
-- **Verifiable delegation** — a subagent's answer is a candidate, and declared artifacts are re-hashed against disk before anything flows downstream. → [multi-agent collaboration](docs/multi-agent.md)
-- **Goals that can fail** — acceptance evidence carries a file fingerprint, commit and environment, and expires when they change. → [canvas, workflows and goals](docs/canvas-and-goals.md)
-- **Swappable backends** — the built-in agent and external agents share one ACP v1 contract. → [agent backends](docs/backends.md)
-
-## Quick start
-
-Node.js 22.12 or newer, plus a desktop environment able to run Electron (CI pins the 22 line via `.nvmrc`).
-
-```powershell
+```sh
 git clone https://github.com/yimi528/CodeNode.git
 cd CodeNode
 npm ci
 npm run dev
 ```
 
-`npm run dev` starts Vite and Electron together. Local packages are written under `release/`; version tags trigger the fail-closed three-platform GitHub Release workflow documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+This starts Vite and the Electron window. Open a project from the project sidebar or create one for an existing source directory. In the conversation panel, select a model and connect its provider. For a first task, try “Find the application entry point and show me the files involved in startup.”
 
-### First run
+## Working in a project
 
-1. Choose **New project**, **Open project** or **Open project file** — an existing `.cnode` file opens directly.
-2. Under **Agent → Manage models…** pick a provider, paste an API key, click **Fetch models**, then **Connect and use**. No model ID, base URL, context size or price to type in.
-3. Start read-only: "Find the project entry point, explain the startup flow, and give me the file paths." **Enter** sends, **Shift+Enter** inserts a newline.
-4. To change code, state the scope and the acceptance conditions, watch the tool calls, and confirm what the UI asks about. You can interject or stop while a run is in progress.
-5. **Ctrl+S** saves the project; the **Run** tab at the bottom shows the recovery plan after an interruption.
-
-## Core capabilities
-
-| Capability | What it does |
+| When you want to… | Use |
 | --- | --- |
-| Project-aware agent | Reads, searches and edits project files, runs approved tools and commands, and shows the calls it makes. |
-| Single-agent ReAct run | Handles model responses, tool calls, approvals, cancellation, failures and budget stops inside an explicit run boundary. |
-| Resumable run records | Stores events, checkpoints and a side-effect ledger; after an interruption it separates steps that can continue from external operations that need review. |
-| Visual workflows | Organises tasks and dependencies with `start`, `task`, `stage`, `tool` and `scope` nodes. |
-| Multi-agent delegation | The main agent delegates exploration, implementation, verification and review; results are checked before they reach downstream tasks. |
-| [Trellis compatible](docs/trellis-compatibility.md) (Chinese) | Load an existing task's PRD and specs, restore task/run links, and write status, logs and specs back after preview and conflict checks. |
-| Streaming replies | SSE token-by-token rendering, configurable and speed-adjustable in General settings. |
-| Optional project retrieval | Local lexical and structural search over source and docs; vector retrieval, reranking and strict answer validation are enabled explicitly per scenario. |
-| Multiple model providers | OpenAI-compatible endpoints, Anthropic, Gemini, Azure and local servers. |
+| Understand or edit code | Chat renders Markdown, including tables and code blocks. Review tool requests in the conversation and inspect the resulting file changes. |
+| Turn a plan into tasks | Use the workflow canvas to arrange nodes and dependencies. Open the goal overview to create a draft, inspect a task or review work that needs your input. [Canvas and goals](docs/canvas-and-goals.md) |
+| Resume interrupted work | Inspect the run record and checkpoints before continuing. The recovery view distinguishes completed writes from actions that still need review. [Run recovery](docs/run-recovery.md) |
+| Change the agent running a task | Choose the built-in backend or connect an external agent through ACP. [Backends](docs/backends.md) |
 
-## Architecture
+## Development
 
-One agent loop, one run boundary, one execution chain: chat, the canvas and Goal auto-advance all go through it. Retrieval stays local and optional (BM25 plus optional vectors), and a citation must come from a source actually read in that turn.
+`npm run build` checks renderer types and builds the UI. `npm run check:js` checks the Electron process and scripts. Run `npm test` for the core regression suite or `npm run test:list` to find a specific check.
 
-![Single-agent ReAct run state and recovery](docs/architecture/single-agent-react-state.png)
-
-![Multi-agent delegation and result confirmation](docs/architecture/multi-agent-collaboration.png)
-
-Internals: [run safety and recovery](docs/run-recovery.md) · [multi-agent collaboration](docs/multi-agent.md) · [canvas, workflows and goals](docs/canvas-and-goals.md).
-
-## Agent evaluation
-
-The 2026-11-01 offline regression run used `agent-eval-v2`: **14 scenarios × 3 trials, all 42 trials passed**. Observed pass@1, pass@3 and pass^3 were 100%. Scenarios cover editing and test execution, retrieval citations, tool boundaries, cancellation, recovery, budgets and workflow changes.
-
-Model responses and tool choices were scripted; tools, files, commands and run events executed for real. These results verify the framework under the tested scenarios. They do not measure autonomous model performance or establish a ranking against other agents. No live-model evaluation was performed in this run.
-
-```bash
-npm run eval:agent:repeat -- --trials=3
-```
-
-Each run saves per-trial transcripts, workspace outcomes and assertions. See [methodology, results and limitations](docs/agent-evals-anthropic.zh-CN.md) (Chinese), following [Anthropic's agent evaluation guide](https://www.anthropic.com/research/demystifying-evals-for-ai-agents).
-
-**Live-model run, 2026-11-02:** a frozen CodeNode source snapshot with `deepseek-chat` passed **32/33 trials across 11 tasks** under the existing assertions (96.97%); 10/11 tasks passed all three trials. The overall gate failed. Review found a wrong frequency-counting answer that the long-text grader accepted, so these figures measure assertion pass rates, not general answer accuracy. See the [live report and grading limitations](docs/eval-reports/deepseek-live-2026-11-02.md) (Chinese).
-
-## Development and verification
-
-```powershell
-npm run build       # TypeScript check, Vite build and icon check
-npm run check:js    # JS type check for the Electron main process and scripts
-npm test            # core regression suite (offline, no display)
-npm run verify      # build + check:js + core tests
-npm run dist:win    # Windows packaging; dist:mac / dist:linux as well
-```
-
-| Location | Contents |
-| --- | --- |
-| `src/` | React UI, canvas and state management |
-| `electron/` | Main process: agent loop, tools, sandbox, checkpoints, costs |
-| `docs/development-log/` | 按完整日期记录 Bug 修复、更新内容与验证结果 |
-| `scripts/` | Regression and gate scripts; `npm run test:list` prints the set |
-| `docs/` | Design notes, architecture images and evaluation data |
-
-Executors: the built-in CodeNode agent, plus Codex, DeepSeek Harness, Hermes, OpenCode, OpenClaw and custom ACP agents — all over ACP v1 stdio ([details](docs/backends.md)).
-
-Test principles, the gate list and the release process are in [CONTRIBUTING.md](CONTRIBUTING.md).
-Open risks and their evidence-based completion criteria are tracked in [docs/known-issues.md](docs/known-issues.md).
+Changes land on `main`. Name working branches `<type>-YYYYMMDD-<topic>`, for example `feat-20261127-merge-desktop-workbench`. See the [contribution guide](CONTRIBUTING.md) for setup and verification, and the [documentation index](docs/README.md) for architecture, evaluations and development history.
 
 ## License
 

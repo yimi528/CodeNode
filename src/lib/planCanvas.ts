@@ -1,4 +1,4 @@
-import type { Node, Edge } from '@xyflow/react';
+import type { Dimensions, Node, Edge } from '@xyflow/react';
 import type { PlanItem } from '../store/sessionStore';
 import { useGraphStore } from '../store/graphStore';
 import { useSessionStore } from '../store/sessionStore';
@@ -28,8 +28,70 @@ export function addPlanToCanvas(steps:Step[],sourceId:string): number {
   return nodes.length;
 }
 
-export function planItemsToSteps(items:PlanItem[]):Step[] {
-  const included=items.filter(item=>item.status!=='cancelled');
-  const known=new Set(included.map(item=>item.id));
-  return included.map(item=>({key:item.id,title:item.step.slice(0,80),objective:item.step,acceptance:item.acceptanceCriteria||'完成本步骤并说明验证结果',dependsOn:(item.dependsOn||[]).filter(id=>known.has(id))}));
+/** Display the current Agent plan without changing the executable workflow document. */
+export function projectPlanOnCanvas(
+  items: PlanItem[] | null, sourceId: string | null, nodes: Node[], edges: Edge[],
+  previewSizes?: Record<string, Dimensions>,
+) {
+  if (!items?.length || !sourceId) return { nodes, edges, previewIds: new Set<string>() };
+
+  const byItem = new Map(items.map((item) => [item.id, item]));
+  const existing = nodes.filter((node) => node.data.planSourceId === sourceId);
+  const ids = new Map<string, string>();
+  const previews = new Map<string, PlanItem>();
+  const previewIds = new Set<string>();
+  const generated: Node[] = [];
+  const bottom = nodes.reduce((value, node) => Math.max(value,
+    node.position.y + (node.measured?.height || Number(node.data.height) || (node.type === 'vector' ? 640 : 140))), 40);
+  const nextY = new Map<number, number>();
+  const depths = new Map<string, number>();
+  const hasDependencies = items.some((item) => item.dependsOn?.length);
+  const depth = (id: string, visited = new Set<string>()): number => {
+    const cached = depths.get(id);
+    if (cached !== undefined) return cached;
+    if (visited.has(id)) return 0;
+    const deps = (byItem.get(id)?.dependsOn || []).filter((dep) => byItem.has(dep));
+    visited.add(id);
+    const value = deps.length ? 1 + Math.max(...deps.map((dep) => depth(dep, visited))) : 0;
+    visited.delete(id);
+    depths.set(id, value);
+    return value;
+  };
+
+  items.forEach((item, index) => {
+    const legacy = existing.find((node) => !previews.has(node.id) &&
+      (node.data.prompt === item.step || node.data.label === item.step.slice(0, 80)));
+    if (legacy) {
+      ids.set(item.id, legacy.id);
+      previews.set(legacy.id, item);
+      return;
+    }
+    const id = `agent-plan:${sourceId}:${item.id}`;
+    const column = hasDependencies ? depth(item.id) : index % 4;
+    const measured = previewSizes?.[id];
+    const y = nextY.get(column) ?? bottom + 60;
+    nextY.set(column, y + (measured?.height ?? 104) + 28);
+    ids.set(item.id, id);
+    previewIds.add(id);
+    generated.push({
+      id, type: 'task', position: { x: 60 + column * 245, y }, measured,
+      width: 210, initialHeight: 104, draggable: false, selectable: false, connectable: false, deletable: false, focusable: false,
+      data: { label: item.step || `步骤 ${index + 1}`, planPreview: item, planPreviewOnly: true },
+    });
+  });
+
+  const connections = new Set(edges.map((edge) => `${edge.source}\n${edge.target}`));
+  const planEdges = items.flatMap((item) => {
+    const target = ids.get(item.id)!;
+    return (item.dependsOn || []).flatMap((dep): Edge[] => {
+      const source = ids.get(dep);
+      if (!source || source === target || connections.has(`${source}\n${target}`)) return [];
+      return [{ id: `${source}->${target}`, source, target, type: 'waypoint', selectable: false, deletable: false, focusable: false, interactionWidth: 0 }];
+    });
+  });
+  return {
+    nodes: [...nodes.map((node) => previews.has(node.id) ? { ...node, data: { ...node.data, planPreview: previews.get(node.id) } } : node), ...generated],
+    edges: [...edges, ...planEdges],
+    previewIds,
+  };
 }

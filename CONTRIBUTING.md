@@ -4,6 +4,10 @@
 
 CodeNode desktop is an Electron main process (`electron/`), a React renderer (`src/`) and an executable suite of regression and gate scripts (`scripts/`).
 
+## Branch names
+
+Use `<type>-YYYYMMDD-<topic>` for working branches. Choose a type such as `feat`, `fix`, or `docs`, use the date the branch is created, and describe the change in lowercase words joined by hyphens. For example, `feat-20261127-merge-desktop-workbench` integrates the desktop workbench. Open pull requests against `main`.
+
 ## Environment
 
 | Item | Requirement |
