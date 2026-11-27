@@ -73,6 +73,14 @@ After an interruption, checkpoints and the side-effect ledger determine which st
 | November 1, 2026, scripted model responses with real tools and file operations | 14 scenarios run three times each, 42/42 passed | Exercises framework behavior including edits, recovery, cancellation and budgets. |
 | November 2, 2026, frozen source with live `deepseek-chat` | 11 tasks run three times each, 32/33 passed the assertions in use. The overall gate failed. | Review found that the grader accepted an incorrect word count. The pass count measures that grader’s decisions and cannot establish answer accuracy. |
 
+**A repair you can reproduce.** On November 27, 2026 we reran `edit-then-run-tests` on the merged version. The sample project’s addition function used subtraction. In each trial CodeNode read the implementation, edited only `pkg/math.cjs` and ran the existing tests. A separate grader compared the workspace before and after the edit, then reran assertions including `add(2, 3) === 5`. All three fresh workspaces passed with the test file intact. Model decisions in this case were scripted. [Task and grading criteria](scripts/eval/agent-eval-tasks.cjs)
+
+To reproduce this case, run the following command.
+
+```sh
+npm run eval:agent:repeat -- --mode=offline --task=edit-then-run-tests --trials=3
+```
+
 Run `npm run eval:agent:repeat -- --trials=3` to repeat the offline suite on your checkout and inspect the per-trial records and assertions. [Evaluation methods and historical results (Chinese)](docs/agent-evals-anthropic.zh-CN.md)
 
 ## Development
