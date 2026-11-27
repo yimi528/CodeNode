@@ -108,7 +108,10 @@ app.whenReady().then(async () => {
     await js(`window.__codenodeUi.getState().closeSettings()`);
     // A failed request flushes received text; history switches show full records.
     await js(`window.__codenodeSession.getState().beginTurn();window.__codenodeSession.getState().streamDelta({kind:'content',text:'已收到的部分'.repeat(50)});window.__codenodeSession.getState().failTurn('测试中断')`); await sleep(80);
-    assert.equal((await read()).shown, (await read()).raw); assert.match((await read()).shown, /测试中断/);
+    const failed = await read();
+    assert.ok(failed.shown.startsWith('已收到的部分'.repeat(50)));
+    assert.match(failed.raw, /> ⚠️ 本轮中断：测试中断/);
+    assert.equal(await js(`document.querySelector('.cs-msg-agent:last-child .cs-msg-text blockquote')?.textContent.trim()`), '⚠️ 本轮中断：测试中断');
     const paragraphs = Array.from({length:120}, (_,index) => '逐字滚动第 ' + index + ' 行').join('\n');
     await js(`window.__codenodeSession.getState().beginTurn();window.__codenodeSession.getState().streamDelta({kind:'content',text:${JSON.stringify(paragraphs)}})`);
     await wait(`(()=>{const body=document.querySelector('.ap-body');return body.scrollHeight>body.clientHeight+100;})()`, 'typing scroll growth');
@@ -122,6 +125,20 @@ app.whenReady().then(async () => {
     await js(`window.__codenodeSession.getState().newCanvas()`); await sleep(60);
     await js(`window.__codenodeSession.getState().switchSession(${JSON.stringify(sessionId)})`); await sleep(80);
     assert.equal((await read()).shown, (await read()).raw);
+    const markdown = [
+      '## 检查报告', '', '- **完成**', '', '| 项目 | 结果 |', '| --- | --- |', '| `build` | 通过 |',
+      '', '```text', 'command output', '```', '',
+      '[帮助](https://example.test/help) · [本地文件](file:///sample.txt)', '',
+      '<div data-raw-html="test">原始 HTML</div>',
+    ].join('\n');
+    await js(`window.__codenodeSession.getState().beginTurn();window.__codenodeSession.getState().streamDelta({kind:'content',text:${JSON.stringify(markdown)}});window.__codenodeSession.getState().stopTurn()`);
+    await wait(`!!document.querySelector('.cs-msg-agent:last-child .cs-msg-markdown .cs-markdown-table td')`, 'Markdown reply');
+    const renderedMarkdown = await js(`(()=>{const root=document.querySelector('.cs-msg-agent:last-child .cs-msg-markdown');return{
+      heading:root.querySelector('h2')?.textContent, strong:root.querySelector('li strong')?.textContent,
+      code:root.querySelector('pre code')?.textContent.trim(), links:[...root.querySelectorAll('a')].map(a=>a.href),
+      rawHtml:!!root.querySelector('[data-raw-html]')};})()`);
+    assert.deepEqual(renderedMarkdown, { heading:'检查报告',strong:'完成',code:'command output',links:['https://example.test/help'],rawHtml:false });
+    assert.equal((await read()).raw, markdown, 'rendering must preserve the source used for copying and history');
     // Native reduced-motion preference suppresses typing, even when enabled.
     win.webContents.debugger.attach('1.3');
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });

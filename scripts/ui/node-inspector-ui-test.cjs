@@ -23,13 +23,14 @@ app.whenReady().then(async () => {
     require(path.join(moduleRoot, 'electron/modelStore.cjs')).writeModels(userData,
       [{ id: 'inspector-model', model: 'fixture-model', label: 'Inspector test', apiBase: 'http://127.0.0.1:12345', apiKey: 'synthetic-ui-key' }], 'inspector-model');
     await win.loadFile(path.join(moduleRoot, 'dist/index.html'));
+    win.setPosition(-1900, -1900); win.showInactive();
     await win.webContents.executeJavaScript(`(async () => {
       for (let i = 0; !window.__codenodeProject && i < 120; i++) await new Promise(r => setTimeout(r, 50));
       window.__codenodeUi.getState().updatePreferences({advancedMode:true,vectorEditorEnabled:true});
       await window.__codenodeProject.getState().loadRoot(${JSON.stringify(root)});
       if (!window.__codenodeSession.getState().current()) window.__codenodeSession.getState().newCanvas();
-      for (let i = 0; !document.querySelector('.canvas-add-trigger') && i < 120; i++) await new Promise(r => setTimeout(r, 50));
-      if (!document.querySelector('.canvas-add-trigger')) throw Error('Lazy toolbar did not finish loading');
+      for (let i = 0; (!document.querySelector('.canvas-add-trigger') || document.querySelector('.startup-splash')) && i < 120; i++) await new Promise(r => setTimeout(r, 50));
+      if (!document.querySelector('.canvas-add-trigger') || document.querySelector('.startup-splash')) throw Error('Canvas did not finish starting');
     })()`);
     const reports = [];
     for (const theme of ['light', 'dark']) {
@@ -67,6 +68,15 @@ app.whenReady().then(async () => {
 
         const inlineEditor = document.querySelector('.react-flow__node.selected .wf-node-prompt');
         if (!inlineEditor || document.querySelector('.node-editor')) throw Error('任务节点应显示内联编辑器');
+        const previousHeight = inlineEditor.clientHeight;
+        const longPrompt = '逐项检查交互与验收条件，并记录验证结果。'.repeat(6);
+        inlineEditor.focus();
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(inlineEditor, longPrompt);
+        inlineEditor.dispatchEvent(new Event('input', { bubbles: true })); await sleep(70);
+        if (inlineEditor.clientHeight <= previousHeight || inlineEditor.scrollHeight > inlineEditor.clientHeight + 1 ||
+            graph.getState().nodes.find(n => n.id === graph.getState().selectedId).data.prompt !== longPrompt)
+          throw Error('内联指令编辑后应保存并随文案增高');
+        inlineEditor.blur();
         click('.node-actions [aria-label="展开输入框"]'); await sleep(50);
         const editor = document.querySelector('.node-editor textarea');
         const editorBox = editor.closest('section').getBoundingClientRect();

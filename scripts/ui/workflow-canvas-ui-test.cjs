@@ -21,6 +21,7 @@ app.whenReady().then(async () => {
       if (event.level === 'error') rendererErrors.push(event.message);
     });
     await win.loadFile(path.join(source, 'dist/index.html'));
+    win.setPosition(-1900, -1900); win.showInactive();
     const screenshotDir = process.env.CODENODE_CANVAS_SCREENSHOTS;
     win.webContents.debugger.attach('1.3');
     const setContrast = value => win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
@@ -39,39 +40,44 @@ app.whenReady().then(async () => {
       window.__codenodeUi.setState({sideOpen:false,sideTab:'agent'});
       window.__codenodeStore.getState().load([
         {id:'source',type:'start',position:{x:100,y:120},data:{label:'开始',status:'pending',accent:'#22c55e'}},
-        {id:'work',type:'task',position:{x:430,y:120},data:{label:'处理任务',status:'running',prompt:'检查并修复问题',accent:'#3b82f6'}},
+        {id:'work',type:'task',position:{x:430,y:120},data:{label:'审计现有实现并检查页面路由、地图交互和组件状态',status:'running',prompt:'检查页面路由与地图交互。'.repeat(5)+'\\nlong_identifier_without_spaces_0123456789_abcdefghijklmnopqrstuvwxyz',accent:'#3b82f6'}},
         {id:'finish',type:'end',position:{x:760,y:120},data:{label:'结束',status:'pending',accent:'#ef4444'}}
       ],[{id:'edge-a',source:'source',target:'work',type:'waypoint'},{id:'edge-b',source:'work',target:'finish',type:'waypoint'}]);
       await sleep(350);
+      for(let i=0;i<60&&document.querySelector('.startup-splash');i++)await sleep(50);
       const canvas=document.querySelector('.workflow-canvas-layer');
       const node=document.querySelector('.react-flow__node[data-id="work"]');
       return {hasCanvas:canvas instanceof HTMLCanvasElement,nodeOpacity:getComputedStyle(node).opacity};
     })()`);
-    assert.deepEqual(setup, { hasCanvas: true, nodeOpacity: '0' });
-    win.setPosition(-1900, -1900); win.showInactive();
+    assert.deepEqual(setup, { hasCanvas: true, nodeOpacity: '1' });
     await new Promise(resolve => setTimeout(resolve, 300));
     const before = await win.webContents.executeJavaScript(`(()=>{
       const canvas=document.querySelector('.workflow-canvas-layer'),node=document.querySelector('.react-flow__node[data-id="work"]');
-      const rect=node.getBoundingClientRect(),screen=canvas.getBoundingClientRect(),ratio=canvas.width/screen.width;
-      const pixelAt = (x, y) => [...canvas.getContext('2d').getImageData(
-        Math.floor((rect.left + rect.width * x - screen.left) * ratio),
-        Math.floor((rect.top + rect.height * y - screen.top) * ratio), 1, 1).data];
-      return {width:canvas.width,height:canvas.height,pixel:pixelAt(.5,.5),
-        highlight:pixelAt(.65,.12),base:pixelAt(.65,.69),
-        center:{x:rect.left+rect.width/2,y:rect.top+rect.height/2},position:window.__codenodeStore.getState().nodes.find(item=>item.id==='work').position};
+      const rect=node.getBoundingClientRect(),card=node.querySelector('.wf-workflow-card'),style=getComputedStyle(card);
+      const title=card.querySelector('.wf-node-label'),prompt=card.querySelector('.wf-node-prompt');
+      const titleRect=title.getBoundingClientRect();
+      const center={x:rect.left+rect.width/2,y:titleRect.top+8};
+      const hit=document.elementFromPoint(center.x,center.y);
+      return {width:canvas.width,height:canvas.height,background:style.backgroundColor,border:style.border,
+        radius:style.borderRadius,titleWrap:title.offsetHeight>20,
+        promptWrap:prompt.clientHeight>48&&prompt.scrollHeight<=prompt.clientHeight+1&&prompt.scrollWidth<=prompt.clientWidth+1,
+        nativeResize:getComputedStyle(prompt).resize,
+        center,hit:hit?.closest('.react-flow__node')?.dataset.id, hitClass:hit?.className,
+        blocked:!!node.closest('[inert]'),
+        position:window.__codenodeStore.getState().nodes.find(item=>item.id==='work').position};
     })()`);
     assert.ok(before.width > 500 && before.height > 300, JSON.stringify(before));
-    assert.ok(before.pixel[3] > 100 && before.pixel[3] < 255, 'Canvas card must remain translucent');
-    const brightnessDifference = before.highlight[0] - before.base[0];
-    assert.ok(brightnessDifference >= 7 && brightnessDifference <= 24, 'The graphite finish should have a restrained highlight');
-    for (const [r, g, b] of [before.highlight, before.pixel, before.base]) {
-      assert.ok(Math.max(r, g, b) - Math.min(r, g, b) <= 2, 'Node surfaces should remain neutral grey');
-    }
+    assert.ok(before.titleWrap && before.promptWrap, 'long titles and prompts should wrap and grow inside the card');
+    assert.equal(before.nativeResize, 'none', 'prompt sizing is automatic');
+    assert.equal(before.hit, 'work', JSON.stringify(before));
+    win.webContents.sendInputEvent({type:'mouseMove',x:Math.round(before.center.x),y:Math.round(before.center.y)});
     win.webContents.sendInputEvent({type:'mouseDown',x:Math.round(before.center.x),y:Math.round(before.center.y),button:'left',clickCount:1});
     win.webContents.sendInputEvent({type:'mouseUp',x:Math.round(before.center.x),y:Math.round(before.center.y),button:'left',clickCount:1});
     await new Promise(resolve => setTimeout(resolve, 90));
     const selected = await win.webContents.executeJavaScript(`window.__codenodeStore.getState().selectedId`);
-    assert.equal(selected, 'work', 'Canvas-painted node must remain clickable');
+    assert.equal(selected, 'work', 'Workflow card must remain clickable');
+    const selectedStyle = await win.webContents.executeJavaScript(`(()=>{const style=getComputedStyle(document.querySelector('.react-flow__node.selected .wf-workflow-card'));return {background:style.backgroundColor,border:style.border,radius:style.borderRadius};})()`);
+    assert.deepEqual(selectedStyle, { background: before.background, border: before.border, radius: before.radius }, 'selection must keep the same card surface and border');
     const dragFrom = await win.webContents.executeJavaScript(`(()=>{const r=document.querySelector('.react-flow__node[data-id="work"]').getBoundingClientRect();return{x:Math.round(r.left+45),y:Math.round(r.top+14)}})()`);
     win.webContents.sendInputEvent({type:'mouseMove',x:dragFrom.x,y:dragFrom.y});
     win.webContents.sendInputEvent({type:'mouseDown',x:dragFrom.x,y:dragFrom.y,button:'left',clickCount:1});
@@ -103,14 +109,12 @@ app.whenReady().then(async () => {
       const previous=ui.getState().theme;
       ui.getState().toggleTheme();
       await new Promise(resolve=>setTimeout(resolve,180));
-      const canvas=document.querySelector('.workflow-canvas-layer'),node=document.querySelector('.react-flow__node[data-id="work"]');
-      const rect=node.getBoundingClientRect(),screen=canvas.getBoundingClientRect(),ratio=canvas.width/screen.width;
-      const pixel=canvas.getContext('2d').getImageData(Math.floor((rect.left+rect.width/2-screen.left)*ratio),Math.floor((rect.top+rect.height/2-screen.top)*ratio),1,1).data;
-      return {changed:ui.getState().theme!==previous,pixel:[...pixel],selected:window.__codenodeStore.getState().selectedId};
+      const card=document.querySelector('.react-flow__node[data-id="work"] .wf-workflow-card');
+      return {changed:ui.getState().theme!==previous,background:getComputedStyle(card).backgroundColor,selected:window.__codenodeStore.getState().selectedId};
     })()`);
     assert.equal(theme.changed, true);
     assert.equal(theme.selected, 'work');
-    assert.notDeepEqual(theme.pixel, before.pixel, 'theme switch must repaint the Canvas card');
+    assert.notEqual(theme.background, before.background, 'theme switch must recolor the workflow card');
     const editor = await win.webContents.executeJavaScript(`(async()=>{
       const graph=window.__codenodeStore.getState();
       graph.addNode({id:'drawing',type:'vector',position:{x:100,y:320},data:{label:'画布节点',status:'pending',width:560,height:380,mode:'design',accent:'#22d3ee'}});
@@ -118,7 +122,7 @@ app.whenReady().then(async () => {
       const node=document.querySelector('.react-flow__node[data-id="drawing"]');
       const material=getComputedStyle(node.querySelector('.wf-vector'));
       return {opacity:getComputedStyle(node).opacity,editor:!!node.querySelector('.vs-svg'),
-        glass:material.backgroundImage.startsWith('linear-gradient(') && material.backdropFilter.includes('blur(')};
+        glass:material.backgroundColor!=='rgba(0, 0, 0, 0)' && material.backdropFilter.includes('blur(')};
     })()`);
     assert.deepEqual(editor, {opacity:'1',editor:true,glass:true}, 'embedded drawing editor must keep its glass surface and interactive content');
     const js = code => win.webContents.executeJavaScript(code);
@@ -130,16 +134,8 @@ app.whenReady().then(async () => {
     await setContrast('more');
     await new Promise(resolve => setTimeout(resolve, 160));
     assert.equal(await js(`getComputedStyle(document.querySelector('.wf-vector')).backdropFilter`), 'none');
-    const solidAlpha = await js(`(() => {
-      const canvas = document.querySelector('.workflow-canvas-layer');
-      const rect = document.querySelector('.react-flow__node[data-id="work"]').getBoundingClientRect();
-      const origin = canvas.getBoundingClientRect();
-      const scale = canvas.width / origin.width;
-      return canvas.getContext('2d').getImageData(
-        Math.floor((rect.left + rect.width * .88 - origin.left) * scale),
-        Math.floor((rect.top + rect.height * .69 - origin.top) * scale), 1, 1).data[3];
-    })()`);
-    assert.equal(solidAlpha, 255, 'High contrast should use an opaque card');
+    const solidBackground = await js(`getComputedStyle(document.querySelector('.react-flow__node[data-id="work"] .wf-workflow-card')).backgroundColor`);
+    assert.match(solidBackground, /^rgb\(/, 'High contrast should use an opaque card');
     await setContrast('no-preference');
     await js(`window.__codenodeStore.getState().setSelectedIds([])`);
     assert.equal(await js(`getComputedStyle(document.querySelector('.react-flow__node[data-id="drawing"]')).opacity`), '0');

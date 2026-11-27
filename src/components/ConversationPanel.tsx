@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type Ref } from 'react';
 import { useUiStore } from '../store/uiStore';
 import AgentPanel from './side/AgentPanel';
 import AgentSwitcher from './AgentSwitcher';
 import {GoalBinding} from './GoalManager';
 
-export default function ConversationPanel() {
+export default function ConversationPanel({ requestHostRef }: { requestHostRef: Ref<HTMLDivElement> }) {
   const [optionsHost, setOptionsHost] = useState<HTMLDivElement | null>(null);
   const open = useUiStore(state => state.conversationOpen);
   const width = useUiStore(state => state.conversationWidth);
@@ -28,6 +28,6 @@ export default function ConversationPanel() {
     <div className="conversation-resize" role="separator" aria-label="调整对话栏宽度" aria-orientation="vertical" aria-valuemin={320} aria-valuemax={640} aria-valuenow={width} tabIndex={0} onPointerDown={resize} onDoubleClick={()=>setWidth(400)} onKeyDown={event => { if(event.key==='ArrowLeft'||event.key==='ArrowRight') { event.preventDefault(); setWidth(width+(event.key==='ArrowLeft'?16:-16)); } }} />
     <header className="conversation-head"><strong>对话</strong><div className="conversation-head-actions"><AgentSwitcher optionsRef={setOptionsHost} /></div></header>
     <GoalBinding/>
-    <AgentPanel optionsHost={optionsHost} />
+    <AgentPanel optionsHost={optionsHost} requestHostRef={requestHostRef} />
   </aside>;
 }

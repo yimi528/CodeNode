@@ -1,30 +1,38 @@
-/* ---------- Agent 工具请求弹窗 ---------- */
-.tool-dialog-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(8, 10, 14, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+/* ---------- Agent 工具请求 ---------- */
+.tool-dialog-slot { flex: none; margin-bottom: 8px; }
+.tool-dialog-slot:empty { display: none; }
 
 .tool-dialog {
-  width: min(520px, calc(100vw - 60px));
-  max-height: 80vh;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: min(320px, max(140px, 38dvh));
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 18px 20px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  padding: 12px;
+}
+
+.tool-dialog-floating {
+  position: fixed;
+  right: 16px;
+  bottom: 32px;
+  z-index: 1100;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+}
+
+.tool-dialog-content {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .tool-dialog-title {
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .tool-dialog-what {
@@ -87,6 +95,8 @@
   padding: 6px 12px;
   font-size: 12px;
   cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .tool-dialog-opt:hover {
@@ -94,12 +104,10 @@
   color: var(--accent);
 }
 
-.tool-dialog-free {
-  margin-top: 12px;
-}
-
 .tool-dialog-input {
   width: 100%;
+  flex: none;
+  margin-top: 10px;
   background: rgba(0, 0, 0, 0.25);
   color: var(--text);
   border: 1px solid var(--border);
@@ -115,16 +123,17 @@
 }
 
 .tool-dialog-actions {
-  margin-top: 16px;
+  margin-top: 10px;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .tool-dialog-btn {
   border: none;
   border-radius: 8px;
-  padding: 8px 20px;
+  padding: 6px 12px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -133,6 +142,11 @@
 .tool-dialog-btn.cancel {
   background: var(--bg-panel-2);
   color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.tool-dialog-btn.always {
+  background: var(--bg-panel-2);
   border: 1px solid var(--border);
 }
 

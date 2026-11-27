@@ -3,6 +3,7 @@ import { themeTokens, themeColorScheme } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
 import WorkspaceHome from './components/WorkspaceHome';
+import StartupSplash from './components/StartupSplash';
 import ActivityBar from './components/ActivityBar';
 import SidePanel from './components/side/SidePanel';
 import './components/side/nodeInspectorDock.css';
@@ -123,7 +124,12 @@ export default function App() {
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const tutorialOpen = useUiStore(s => s.tutorialOpen);
   const modelManagerOpen = useUiStore((s) => s.modelManagerOpen);
+  const conversationOpen = useUiStore((s) => s.conversationOpen);
+  const [toolRequestHost, setToolRequestHost] = useState<HTMLDivElement | null>(null);
+  const showRequestInConversation = conversationOpen && appPage === 'workbench' &&
+    !overview && !replayVisible && !tutorialOpen && !settingsOpen && !modelManagerOpen;
   const booted = useUiStore((s) => s.booted);
+  const [starting, setStarting] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const { fitView } = useReactFlow();
 
   useEffect(() => {
@@ -181,6 +187,8 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (starting) return;
+      if (document.activeElement?.closest('.tool-dialog')) return;
       if (useUiStore.getState().tutorialOpen || useUiStore.getState().appPage !== 'workbench') return;
       if (useUiStore.getState().settingsOpen || useUiStore.getState().modelManagerOpen) return;
       if (e.key === 'Escape' && useUiStore.getState().stageReplayOpen) {
@@ -309,10 +317,12 @@ export default function App() {
     // 就会被吞掉 —— 表现就是「选中画布节点后 Delete 没反应」。
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [undo, redo, duplicateNode, selectedId, deleteNodes, fitView, arrangeNodes, createScopeFromSelection]);
+  }, [starting, undo, redo, duplicateNode, selectedId, deleteNodes, fitView, arrangeNodes, createScopeFromSelection]);
 
   return (
-    <div className={`app ui-clean glass-theme theme-${theme}`}>
+    <>
+    {starting && <StartupSplash onFinish={() => setStarting(false)} />}
+    <div className={`app ui-clean glass-theme theme-${theme}`} inert={starting}>
       <div className="app-shell">
         <ActivityBar showTasks={trellisReady} />
         <div className="app-shell-main">
@@ -336,7 +346,7 @@ export default function App() {
                     {sideTab === 'project' && <Suspense fallback={null}><FileWorkspace /></Suspense>}
                     {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
                     <div className="workspace-canvas" aria-hidden={sideTab === 'project'}><Suspense fallback={null}><Canvas /></Suspense></div>
-                    <ConversationPanel />
+                    <ConversationPanel requestHostRef={setToolRequestHost} />
                   </div>
                   {(replayVisible || replayLoaded) && <section className="workspace-stage-replay" hidden={!replayVisible} inert={!replayVisible} aria-label="阶段 3D 回放"
                     onDoubleClick={() => useUiStore.getState().closeStageReplay()}>
@@ -358,12 +368,13 @@ export default function App() {
         </div>
       </div>
       {tutorialOpen && <Suspense fallback={null}><TutorialPage /></Suspense>}
-      <ToolDialog />
+      <ToolDialog host={showRequestInConversation ? toolRequestHost : null} />
       <GoalAutoAdvanceManager />
       <Suspense fallback={(settingsOpen || modelManagerOpen) ? <DialogLoading /> : null}>
         {settingsOpen && <GlobalSettings />}
         {modelManagerOpen && <ModelManager />}
       </Suspense>
     </div>
+    </>
   );
 }

@@ -15,7 +15,7 @@
  *   B. #21：needsReview 的 plan 不再被丢弃（reason/warning/unknownEffects/pendingSteps 可见）、
  *      两个出口（强制续跑 / 按状态重试）、`truncated` 与 `stopped` delta 有分支、未知 kind 兜底告警。
  *   C. #25：发布型错误变成用户可见提示（fireAndReport）、对话体 live region、
- *      toast 容器 role=status、ToolDialog role=dialog/aria-modal/初始焦点/Escape 关闭。
+ *      toast 容器 role=status、ToolDialog 的非模态语义及取消应答。
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -630,13 +630,13 @@ async function testAccessibilityMarkup() {
   const GraphStore = require(path.join(PROJECT, 'src', 'store', 'graphStore.ts'));
   ui.getState().setToast('Agent 调用失败：X');
   prepareForRender();
-  const statusHtml = renderReact(React.createElement(StatusBar.default));
+  const statusHtml = renderReact(React.createElement(StatusBar.default, { showCanvasStatus: false }));
   check('D2a toast 容器 role="status"', /role="status"/.test(statusHtml), statusHtml.slice(0, 400));
   check('D2b toast 容器 aria-live="polite"', /aria-live="polite"/.test(statusHtml));
   check('D2c toast 文本可被读屏读到', /Agent 调用失败：X/.test(statusHtml));
   ui.getState().setToast(null);
   prepareForRender();
-  const statusEmpty = renderReact(React.createElement(StatusBar.default));
+  const statusEmpty = renderReact(React.createElement(StatusBar.default, { showCanvasStatus: false }));
   check('D2d toast 为空时容器仍常驻（否则后插入的提示读不到）', /role="status"/.test(statusEmpty) && /aria-live="polite"/.test(statusEmpty));
 
   // D3：ToolDialog 的对话框语义
@@ -656,7 +656,7 @@ async function testAccessibilityMarkup() {
   prepareForRender();
   const dialogHtml = renderReact(React.createElement(ToolDialogMod.default));
   check('D3a 审批弹窗 role="dialog"', /role="dialog"/.test(dialogHtml), dialogHtml.slice(0, 300));
-  check('D3b 审批弹窗 aria-modal="true"', /aria-modal="true"/.test(dialogHtml));
+  check('D3b 请求卡允许继续使用工作台', !/aria-modal="true"/.test(dialogHtml));
   check('D3c 弹窗有可访问名（aria-labelledby 指向标题）', /aria-labelledby="[^"]+"/.test(dialogHtml) && /Agent 请求确认/.test(dialogHtml));
   check('D3d 弹窗有可访问描述（aria-describedby）', /aria-describedby="[^"]+"/.test(dialogHtml) && /写入 \.env/.test(dialogHtml));
   check('D3e 初始焦点可定位（tabIndex=-1 容器 + 首个可聚焦按钮）', /tabindex="-1"/.test(dialogHtml) && /<button/.test(dialogHtml));
@@ -667,29 +667,9 @@ async function testAccessibilityMarkup() {
   const scopedDialog = renderReact(React.createElement(ToolDialogMod.default));
   check('D3 持久授权展示实际动作', scopedDialog.includes('本项目始终允许') && scopedDialog.includes('get_workbench_model.focus'));
 
-  const focusablesFn = ToolDialogMod.focusables;
-  const fakeItems = [{ focus: () => {} }, { focus: () => {} }];
-  const fakeNode = {
-    querySelectorAll: () => fakeItems,
-  };
-  check('D3f focusables() 能从容器里取出可聚焦元素（Tab 圈定的依据）', focusablesFn(fakeNode).length === 2);
-  check('D3g firstFocusable() 取第一个', ToolDialogMod.firstFocusable(fakeNode) === fakeItems[0]);
-  check('D3h 没有可聚焦元素时返回 null（不会把焦点丢到 body）', ToolDialogMod.firstFocusable({ querySelectorAll: () => [] }) === null);
-
-  // D4：Escape / Tab 的键盘契约（判定函数 + 关闭时的应答语义）
-  const { decideDialogKey, nextFocusIndex, closeResult } = ToolDialogMod;
-  check('D4a Escape → close（弹窗必须能被键盘关掉）', decideDialogKey({ key: 'Escape' }) === 'close');
-  check('D4b Tab → trap（焦点圈定在弹窗内，不跑到背后画布）', decideDialogKey({ key: 'Tab' }) === 'trap');
-  check('D4c 其它按键不拦截（不吞用户输入）', decideDialogKey({ key: 'a' }) === 'none' && decideDialogKey(null) === 'none');
+  const { closeResult } = ToolDialogMod;
   check('D4d Escape 关闭 = 明确应答「取消」（confirm → ok:false，不是挂起）', JSON.stringify(closeResult({ type: 'confirm' })) === JSON.stringify({ ok: false }));
   check('D4e ask 弹窗关闭 = 空回答应答', JSON.stringify(closeResult({ type: 'ask' })) === JSON.stringify({ answer: '' }));
-  check('D4f Tab 在最后一个可聚焦元素上回到第一个', nextFocusIndex(2, 1, false) === 0);
-  check('D4g Shift+Tab 在第一个上绕到最后一个', nextFocusIndex(2, 0, true) === 1);
-  check('D4h 中间位置不抢默认行为', nextFocusIndex(3, 1, false) === null && nextFocusIndex(3, 1, true) === null);
-  check('D4i 不足两个可聚焦元素时不圈定（不阻断 Tab）', nextFocusIndex(1, 0, false) === null);
-  // 源码级接线检查：ToolDialog 必须真的用了上面的判定（否则函数再对也没用）
-  const toolDialogSource = fs.readFileSync(path.join(PROJECT, 'src', 'components', 'ToolDialog.tsx'), 'utf8');
-  check('D4j onKeyDown 真的调用 decideDialogKey（接线检查）', /onKeyDown[\s\S]{0,200}decideDialogKey\(/.test(toolDialogSource), '');
 }
 
 // ---------------------------------------------------------------------------

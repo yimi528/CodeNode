@@ -6,7 +6,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'codenode-goal-graph-ui-'));
 const uiFile=process.env.CODENODE_PACKAGED_ASAR?path.join(path.resolve(process.env.CODENODE_PACKAGED_ASAR),'dist/index.html'):path.join(__dirname,'../../dist/index.html');
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 app.whenReady().then(async()=>{
-  const win=new BrowserWindow({width:1260,height:850,show:false,webPreferences:{sandbox:true,backgroundThrottling:false,offscreen:!!process.env.CODENODE_GOAL_PRIORITY_PREVIEW_DIR}});
+  const win=new BrowserWindow({width:1260,height:850,show:false,webPreferences:{sandbox:true,backgroundThrottling:false,offscreen:!!(process.env.CODENODE_GOAL_PRIORITY_PREVIEW_DIR||process.env.CODENODE_OVERVIEW_PREVIEW_FILE)}});
   try{
     await win.loadFile(uiFile);
     await wait(400);
@@ -36,10 +36,16 @@ app.whenReady().then(async()=>{
       project.setState({root:${JSON.stringify(root)}});
       ui.getState().updatePreferences({workbenchView:'overview'});
       await until(()=>document.querySelector('[data-goal-id="g1"]'));
+      const card=document.querySelector('[data-goal-id="g1"]');
+      const resize=card.parentElement.querySelector('.overview-goal-resize');
+      const initialWidth=card.getBoundingClientRect().width;
+      resize.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+      await until(()=>card.getBoundingClientRect().width>initialWidth);
       document.querySelector('[data-goal-id="g1"]').click();
       await until(()=>document.querySelectorAll('.goal-task-graph-canvas .react-flow__node').length===2);
       await until(()=>document.querySelectorAll('.goal-task-graph-canvas .react-flow__edge').length===1);
       const out={nodes:document.querySelectorAll('.goal-task-graph-canvas .react-flow__node').length,edges:document.querySelectorAll('.goal-task-graph-canvas .react-flow__edge').length};
+      out.projectBrief=!!document.querySelector('.overview-brief h1');
       document.querySelector('.goal-task-graph-canvas .react-flow__node[data-id="t1"]').click();
       await until(()=>document.querySelector('.goal-graph-editor'));
       out.selectedTask=document.querySelector('.goal-graph-editor strong')?.textContent;
@@ -81,15 +87,17 @@ app.whenReady().then(async()=>{
       ui.getState().updatePreferences({workbenchView:'conversation'});
       session.getState().startOnCurrent('test plan');
       session.getState().streamDelta({kind:'plan',runId:'ui-plan',items:[{id:'a',step:'读取现状',acceptanceCriteria:'已读取',status:'pending'},{id:'b',step:'修改文件',acceptanceCriteria:'测试通过',status:'pending',dependsOn:['a']}]});
-      await until(()=>document.querySelector('.ap-plan-canvas-action'));
-      document.querySelector('.ap-plan-canvas-action').click();
-      await until(()=>graph.getState().nodes.length===2);
-      out.planNodes=graph.getState().nodes.length;out.planEdges=graph.getState().edges.length;out.planPending=graph.getState().nodes.every(n=>n.data.status==='pending');
+      await until(()=>document.querySelectorAll('.workspace-canvas .wf-agent-plan').length===2);
+      await until(()=>document.querySelectorAll('.workspace-canvas .react-flow__edge').length===1);
+      out.planNodes=document.querySelectorAll('.workspace-canvas .wf-agent-plan').length;
+      out.planEdges=document.querySelectorAll('.workspace-canvas .react-flow__edge').length;
+      out.planPending=document.querySelectorAll('.workspace-canvas .wf-plan-status[data-status="pending"]').length===2;
       await chat.getState().send('/plan 修复登录');
       out.slashPlanNodes=graph.getState().nodes.length;out.planCalls=planCalls;out.agentChatCalls=agentChatCalls;
       await chat.getState().send('/goal 改善登录稳定性');
-      await until(()=>document.querySelector('.goal-create-form input[aria-label="Goal 标题"]')?.value==='改善登录稳定性');
-      out.goalDraft=document.querySelector('.goal-create-form input[aria-label="Goal 标题"]')?.value;
+      const draftTitle='.overview-create-panel input[aria-label="Goal 标题"]';
+      await until(()=>document.querySelector(draftTitle)?.value==='改善登录稳定性');
+      out.goalDraft=document.querySelector(draftTitle)?.value;
       const criterion=document.querySelector('.goal-create-form textarea[aria-label="验收条件"]');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(criterion,'登录测试通过');
       criterion.dispatchEvent(new Event('input',{bubbles:true}));
@@ -141,14 +149,14 @@ app.whenReady().then(async()=>{
     })()`);
     assert.equal(result.unknownExecuteDisabled,true);assert.equal(result.unknownRequeueDisabled,true);assert.equal(result.singleStageRun,true);
     assert.equal(result.blockerOnNode,true);assert.equal(result.upstreamVisible,true);assert.equal(result.completedSelectionRetained,true);
-    assert.equal(result.nodes,2);assert.equal(result.edges,1);assert.match(result.selectedTask,/定位问题/);
+    assert.equal(result.nodes,2);assert.equal(result.edges,1);assert.match(result.selectedTask,/定位问题/);assert.equal(result.projectBrief,true);
     assert.equal(result.themeChanged,true);assert.equal(result.nodesAfterTheme,2);assert.equal(result.selectedAfterTheme,true);
     assert.equal(result.previewBeforeSave,2);assert.equal(result.generatedGoalNodes,4);assert.equal(result.editedGoalNode,'确认登录入口');assert.equal(result.stageSummaryVisible,true);assert.equal(result.initialCriterionBinding,true);assert.equal(result.editedCriterionBinding,0);
     assert.equal(result.priorityPreview,true);assert.deepEqual(result.generatedPriorities,['high','normal']);
     assert.equal(result.ownerPreview,true,'the user reviews the suggested owner before confirming a Goal plan');assert.deepEqual(result.generatedOwners,['investigator','main'],'owner suggestions survive plan confirmation');
     assert.equal(result.goalStartCalls,1);assert.equal(result.goalRunCalls,0);assert.deepEqual(result.goalRunOrder,['completed','completed','completed','completed']);
     assert.equal(result.planNodes,2);assert.equal(result.planEdges,1);assert.equal(result.planPending,true);
-    assert.equal(result.slashPlanNodes,4);assert.equal(result.planCalls,2);assert.equal(result.agentChatCalls,0);
+    assert.equal(result.slashPlanNodes,2);assert.equal(result.planCalls,2);assert.equal(result.agentChatCalls,0);
     assert.equal(result.goalDraft,'改善登录稳定性');assert.equal(result.autoGoalPreview,2);assert.equal(result.autoGoalTasksBeforeConfirm,0);assert.equal(result.planCallsAfterGoal,3);
     assert.deepEqual(result.stoppedAfterExternalEdit,['completed','todo']);assert.equal(result.externalEditStartCalls,1);
     assert.equal(result.manualPriority,'low');assert.equal(result.panelPriority,'urgent','both Task creation surfaces persist the selected priority');
@@ -163,7 +171,12 @@ app.whenReady().then(async()=>{
         await wait(300);fs.writeFileSync(path.join(previewDir,theme+'.png'),(await win.webContents.capturePage()).toPNG());
       }
     }
-    console.log('GOAL TASK GRAPH UI: PASS (Goal graph, selection, theme state, plan import, /plan, /goal)');
+    if(process.env.CODENODE_OVERVIEW_PREVIEW_FILE){
+      await win.webContents.executeJavaScript(`document.querySelector('.overview-goal-editor:not([hidden]) [aria-label="关闭目标编辑"]')?.click();document.querySelector('.goal-overview')?.scrollIntoView({block:'start'});`);
+      await wait(300);
+      fs.writeFileSync(process.env.CODENODE_OVERVIEW_PREVIEW_FILE,(await win.webContents.capturePage()).toPNG());
+    }
+    console.log('GOAL TASK GRAPH UI: PASS (Goal graph, selection, theme state, canvas plan, /plan, /goal)');
     app.exit(0);
   }catch(error){console.error(error);try{console.error(await win.webContents.executeJavaScript(`({body:document.body.innerText.slice(0,1200),overview:!!document.querySelector('.goal-overview'),editor:!!document.querySelector('.overview-goal-editor'),goalRow:!!document.querySelector('[data-goal-id="g1"]'),graphNodes:document.querySelectorAll('.goal-task-graph-canvas .react-flow__node').length,planAction:!!document.querySelector('.ap-plan-canvas-action'),goalDraft:!!document.querySelector('.goal-create-form')})`));}catch{}app.exit(1);}
   finally{const resolved=path.resolve(root);assert.equal(path.dirname(resolved),path.resolve(os.tmpdir()));assert.ok(path.basename(resolved).startsWith('codenode-goal-graph-ui-'));fs.rmSync(root,{recursive:true,force:true});}

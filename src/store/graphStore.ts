@@ -1,4 +1,5 @@
-import { nodeModes, nodePresentation } from '../nodes/presentation';
+import { nodeModes } from '../nodes/presentation';
+import { workflowNodeAccent } from '../lib/workflowNodeAppearance';
 import { create } from 'zustand';
 import {
   Node,
@@ -381,7 +382,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       data: {
         label: '分组',
         status: 'pending',
-        accent: nodePresentation('scope').color,
+        accent: workflowNodeAccent('scope'),
         fill: '#3b2f6b',
         opacity: 0.16,
         width: Math.max(220, Math.ceil(maxX - minX + pad * 2)),
@@ -555,7 +556,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const modes = nodeModes(node?.type || '');
     if (!node || node.data.status === 'running' || !modes || !Object.prototype.hasOwnProperty.call(modes, type)) return s;
     const nodes = s.nodes.map(n => n.id === id ? { ...n, type, measured: undefined,
-      data: { ...n.data, accent: nodePresentation(type).color, ...patch } } : n);
+      data: { ...n.data, accent: workflowNodeAccent(type), ...patch } } : n);
     return { nodes, ...withHistory(s) };
   }),
 

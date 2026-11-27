@@ -21,12 +21,13 @@ type ViewControls = {
   minimap: boolean;
   links: boolean;
   snap: boolean;
+  hasPlanNodes: boolean;
   toggleMinimap: () => void;
   toggleLinks: () => void;
   toggleSnap: () => void;
 };
 
-export default function CanvasActions({ minimap, links, snap, toggleMinimap, toggleLinks, toggleSnap }: ViewControls) {
+export default function CanvasActions({ minimap, links, snap, hasPlanNodes, toggleMinimap, toggleLinks, toggleSnap }: ViewControls) {
   const menuRef = useRef<HTMLDetailsElement>(null);
   const canUndo = useGraphStore(s => s.past.length > 0);
   const canRedo = useGraphStore(s => s.future.length > 0);
@@ -73,6 +74,7 @@ export default function CanvasActions({ minimap, links, snap, toggleMinimap, tog
   const arrange = CANVAS_ACTIONS.find(action => action.id === 'arrange');
   const fit = CANVAS_ACTIONS.find(action => action.id === 'fit');
   const showNodeActions = nodes.length > 0 || !preferences.hideDisabledActions;
+  const canFit = nodes.length > 0 || hasPlanNodes;
   const menuActions: MenuAction[] = [
     ...(arrange && showNodeActions && preferences.visibleActions.includes('arrange') ? [{
       ...arrange, id: 'arrange' as const, shortcut: arrange.shortcut?.replace('Ctrl', 'Mod'),
@@ -106,7 +108,7 @@ export default function CanvasActions({ minimap, links, snap, toggleMinimap, tog
           <span aria-label="画布缩放倍率">{zoomPercent}%</span>
           <CanvasIconButton icon="plus" description={atMaxZoom ? '已达到最大缩放倍率。' : '放大视图，查看节点细节。'} label="放大画布" disabled={atMaxZoom} onClick={() => void zoomIn()} />
         </div>
-        {fit && showNodeActions && preferences.visibleActions.includes('fit') && <CanvasIconButton icon="fit" label="适应画布" title={hint(fit)} description={fit.description} data-action="fit" disabled={!nodes.length} onClick={handlers.fit} />}
+        {fit && (canFit || !preferences.hideDisabledActions) && preferences.visibleActions.includes('fit') && <CanvasIconButton icon="fit" label="适应画布" title={hint(fit)} description={fit.description} data-action="fit" disabled={!canFit} onClick={handlers.fit} />}
         <details className="toolbar-dropdown canvas-command-menu" ref={menuRef}>
           <summary className="canvas-icon-button" aria-label="画布选项" data-tip-heading="画布选项" aria-description="整理节点布局，调整连线、吸附和小地图。"><CanvasIcon name="properties" /><span>画布选项</span></summary>
           <div className="toolbar-menu" style={{
