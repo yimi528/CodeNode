@@ -11,6 +11,19 @@
   font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+.app.glass-theme.ui-clean.theme-light {
+  --workbench-frame: #eaede8;
+  --workbench-canvas: var(--bg);
+  --workbench-rim: var(--glass-border);
+  --workbench-highlight: white;
+  --workbench-glass: var(--glass-surface);
+  --workbench-backdrop: linear-gradient(145deg, #f5f6f3, #e7ebe6);
+}
+.theme-light .workspace-canvas :is(.canvas-quick-actions, .canvas-view-strip),
+.theme-light .status-toast:not(:empty) { background: var(--glass-sheet); }
+.glass-theme.ui-clean.theme-light .toolbar .workbench-view-switch button[aria-current="page"] {
+  background: var(--glass-selected); color: var(--glass-text);
+}
 .app-shell-main { position: relative; }
 
 .glass-theme.ui-clean :is(.activity-bar, .toolbar, .status-bar) {
@@ -122,7 +135,7 @@
 .glass-theme.ui-clean .workspace-main .conversation-workspace.conversation-right {
   border: 1px solid var(--workbench-rim);
   border-radius: 16px;
-  background: #202020;
+  background: var(--chat-panel);
   margin-inline-start: 8px;
 }
 .glass-theme.ui-clean .workspace-canvas .canvas-wrap { background: transparent; }
@@ -298,7 +311,7 @@
 }
 @media (max-width: 600px) {
   .glass-theme.ui-clean .project-navigation {
-    background: #292929;
+    background: var(--glass-sheet);
     margin-inline-start: 0;
   }
   .workspace-main { margin-inline: 4px; }

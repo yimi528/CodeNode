@@ -8,8 +8,8 @@
   --chat-hover: rgba(255, 255, 255, .08);
   --chat-shadow: 0 3px 12px rgba(0, 0, 0, .16);
 }
-.glass-theme:is(.theme-light, .theme-bright) .conversation-right,
-.glass-theme.hermes-picker-layer:is(.theme-light, .theme-bright) {
+.glass-theme.theme-light .conversation-right,
+.glass-theme.hermes-picker-layer.theme-light {
   --chat-panel: #f5f5f2;
   --chat-paper: #fff;
   --chat-ink: #242623;

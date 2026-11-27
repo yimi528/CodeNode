@@ -1,7 +1,7 @@
 .app-plugin-layer { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .app-plugin-layer[hidden] { display: none; }
 
-.glass-theme:is(.theme-light, .theme-bright) .plugin-workspace {
+.glass-theme.theme-light .plugin-workspace {
   color-scheme: light;
   --workbench-canvas: #fafafc;
   --workbench-frame: #efeff4;
@@ -70,7 +70,7 @@
   .market-grid article > button { padding-inline: 8px; }
 }
 
-.glass-theme:is(.theme-light, .theme-bright) .app-shell:has(.app-plugin-layer:not([hidden])) > .activity-bar {
+.glass-theme.theme-light .app-shell:has(.app-plugin-layer:not([hidden])) > .activity-bar {
   background: #efeff4;
   border-color: #d7d8e0;
   --glass-text: #20212b;

@@ -154,33 +154,32 @@ app.whenReady().then(async () => {
     await sleep(400);
     ok('项目标签含文件树与过滤框', await js(`!!document.querySelector('.pm-tree') && !!document.querySelector('.pm-search')`));
 
-    // ---- 第三套主题「无色玻璃」：不透明皮肤，打包产物里不得再引入透明窗口 ----
+    // ---- 日间与夜间主题：不透明皮肤，打包产物里不得再引入透明窗口 ----
     const asarThemes = JSON.parse(fs.readFileSync(path.join(ASAR, 'config', 'ui.themes.json'), 'utf8'));
-    ok('asar 四套主题色值齐全且 token 键一致', ['light', 'dark', 'bright', 'xiaohuang'].every((id) => asarThemes[id] && JSON.stringify(Object.keys(asarThemes.light).sort()) === JSON.stringify(Object.keys(asarThemes[id]).sort())));
-    ok('无色玻璃主题的底色是不透明色', /^#[0-9a-f]{6}$/i.test(asarThemes.bright['--bg']) && /^#[0-9a-f]{6}$/i.test(asarThemes.bright['--glass-base']));
-    ok('小黄形象与皮肤已打包', rendererBundles.some((bundle) => bundle.includes('xiaohuang-companion')) && rendererBundles.some((bundle) => bundle.includes('小黄')));
+    ok('asar 两套主题色值齐全且 token 键一致', ['light', 'dark'].every((id) => asarThemes[id] && JSON.stringify(Object.keys(asarThemes.light).sort()) === JSON.stringify(Object.keys(asarThemes[id]).sort())));
+    ok('日间主题的底色是不透明色', /^#[0-9a-f]{6}$/i.test(asarThemes.light['--bg']) && /^#[0-9a-f]{6}$/i.test(asarThemes.light['--glass-base']));
     const packagedMain = fs.readFileSync(path.join(ASAR, 'electron', 'main.cjs'), 'utf8');
     ok('打包主进程不使用透明窗口（主界面必须不透明）', packagedMain.includes('backgroundColor: ') && !/transparent:\s*true/.test(packagedMain) && !packagedMain.includes('theme.cjs'));
     ok('打包产物不含主题→窗口材质模块', !fs.existsSync(path.join(ASAR, 'electron', 'theme.cjs')));
     ok('asar preload 不再暴露窗口材质 IPC', !fs.readFileSync(path.join(ASAR, 'electron', 'preload.cjs'), 'utf8').includes('theme:apply'));
     const cssBundles = assetNames.filter((name) => name.endsWith('.css')).map((name) => fs.readFileSync(path.join(assetsDir, name), 'utf8'));
-    ok('asar 渲染包包含第三个主题入口且没有整页透明规则', rendererBundles.some((bundle) => bundle.includes('无色玻璃') && bundle.includes('data-theme-select')) && !cssBundles.some((bundle) => /\[data-theme=["']?glass["']?\]/.test(bundle)));
+    ok('asar 渲染包包含主题切换入口且没有整页透明规则', rendererBundles.some((bundle) => bundle.includes('data-theme-choice')) && !cssBundles.some((bundle) => /\[data-theme=["']?glass["']?\]/.test(bundle)));
 
     // 应用主窗口由打包 main.cjs 创建（本检查另开了一个自己的窗口），
     // 主题只改页面配色，绝不能碰窗口：底色必须恒为不透明深色。
     const appWindow = BrowserWindow.getAllWindows().find((w) => w !== win && w.getTitle() === 'CodeNode');
-    ok('应用主窗口按不透明底色创建', Boolean(appWindow) && String(appWindow.getBackgroundColor()).slice(0, 7).toUpperCase() === '#14161A', appWindow ? String(appWindow.getBackgroundColor()) : '未找到应用窗口');
+    ok('应用主窗口按不透明底色创建', Boolean(appWindow) && String(appWindow.getBackgroundColor()).slice(0, 7).toUpperCase() === '#222222', appWindow ? String(appWindow.getBackgroundColor()) : '未找到应用窗口');
 
-    for (const theme of ['light', 'dark', 'bright', 'xiaohuang']) {
+    for (const theme of ['light', 'dark']) {
       await js(`window.__codenodeUi.getState().setTheme(${JSON.stringify(theme)})`);
       await sleep(300);
-      ok('切换到 ' + theme + ' 后应用主窗口底色不变', String(appWindow.getBackgroundColor()).slice(0, 7).toUpperCase() === '#14161A', String(appWindow.getBackgroundColor()));
+      ok('切换到 ' + theme + ' 后应用主窗口底色不变', String(appWindow.getBackgroundColor()).slice(0, 7).toUpperCase() === '#222222', String(appWindow.getBackgroundColor()));
       const opaque = await js(`(() => { const body=getComputedStyle(document.body); return { theme: document.documentElement.dataset.theme, bodyAlpha: body.backgroundColor, hasImage: getComputedStyle(document.querySelector('.app')).backgroundImage !== 'none' }; })()`);
       ok('切换到 ' + theme + ' 后页面有不透明底', opaque.theme === theme && /^rgb\(/.test(opaque.bodyAlpha), JSON.stringify(opaque));
     }
     await js(`window.__codenodeUi.getState().setTheme('dark')`);
     await sleep(300);
-    ok('切回夜间后页面底色恢复墨黑', await js(`getComputedStyle(document.querySelector('.app')).backgroundColor==='rgb(23, 25, 29)'`));
+    ok('切回夜间后页面底色恢复墨黑', await js(`getComputedStyle(document.querySelector('.canvas-wrap')).backgroundColor==='rgb(18, 18, 18)'`));
 
     const img = await win.webContents.capturePage();
     fs.mkdirSync(path.dirname(SHOT), { recursive: true });

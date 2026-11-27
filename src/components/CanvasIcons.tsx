@@ -1,6 +1,8 @@
 import type { ButtonHTMLAttributes } from 'react';
 
 const paths = {
+  sun: 'M16 12a4 4 0 1 1-8 0 4 4 0 1 1 8 0zM12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5',
+  moon: 'M20.5 14A8.8 8.8 0 0 1 10 3.5 9 9 0 1 0 20.5 14Z',
   undo: 'M9 5 4 10l5 5M4 10h10a5 5 0 0 1 0 10h-2',
   redo: 'm15 5 5 5-5 5m5-5H10a5 5 0 0 0 0 10h2',
   minus: 'M5 12h14',

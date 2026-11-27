@@ -121,7 +121,7 @@ function createWindow() {
       titleBarOverlay: { height: 46, color: WINDOW_FRAME_COLOR, symbolColor: '#f2f2f2' },
     } : {}),
     // 主界面一律不透明：窗口不开 transparent，保留 DWM 外阴影。
-    // 三套主题（日间／夜间／无色玻璃）都只改页面内的配色变量，不碰窗口本身。
+    // 日间与夜间主题都只改页面内的配色变量，不碰窗口本身。
     backgroundColor: WINDOW_FRAME_COLOR,
     icon: resolveAppIcon(),
     autoHideMenuBar: true,

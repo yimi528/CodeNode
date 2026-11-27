@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
-import { themeTokens, themeColorScheme } from './lib/theme';
+import { themeTokens } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
 import WorkspaceHome from './components/WorkspaceHome';
@@ -116,7 +116,7 @@ export default function App() {
   const theme = useUiStore((s) => s.theme);
   useLayoutEffect(() => {
     const root = document.documentElement;
-    root.dataset.theme = theme; root.style.colorScheme = themeColorScheme(theme);
+    root.dataset.theme = theme; root.style.colorScheme = theme;
     for (const [name,value] of Object.entries(themeTokens(theme))) root.style.setProperty(name,value);
   }, [theme]);
   const dockOpen = useUiStore((s) => s.dockOpen);

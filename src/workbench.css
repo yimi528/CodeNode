@@ -446,7 +446,7 @@
 .workspace-main .workspace-content { flex-direction: row; }
 .workspace-main .workspace-canvas { order: 0; min-height: 0; }
 .workspace-main .conversation-workspace.conversation-right { position: relative; order: 2; width: min(var(--conversation-width),45%); height: 100%; flex: 0 0 auto; padding: 0 14px 14px; background: var(--chat-panel); backdrop-filter: none; border-left: 1px solid var(--workbench-frame); }
-:is(.conversation-right, .agent-switch-layer, .hermes-picker-layer, .activity-bar, .project-navigation, .toolbar, .status-bar) {
+:root[data-theme="dark"] :where(.conversation-right, .agent-switch-layer, .hermes-picker-layer, .activity-bar, .project-navigation, .toolbar, .status-bar) {
   --glass-text: #f2f2f2;
   --glass-muted: #c4c4c4;
   --glass-faint: #acacac;
@@ -471,7 +471,7 @@
 :is(.conversation-right, .agent-switch-layer, .hermes-picker-layer) :focus-visible {
   outline-color: var(--glass-accent);
 }
-.conversation-right .pp-controls {
+:where(:root[data-theme="dark"]) .conversation-right .pp-controls {
   --glass-control: #535353;
   --glass-selected: #595959;
 }
@@ -624,9 +624,20 @@
 .global-settings .settings-row input[type="range"] { width: 120px; min-width: 60px; accent-color: var(--glass-accent); }
 .global-settings .settings-row output { min-width: 46px; font-size: 11px; color: var(--glass-muted); }
 .global-settings input[type="checkbox"] { accent-color: var(--glass-accent); }
-/* 主题选择：三套皮肤共用同一个下拉控件，差异只由配色变量表达。 */
 .settings-theme-hint { display: block; margin-top: 2px; font-size: 11px; color: var(--glass-muted); }
-.global-settings .settings-row select[data-theme-select] { min-width: 148px; max-width: 200px; flex: none; }
+.theme-switch { display: flex; padding: 3px; border-radius: 999px; background: var(--glass-control); }
+.glass-theme .theme-switch button {
+  display: grid; place-items: center; width: 38px; height: 30px; padding: 0;
+  border: 0; border-radius: 999px; color: var(--glass-muted); cursor: pointer;
+}
+.glass-theme .theme-switch button[aria-pressed="true"] {
+  background: var(--glass-sheet); color: var(--glass-text); box-shadow: 0 1px 4px rgb(0 0 0 / 16%);
+  view-transition-name: theme-indicator;
+}
+.theme-switch button:focus-visible { outline: 2px solid var(--glass-accent); }
+::view-transition-group(root), ::view-transition-group(theme-indicator) {
+  animation-duration: 180ms; animation-timing-function: ease-out;
+}
 .settings-menu-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; border: 1px solid var(--glass-border); border-radius: 8px; }
 .settings-menu-actions legend { font-size: 12px; color: var(--glass-muted); }
 .settings-menu-actions label { display: flex; align-items: center; gap: 8px; font-size: 12px; }

@@ -126,7 +126,7 @@ app.whenReady().then(async () => {
     for (const [code, modifiers] of guardedKeys) await key(code, modifiers);
     assert.equal(await js(`window.__codenodeUi.getState().addMenu`), null);
     assert.equal(await snapshot(), populated, 'tutorial keys must not mutate the background workspace');
-    for (const theme of ['light', 'dark', 'bright']) {
+    for (const theme of ['light', 'dark']) {
       await js(`window.__codenodeUi.getState().setTheme(${JSON.stringify(theme)})`);
       await sleep(120);
       assert.equal(await js(`document.querySelectorAll('.tutorial-sidebar nav button').length`), 7);
@@ -152,7 +152,7 @@ app.whenReady().then(async () => {
     }
     assert.equal(await js(`!!document.querySelector('vite-error-overlay')`), false);
     assert.deepEqual(errors, [], 'renderer console must have no errors');
-    console.log('TUTORIAL UI: PASS (reference empty canvas, both settings entries, isolated demos, search, background shortcut protection, state preservation, 3 themes, desktop/narrow layouts)');
+    console.log('TUTORIAL UI: PASS (reference empty canvas, both settings entries, isolated demos, search, background shortcut protection, state preservation, 2 themes, desktop/narrow layouts)');
     console.log('EVIDENCE=' + output);
     app.exit(0);
   } catch (error) { console.error(error); console.error('EVIDENCE=' + output); app.exit(1); }

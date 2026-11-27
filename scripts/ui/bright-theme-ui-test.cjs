@@ -1,17 +1,6 @@
 'use strict';
 
-/**
- * 第三套主题「无色玻璃」的端到端验收 —— 重点不是「像不像玻璃」，而是**界面必须不透明**。
- *
- * 用户明确要求：主界面不允许做成透明玻璃。所以这条用例的核心断言是像素级的：
- * 窗口背后放高频棋盘格，三套主题的取样区标准差都必须 ≤20（棋盘格自身 ~123），
- * 任何一套漏出桌面内容都会立刻失败。
- *
- * 其余断言：三套 token 键一致、第三套无色（RGB 极差 ≤12）、设置里是下拉框、
- * 窗口底色始终不透明、切换主题不重置会话/草稿/模型/侧栏。
- *
- * 设置 CODENODE_UI_TEST_PACKAGE=<交付包根目录> 时改测包内 asar。
- */
+// Verify theme controls, workspace colors, persistence, and window opacity.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -19,7 +8,6 @@ const path = require('node:path');
 const { app, BrowserWindow, desktopCapturer, screen } = require('electron');
 
 const themesJson = require('../../config/ui.themes.json');
-const THIRD_THEME = 'bright';
 
 const packageRoot = process.env.CODENODE_UI_TEST_PACKAGE ? path.resolve(process.env.CODENODE_UI_TEST_PACKAGE) : null;
 const runtimeAsar = packageRoot ? path.join(packageRoot, 'resources', 'app.asar') : null;
@@ -104,28 +92,12 @@ app.on('window-all-closed', () => {});
 
 app.whenReady().then(async () => {
   try {
-    // ---- 1. token 表：三套主题键集合必须一致，且第三套无色 ----
     const ids = Object.keys(themesJson);
-    const packagedThemes = runtimeAsar ? JSON.parse(fs.readFileSync(path.join(runtimeAsar, 'config', 'ui.themes.json'), 'utf8')) : themesJson;
-    assert.deepEqual(Object.keys(packagedThemes), ids, '包内主题表必须与源码主题表一致');
-    assert.deepEqual(ids, ['light', 'dark', THIRD_THEME], '主题表与参考分支的三套主题一致');
-    const referenceKeys = Object.keys(themesJson.light).sort();
-    for (const id of ids) assert.deepEqual(Object.keys(themesJson[id]).sort(), referenceKeys, id + ' 主题 token 键与 light 不一致');
-    const CHROMATIC_ALLOWED = new Set(['--stage-running', '--stage-done', '--stage-failed', '--stage-blocked', '--menu-danger']);
-    for (const [key, value] of Object.entries(themesJson[THIRD_THEME])) {
-      if (CHROMATIC_ALLOWED.has(key)) continue;
-      const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value.trim());
-      if (!hex) continue;
-      const [r, g, b] = [1, 2, 3].map((i) => parseInt(hex[i], 16));
-      assert.ok(Math.max(r, g, b) - Math.min(r, g, b) <= 12, '无色玻璃主题必须无色，' + key + '=' + value + ' 带明显色偏');
-    }
-    // 不透明底线：底色必须有不透明的兜底色，不能是「全透明 + 只靠叠加」。
-    for (const key of ['--bg', '--glass-base']) {
-      assert.match(themesJson[THIRD_THEME][key], /^#[0-9a-f]{6}$/i, '无色玻璃主题的 ' + key + ' 必须是不透明色，实际 ' + themesJson[THIRD_THEME][key]);
-    }
-    console.log('BRIGHT THEME TOKENS: PASS (三套主题键一致、第三套无色、底色不透明)');
+    const packagedThemes = JSON.parse(fs.readFileSync(sourceRoot('config/ui.themes.json'), 'utf8'));
+    assert.deepEqual(Object.keys(packagedThemes), ['light', 'dark']);
+    assert.deepEqual(Object.keys(packagedThemes.light).sort(), Object.keys(packagedThemes.dark).sort());
 
-    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && window.__codenodeUi.getState().booted').catch(() => false), '启动页');
+    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".app") && window.__codenodeUi?.getState().booted').catch(() => false), '启动页');
     const js = (code) => win.webContents.executeJavaScript(code);
     win.setBounds({ x: 200, y: 110, width: 900, height: 620 });
 
@@ -134,19 +106,27 @@ app.whenReady().then(async () => {
     await js(`window.__codenodeProject.getState().setProjectFile(${JSON.stringify(projectFile)})`);
     await waitFor(async () => await js('!!document.querySelector(".app") && !!document.querySelector(".toolbar")'), '进入工作台');
     win.showInactive();
+    win.webContents.setBackgroundThrottling(false);
     await sleep(400);
 
-    // ---- 3. 设置入口是下拉框，三个选项 ----
     await js('window.__codenodeUi.getState().openSettings()');
-    await waitFor(async () => await js('!!document.querySelector("[data-theme-select]")'), '主题设置入口');
-    const choice = await js(`(() => {
-      const select = document.querySelector('[data-theme-select]');
-      return { tag: select.tagName, value: select.value, options: [...select.options].map(o => ({ id: o.value, label: o.textContent })), buttons: document.querySelectorAll('.settings-theme-choice').length };
-    })()`);
-    assert.equal(choice.tag, 'SELECT', '主题必须用下拉式选择');
-    assert.equal(choice.buttons, 0, '不应再有横排的主题按钮');
-    assert.deepEqual(choice.options.map((o) => o.id), ['light', 'dark', THIRD_THEME]);
-    assert.deepEqual(choice.options.map((o) => o.label), ['日间', '夜间', '无色玻璃']);
+    await waitFor(() => js('!!document.querySelector(".theme-switch")'), '主题开关');
+    assert.deepEqual(await js(`Array.from(document.querySelectorAll('[data-theme-choice]'), el => el.getAttribute('aria-label'))`), ['日间', '夜间']);
+    for (const theme of ids) {
+      await js(`document.querySelector('[data-theme-choice="${theme}"]').click()`);
+      await waitFor(() => js(`document.documentElement.dataset.theme === "${theme}" && document.querySelector('[data-theme-choice="${theme}"]').getAttribute('aria-pressed') === 'true'`), theme);
+      await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      await js("Promise.allSettled(document.getAnimations().filter(a => a.effect?.pseudoElement?.includes('view-transition')).map(a => a.finished))");
+      await sleep(350);
+      for (const selector of ['.global-settings', '.canvas-wrap', '.settings-layout > nav', '.conversation-right']) {
+        const bg = await js(`getComputedStyle(document.querySelector('${selector}')).backgroundColor`);
+        const red = Number(/^rgb\((\d+)/.exec(bg)?.[1]);
+        assert.ok(theme === 'light' ? red > 215 : red < 75, theme + ' ' + selector + ' ' + bg);
+      }
+      if (process.env.CODENODE_THEME_SHOTS) {
+        fs.writeFileSync(path.join(process.env.CODENODE_THEME_SHOTS, theme + '.png'), (await win.webContents.capturePage()).toPNG());
+      }
+    }
     await js('window.__codenodeUi.getState().closeSettings()');
 
     // ---- 4. 窗口本身必须不是透明窗口，底色始终保持不透明深色 ----
@@ -157,7 +137,7 @@ app.whenReady().then(async () => {
       assert.equal(windowBg(), '#222222', theme + ' 主题下窗口底色必须始终不透明，实际 ' + JSON.stringify(win.getBackgroundColor()));
     }
 
-    // ---- 5. 像素级不透明：三套主题都不允许把背后的棋盘格透出来 ----
+    // ---- 5. 像素级不透明：两套主题都不允许把背后的棋盘格透出来 ----
     const display = screen.getPrimaryDisplay();
     const scale = display.scaleFactor;
     const region = sampleRegion(scale);
@@ -177,6 +157,8 @@ app.whenReady().then(async () => {
     await sleep(300);
 
     win.hide();
+    backdrop.show();
+    backdrop.moveTop();
     await sleep(500);
     const backdropOnly = await captureRegion(region, scale, shotPath('backdrop-reference'));
     assert.ok(backdropOnly.sd > 60, '参照棋盘格必须是高频图案，实际标准差 ' + backdropOnly.sd);
@@ -214,7 +196,7 @@ app.whenReady().then(async () => {
 
     // ---- 6. 切换主题不得重置会话 / 草稿 / 模型 / 侧栏 ----
     await js(`window.__codenodeUi.setState({navigationOpen:true,conversationOpen:true,sideOpen:true,sideTab:'project',dockOpen:true,dockTab:'runs',appPage:'workbench'})`);
-    await js(`window.__codenodeSession.getState().pushUser('无色玻璃主题下的草稿与侧栏状态')`);
+    await js(`window.__codenodeSession.getState().pushUser('主题切换前的消息')`);
     const snapshot = `JSON.stringify({
       root: window.__codenodeProject.getState().root,
       file: window.__codenodeProject.getState().projectFile,
@@ -223,7 +205,7 @@ app.whenReady().then(async () => {
       ui: (({theme,navigationOpen,conversationOpen,sideOpen,sideTab,dockOpen,dockTab,appPage})=>({theme,navigationOpen,conversationOpen,sideOpen,sideTab,dockOpen,dockTab,appPage}))(window.__codenodeUi.getState())
     })`;
     const before = await js(snapshot);
-    for (const theme of [THIRD_THEME, 'light', 'dark', THIRD_THEME]) {
+    for (const theme of ['light', 'dark', 'light']) {
       await js(`window.__codenodeUi.getState().setTheme(${JSON.stringify(theme)})`);
       await sleep(160);
     }
@@ -232,22 +214,26 @@ app.whenReady().then(async () => {
     assert.equal(JSON.parse(after).file, JSON.parse(before).file);
     assert.equal(JSON.parse(after).messages, JSON.parse(before).messages);
     assert.equal(JSON.parse(after).model, JSON.parse(before).model);
-    assert.equal(JSON.parse(after).ui.theme, THIRD_THEME);
+    assert.equal(JSON.parse(after).ui.theme, 'light');
     for (const key of ['navigationOpen', 'conversationOpen', 'sideOpen', 'sideTab', 'dockOpen', 'dockTab', 'appPage']) {
       assert.equal(JSON.parse(after).ui[key], JSON.parse(before).ui[key], '切换主题不得改动 ' + key);
     }
 
     // ---- 7. 主题选择持久化 ----
-    assert.equal(await js(`localStorage.getItem('codenode.theme')`), THIRD_THEME);
+    assert.equal(await js(`localStorage.getItem('codenode.theme')`), 'light');
     if (backdrop && !backdrop.isDestroyed()) { backdrop.destroy(); backdrop = null; }
+    await js("localStorage.setItem('codenode.theme', 'bright')");
+    const reloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    win.webContents.reload();
+    await reloaded;
+    await waitFor(() => js("document.documentElement.dataset.theme === 'light' && localStorage.getItem('codenode.theme') === 'light'"), '旧主题迁移到日间');
 
-    console.log('BRIGHT THEME UI TEST: PASS (三套主题全部不透明；切换保留会话/草稿/模型/侧栏)' + (packageRoot ? ' [交付包 ' + packageRoot + ']' : ' [源码]'));
+    console.log('BRIGHT THEME UI TEST: PASS (两套主题全部不透明；切换保留会话/草稿/模型/侧栏)' + (packageRoot ? ' [交付包 ' + packageRoot + ']' : ' [源码]'));
     process.exitCode = 0;
     app.quit();
   } catch (error) {
     console.error('BRIGHT THEME UI TEST: FAIL', error);
-    process.exitCode = 1;
-    app.quit();
+    app.exit(1);
   }
 });
 

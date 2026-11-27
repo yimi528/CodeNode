@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom';
 import { useEffect } from 'react';
 import { CANVAS_ACTIONS } from '../lib/uiPreferences';
 import { useUiStore } from '../store/uiStore';
@@ -14,7 +15,7 @@ import CostSettingsPanel from './CostSettingsPanel';
 import ProjectIntegrationSettings from './ProjectIntegrationSettings';
 import VectorPluginCard from '../plugins/VectorPluginCard';
 import WebSearchSettingsPanel from './WebSearchSettingsPanel';
-import { THEMES, THEME_HINTS, THEME_LABELS, type Theme } from '../lib/theme';
+import { THEMES, THEME_LABELS, type Theme } from '../lib/theme';
 
 
 export default function GlobalSettings() {
@@ -37,6 +38,14 @@ export default function GlobalSettings() {
     return () => { window.removeEventListener('keydown', onKey); previous?.focus(); };
   }, [open, close]);
   if (!open) return null;
+  function chooseTheme(next: Theme) {
+    if (theme === next) return;
+    if (document.startViewTransition && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.startViewTransition(() => flushSync(() => setTheme(next)));
+    } else {
+      setTheme(next);
+    }
+  }
   const archived = tab === 'archived';
   const category = ['agents', 'execution', 'costs'].includes(tab) ? 'costs'
     : ['project', 'rag', 'web', 'editing'].includes(tab) ? 'project' : 'general';
@@ -47,11 +56,14 @@ export default function GlobalSettings() {
     ] as const).map(([id, label, icon]) => <button key={id} aria-pressed={category === id} onClick={() => openSettings(id)}><CanvasIcon name={icon} />{label}</button>)}</nav>}
     <div className="settings-content" key={tab}>
       {!archived && category === 'general' && <><h2>常规与界面</h2>
-        <section className="settings-group"><label className="settings-row" htmlFor="settings-theme"><span>主题<small className="settings-theme-hint">{THEME_HINTS[theme]}</small></span>
-          <select id="settings-theme" data-theme-select aria-label="主题" value={theme} onChange={event => setTheme(event.target.value as Theme)}>
-            {THEMES.map(id => <option key={id} value={id}>{THEME_LABELS[id]}</option>)}
-          </select>
-        </label>
+        <section className="settings-group"><div className="settings-row"><span id="settings-theme-label">主题</span>
+          <div className="theme-switch" role="group" aria-labelledby="settings-theme-label">
+            {THEMES.map(id => <button key={id} type="button" data-theme-choice={id}
+              aria-label={THEME_LABELS[id]} title={THEME_LABELS[id]} aria-pressed={theme === id} onClick={() => chooseTheme(id)}>
+              <CanvasIcon name={id === 'light' ? 'sun' : 'moon'} />
+            </button>)}
+          </div>
+        </div>
         <label className="settings-row"><span>默认工作台</span><select aria-label="工作台页面" value={preferences.workbenchView} onChange={e=>updatePreferences({workbenchView:e.target.value as 'overview'|'conversation'})}><option value="overview">总览</option><option value="conversation">对话</option></select></label>
         </section>
         <section className="settings-group"><label className="settings-row"><span>自动保存</span><input aria-label="自动保存项目" type="checkbox" checked={preferences.autoSaveEnabled} onChange={e=>updatePreferences({autoSaveEnabled:e.target.checked})}/></label>

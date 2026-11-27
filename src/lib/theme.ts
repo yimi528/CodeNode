@@ -1,45 +1,15 @@
 import themes from '../../config/ui.themes.json';
 
-/** 主题标识：日间 / 夜间 / 无色玻璃。三套都是不透明皮肤，都不穿透桌面。 */
-export type Theme = 'light' | 'dark' | 'bright';
-
-/** 主题顺序即设置面板里的选项顺序；三套主题共用同一套控件结构与布局。 */
-export const THEMES: readonly Theme[] = ['light', 'dark', 'bright'] as const;
-
-export const THEME_LABELS: Record<Theme, string> = {
-  light: '日间',
-  dark: '夜间',
-  bright: '无色玻璃',
-};
-
-/** 设置入口的补充说明。 */
-export const THEME_HINTS: Record<Theme, string> = {
-  light: '浅灰面板',
-  dark: '低眩光石墨灰磨砂',
-  bright: '纯无色玻璃质感 · 界面不透明',
-};
-
-/** 主题选择的持久化键位于 localStorage；主进程另存一份用于启动时决定窗口材质。 */
+export const THEMES = ['light', 'dark'] as const;
+export type Theme = typeof THEMES[number];
+export const THEME_LABELS = { light: '日间', dark: '夜间' };
 export const THEME_STORAGE_KEY = 'codenode.theme';
-export const DEFAULT_THEME: Theme = 'light';
-
-export function isTheme(value: unknown): value is Theme {
-  return typeof value === 'string' && (THEMES as readonly string[]).includes(value);
-}
+export const DEFAULT_THEME: Theme = 'dark';
 
 export function normalizeTheme(value: unknown): Theme {
-  return isTheme(value) ? value : DEFAULT_THEME;
+  return value === 'light' || value === 'bright' ? 'light' : DEFAULT_THEME;
 }
 
-/**
- * 页面 color-scheme：玻璃主题是亮色玻璃，原生控件（滚动条、下拉、输入光标）
- * 必须按亮色渲染，否则在亮玻璃上会出现黑底控件。
- */
-export function themeColorScheme(theme: Theme): 'light' | 'dark' {
-  return theme === 'dark' ? 'dark' : 'light';
-}
-
-/** 主题色值集中在 config/ui.themes.json；几何与交互不随主题变化。 */
 export function themeTokens(theme: Theme): Record<string, string> {
-  return (themes as Record<Theme, Record<string, string>>)[theme];
+  return themes[theme];
 }

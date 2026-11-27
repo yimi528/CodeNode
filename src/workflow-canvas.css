@@ -43,10 +43,16 @@
   --node-glass-bottom: rgba(34, 34, 34, .95);
 }
 
-.theme-bright .canvas-wrap {
-  --node-glass-top: rgba(57, 57, 57, .88);
-  --node-glass-center: rgba(47, 47, 47, .9);
-  --node-glass-bottom: rgba(40, 40, 40, .95);
+.theme-light .canvas-wrap {
+  --node-glass-top: #ffffff;
+  --node-glass-center: #fafbf9;
+  --node-glass-bottom: #eef1ed;
+  --node-glass-input: #eff2ee;
+  --node-glass-rim: #d2d7d1;
+  --node-glass-border: #c7cec7;
+  --node-glass-selection: #536c5c;
+  --node-glass-shadow: rgba(37, 48, 39, .12);
+  --canvas-dot: inherit;
 }
 
 .glass-theme .workspace-canvas .canvas-wrap .wf-node {
