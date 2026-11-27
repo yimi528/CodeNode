@@ -180,18 +180,12 @@ app.whenReady().then(async () => {
       console.log('GEOM ' + JSON.stringify(now));
     }
 
-    // 截图前把画布「显示全部节点」，保证每个节点都落在可视区内。
-    // 该动作现在位于顶部「画布操作」菜单里（config/ui.defaults.json 的 menuActions），用 data-action 定位；
-    // 不要再按按钮 title 找，title 早已改成「显示全部节点」。
-    // 刚被 Agent 新增的节点要等 React Flow 测完尺寸才参与 fit，第一次点击可能漏掉它 —— 最多重试 3 次。
+    // 新增节点的尺寸由 React Flow 异步测量，适应画布后再核对可见节点数量。
     const clickFit = () =>
       js(`(()=>{
-        const menu = [...document.querySelectorAll('details')].find((d) => /画布操作/.test((d.querySelector('summary')||{}).textContent || ''));
-        if (!menu) return 'no-menu';
-        menu.open = true;
-        const button = menu.querySelector('button[data-action="fit"]');
-        if (!button) { menu.open = false; return 'no-fit-item'; }
-        if (button.disabled) { menu.open = false; return 'fit-disabled'; }
+        const button = document.querySelector('.canvas-view-strip button[data-action="fit"]');
+        if (!button) return 'no-fit-button';
+        if (button.disabled) return 'fit-disabled';
         button.click();
         return 'clicked';
       })()`);

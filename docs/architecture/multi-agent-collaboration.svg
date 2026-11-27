@@ -32,7 +32,7 @@
 <path d="M1445 367 V412 H900 V439" fill="none" stroke="#3678ED" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-blue)"/>
 <rect x="500" y="440" width="800" height="86" rx="18" fill="#E9F0FF" stroke="#8EB5FF" stroke-width="2.4" filter="url(#shadow)"/>
 <text x="900.0" y="486" fill="#11294A" font-size="26" font-weight="700" text-anchor="middle" letter-spacing="0">有界 FIFO 调度器</text>
-<text x="900.0" y="520" fill="#8496B8" font-size="19" font-weight="400" text-anchor="middle" letter-spacing="0">默认最多同时运行 3 个子任务；按资源决定并行或独占</text>
+<text x="900.0" y="520" fill="#8496B8" font-size="19" font-weight="400" text-anchor="middle" letter-spacing="0">默认并发上限为 4；按工作区和权限决定并行或独占</text>
 <path d="M900 526 V541" fill="none" stroke="#3678ED" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M228 541 H1556" fill="none" stroke="#3678ED" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M228 541 V579" fill="none" stroke="#3678ED" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-blue)"/>
@@ -55,7 +55,7 @@
 <rect x="1416" y="585" width="280" height="120" rx="18" fill="#FFFFFF" stroke="#79B8F0" stroke-width="2.4" filter="url(#shadow)"/>
 <text x="1556.0" y="631" fill="#11294A" font-size="27" font-weight="700" text-anchor="middle" letter-spacing="0">Canvas</text>
 <text x="1556.0" y="665" fill="#8496B8" font-size="19" font-weight="400" text-anchor="middle" letter-spacing="0">画布修改与保存</text>
-<text x="82" y="742" fill="#8496B8" font-size="18" font-weight="400" text-anchor="start" letter-spacing="0">每个子 Agent 有独立消息与角色权限；默认 600 秒、12 轮、120,000 Token 上限，消耗仍计入父 Run。</text>
+<text x="82" y="742" fill="#8496B8" font-size="18" font-weight="400" text-anchor="start" letter-spacing="0">每个子 Agent 有独立消息与角色权限；时限、轮数与 Token 预算可收紧，消耗仍计入父 Run。</text>
 <rect x="48" y="795" width="1704" height="385" rx="30" fill="#F5FCF8" stroke="#8DD9AA" stroke-width="2.4" stroke-dasharray="10 10"/>
 <text x="73" y="837" fill="#11294A" font-size="22" font-weight="700" text-anchor="start" letter-spacing="1.0">2 · SCHEDULING &amp; ISOLATION / 并发与隔离规则</text>
 <rect x="86" y="872" width="490" height="145" rx="18" fill="#FFFFFF" stroke="#8DD9AA" stroke-width="2.4" filter="url(#shadow)"/>
