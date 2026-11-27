@@ -83,11 +83,28 @@ npm run eval:agent:repeat -- --mode=offline --task=edit-then-run-tests --trials=
 
 可以用 `npm run eval:agent:repeat -- --trials=3` 在当前检出版本重跑离线回归，检查每轮的运行记录与断言。[评测方法与历史结果](docs/agent-evals-anthropic.zh-CN.md)
 
-## 参与开发
+## 代码开发规范
 
-`npm run build` 检查渲染进程的类型并构建界面，`npm run check:js` 检查 Electron 主进程和脚本。运行 `npm test` 执行核心回归，或用 `npm run test:list` 查找单项检查。
+| 改动内容 | 放在哪里、怎样验证 |
+| --- | --- |
+| 界面与交互 | React / TypeScript 组件和状态放在 `src/`。渲染进程通过 preload 暴露的 IPC 接口请求文件或系统操作。改画布交互时，在 Electron 窗口中验证实际点击、键盘操作和最终状态。 |
+| 主进程与 Agent 工具 | 窗口、IPC、运行循环放在 `electron/`，工具实现放在 `electron/tools/`。工具接入现有注册与执行流程，让参数校验、权限检查和运行记录覆盖新行为。 |
+| 回归测试 | 无需显示环境的用例放在 `scripts/core/`，窗口交互用例放在 `scripts/ui/`。从正常入口执行，断言用户可观察的结果。例如测试编辑工具时，读取磁盘上的文件，再独立运行项目测试并检查退出码。 |
 
-改动合入 `main`。工作分支按 `<性质>-YYYYMMDD-<内容>` 命名，例如 `feat-20261127-merge-desktop-workbench`。环境配置与验证流程见[贡献指南](CONTRIBUTING.zh-CN.md)，架构、评测与开发记录见[文档索引](docs/README.md)。
+**代码格式。** 使用 UTF-8、LF 行尾，文件末尾保留换行。TypeScript、JavaScript 和 YAML 使用两个空格缩进。修改双语文档时，同步更新两版的步骤、命令和数据。[编辑器配置](.editorconfig) · [行尾规则](.gitattributes)
+
+**分支与提交。** 工作分支按 `<性质>-YYYYMMDD-<内容>` 命名，日期取建分支当天，内容用短横线连接的小写英文词，例如 `docs-20261127-workbench-guide`。提交标题用 `feat:`、`fix:`、`refactor:`、`docs:` 或 `chore:` 标明性质，正文说明动机和验证方式。PR 面向 `main`，附上实际执行的命令与结果。提交前排除生成的评测报告、运行日志和临时构建产物。[PR 模板](.github/pull_request_template.md)
+
+**开发日志。** 每次改动源码、配置、脚本、测试或文档，都在 `docs/development-log/YYYY-MM-DD.md` 追加本次记录。时间按上海时区写到秒，格式为 `YYYY-MM-DD HH:mm:ss CST`。分别填写“修复的 Bug”“更新内容”“验证结果”，没有对应内容时写“无”。[日志规范](docs/development-log/README.md)
+
+**提交前验证。** 先用 `npm run test:list` 找到受影响的用例，再执行以下检查。涉及界面、画布或 Electron 窗口时，另跑 `npm run test:display`。
+
+```sh
+npm run test:development-log
+npm run verify
+```
+
+`verify` 依次执行 `npm run build`、`npm run check:js` 和 `npm test`，分别覆盖渲染层构建、主进程与脚本静态检查、核心回归。[贡献指南](CONTRIBUTING.zh-CN.md) · [文档索引](docs/README.md)
 
 ## 许可证
 

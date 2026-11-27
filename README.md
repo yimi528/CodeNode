@@ -83,11 +83,28 @@ npm run eval:agent:repeat -- --mode=offline --task=edit-then-run-tests --trials=
 
 Run `npm run eval:agent:repeat -- --trials=3` to repeat the offline suite on your checkout and inspect the per-trial records and assertions. [Evaluation methods and historical results (Chinese)](docs/agent-evals-anthropic.zh-CN.md)
 
-## Development
+## Code development guidelines
 
-`npm run build` checks renderer types and builds the UI. `npm run check:js` checks the Electron process and scripts. Run `npm test` for the core regression suite or `npm run test:list` to find a specific check.
+| What you are changing | Where it belongs and how to check it |
+| --- | --- |
+| UI and interactions | Keep React / TypeScript components and state in `src/`. Request filesystem and system operations through the IPC interface exposed by preload. For a canvas change, exercise the actual pointer or keyboard interaction in Electron and check the resulting state. |
+| Main process and agent tools | Keep window management, IPC and the run loop in `electron/`, and tool implementations in `electron/tools/`. Use the existing tool registration and execution path so argument validation, permission checks and run records cover the new behavior. |
+| Regression tests | Put tests that need no display in `scripts/core/` and window interaction tests in `scripts/ui/`. Exercise the normal entry point and assert an observable result. For an editing tool, read the file back from disk, rerun the project test independently and check its exit code. |
 
-Changes land on `main`. Name working branches `<type>-YYYYMMDD-<topic>`, for example `feat-20261127-merge-desktop-workbench`. See the [contribution guide](CONTRIBUTING.md) for setup and verification, and the [documentation index](docs/README.md) for architecture, evaluations and development history.
+**Formatting.** Use UTF-8, LF line endings and a final newline. Indent TypeScript, JavaScript and YAML with two spaces. When editing a bilingual guide, keep its steps, commands and figures in sync across both versions. [Editor configuration](.editorconfig) · [Line-ending rules](.gitattributes)
+
+**Branches and commits.** Name working branches `<type>-YYYYMMDD-<topic>` using the creation date and a lowercase, hyphenated topic, for example `docs-20261127-workbench-guide`. Prefix commit subjects with `feat:`, `fix:`, `refactor:`, `docs:` or `chore:`. Explain the motivation and verification in the body. Target `main` with pull requests and include the commands you ran and their results. Exclude generated evaluation reports, runtime logs and temporary builds from commits. [Pull request template](.github/pull_request_template.md)
+
+**Development log.** For each change to source, configuration, scripts, tests or documentation, append an entry to `docs/development-log/YYYY-MM-DD.md`. Use Shanghai time in `YYYY-MM-DD HH:mm:ss CST` format. Keep the three required headings, “修复的 Bug” (bugs fixed), “更新内容” (changes) and “验证结果” (verification). Write “无” when a section has no entry. [Log format](docs/development-log/README.md)
+
+**Before committing.** Use `npm run test:list` to find the affected tests, then run the checks below. For changes to the UI, canvas or Electron windows, also run `npm run test:display`.
+
+```sh
+npm run test:development-log
+npm run verify
+```
+
+`verify` runs `npm run build`, `npm run check:js` and `npm test` in sequence. These cover the renderer build, static checks on the main process and scripts, and the core regression suite. [Contribution guide](CONTRIBUTING.md) · [Documentation index](docs/README.md)
 
 ## License
 
