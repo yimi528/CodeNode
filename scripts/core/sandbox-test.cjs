@@ -20,6 +20,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { EventEmitter } = require('events');
+const { PassThrough } = require('stream');
 
 const sandbox = require("../../electron/sandbox.cjs");
 const { safeEnvironment } = require("../../electron/envPolicy.cjs");
@@ -110,6 +112,26 @@ function pidAlive(pid) {
   console.log('policy: ' + sandbox.describe(policy));
   check('策略解析出可写根且包含项目根', policy.writeRoots.some((root) => root === path.resolve(projectRoot)));
   check('best-effort 模式不因平台能力不足 fail-closed', policy.ok === true);
+
+  // ---- 0. Windows Job 交互管道协议（跨平台单元验证） ----
+  {
+    /** @type {any} */
+    const broker = new EventEmitter();
+    broker.pid = 42; broker.stdin = new PassThrough(); broker.stdout = new PassThrough(); broker.stderr = new PassThrough(); broker.kill = () => true;
+    let brokerInput = ''; broker.stdin.on('data', chunk => { brokerInput += chunk.toString('utf8'); });
+    const child = new sandbox.SandboxChild({ broker, backend: 'windows-job', policy, file: 'fixture', args: [], interactive: true });
+    let childOutput = ''; child.stdout.on('data', chunk => { childOutput += chunk.toString('utf8'); });
+    child.stdin.write(Buffer.from('ACP request\n', 'utf8')); child.stdin.end();
+    broker.stdout.write(JSON.stringify({ ev: 'out', stream: 'stdout', b64: Buffer.from('ACP response\n').toString('base64') }) + '\n');
+    await wait(0);
+    const commands = brokerInput.trim().split(/\r?\n/).map(line => JSON.parse(line));
+    check('Windows Job 交互 stdin 通过 base64 协议转发', Buffer.from(commands[0].b64, 'base64').toString('utf8') === 'ACP request\n');
+    check('Windows Job 交互 stdin 可独立发送 EOF', commands[1].op === 'stdin_end');
+    check('Windows Job 交互 stdout 还原为原始字节', childOutput === 'ACP response\n');
+    const helperSource = fs.readFileSync(path.join(__dirname, '../../electron/sandbox/winjob.cs'), 'utf8');
+    check('Windows helper 实现交互协议与子进程 stdin 转发', helperSource.includes('op == "stdin"') && helperSource.includes('_child.StandardInput.BaseStream.Write'));
+    broker.emit('close', 0);
+  }
 
   // ---- 1. 隔离后端跑通正常命令 ----
   {
@@ -235,6 +257,45 @@ function pidAlive(pid) {
     } else {
       check('strict 模式在平台不支持所要求隔离时拒绝执行（fail-closed）', !!threw && threw.code === 'SANDBOX_UNAVAILABLE', threw ? threw.code : 'no throw');
     }
+  }
+
+  // ---- 5b. 外部 Agent 主进程策略：网络可用，但文件写入边界由 OS 沙箱承担 ----
+  {
+    const fakeCaps = {
+      platform: 'fake', backend: 'sandbox-exec',
+      isolation: { lifetime: true, processCount: false, memory: false, cpu: false, filesystem: true, network: true },
+      detail: 'fixture',
+    };
+    const base = sandbox.resolvePolicy({ mode: 'strict', network: 'deny', allowWrite: [path.join(projectRoot, 'generated')] },
+      { projectRoot, userDataDir: path.join(tmpRoot, 'userdata'), capabilities: fakeCaps });
+    const readOnly = sandbox.externalAgentPolicy(base, { projectRoot, access: 'read-only' });
+    check('外部 Agent 保持模型网络可用', readOnly.network === 'inherit');
+    check('外部 Agent 强制请求文件系统隔离', readOnly.requireFilesystem === true && readOnly.unsatisfied.length === 0);
+    check('只读外部 Agent 移除项目与项目子目录写权限', !readOnly.writeRoots.some(root => sandbox.canonicalPath(root).startsWith(sandbox.canonicalPath(projectRoot))));
+    const writable = sandbox.externalAgentPolicy(base, { projectRoot, access: 'workspace-write' });
+    check('可写外部 Agent 保留项目写权限', writable.writeRoots.some(root => sandbox.canonicalPath(root) === sandbox.canonicalPath(projectRoot)));
+    const macNetworkProfile = sandbox.sandboxExecProfile(writable);
+    check('macOS inherit 网络显式放行（deny-default 下不能只省略 deny）', macNetworkProfile.includes('(allow network*)'));
+    const noFilesystem = sandbox.externalAgentPolicy({ ...base, capabilities: { ...fakeCaps, backend: 'windows-job', isolation: { ...fakeCaps.isolation, filesystem: false } } },
+      { projectRoot, access: 'workspace-write' });
+    check('strict 外部 Agent 在无文件系统隔离时 fail-closed', noFilesystem.unsatisfied.includes('filesystem') && noFilesystem.ok === false);
+
+    const bestEffortBase = sandbox.resolvePolicy({ mode: 'best-effort' }, {
+      projectRoot,
+      capabilities: { ...fakeCaps, backend: 'none', isolation: { ...fakeCaps.isolation, lifetime: false, filesystem: false } },
+    });
+    const bestEffortExternal = sandbox.externalAgentPolicy(bestEffortBase, { projectRoot, access: 'workspace-write' });
+    check('best-effort 外部 Agent 在无文件系统隔离时也 fail-closed',
+      bestEffortExternal.unsatisfied.includes('filesystem') && bestEffortExternal.ok === false);
+    let externalThrew = null;
+    try {
+      sandbox.guardedInteractiveSpawn(
+        { file: process.execPath, args: ['-e', '0'], cwd: projectRoot, env: safeEnvironment() },
+        { policy: bestEffortExternal, context },
+      );
+    } catch (error) { externalThrew = error; }
+    check('外部 Agent 不得从 best-effort 降级为未隔离进程',
+      externalThrew?.code === 'SANDBOX_UNAVAILABLE', externalThrew ? String(externalThrew.message) : 'no throw');
   }
 
   // ---- 6. 无后端时 best-effort 降级并留审计 ----

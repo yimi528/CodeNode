@@ -13,19 +13,204 @@
   pointer-events: none;
 }
 .canvas-raster-mode > .react-flow { position: relative; z-index: 1; background: transparent; }
-
-.canvas-copy-preview {
-  position: absolute;
-  z-index: 2;
-  pointer-events: none;
-  border: 1px dashed var(--glass-accent);
-  border-radius: 8px;
-  background: var(--glass-control);
-}
 .canvas-raster-mode .react-flow__edge,
 .canvas-raster-mode .react-flow__node { opacity: 0; }
 .canvas-raster-mode .wf-waypoint { opacity: 0; }
 .canvas-raster-mode .react-flow__node.selected:has(.wf-vector),
 .canvas-raster-mode .react-flow__node.selected:has(.wf-image-node),
 .canvas-raster-mode .react-flow__node.selected:has(.wf-scope),
-.canvas-raster-mode .react-flow__node.selected:has(.wf-object-node) { opacity: 1; }
+.canvas-raster-mode .react-flow__node:has(.wf-workflow-card) { opacity: 1; }
+
+/* The workbench keeps its canvas surface. Node edges and ports use the node's accent. */
+.canvas-wrap {
+  --node-material: var(--glass-surface);
+  --node-glass-rim: rgba(255, 255, 255, .19);
+  --node-glass-border: rgba(255, 255, 255, .12);
+  --node-glass-selection: #ececec;
+  --node-glass-filter: blur(10px);
+  --edge-color: #777777;
+  --canvas-dot: #646464;
+}
+
+.glass-theme .workspace-canvas .canvas-wrap .wf-node {
+  --wf-outline: var(--wf-accent, var(--node-glass-border));
+  background: var(--node-material);
+  border-radius: 8px;
+}
+
+.glass-theme .workspace-canvas .canvas-wrap .wf-node.wf-status-running { --wf-outline: var(--stage-running, #f59e0b); }
+.glass-theme .workspace-canvas .canvas-wrap .wf-node.wf-status-done { --wf-outline: var(--stage-done, #22c55e); }
+.glass-theme .workspace-canvas .canvas-wrap .wf-node.wf-status-failed { --wf-outline: var(--stage-failed, #ef4444); }
+.glass-theme .workspace-canvas .canvas-wrap .wf-node.wf-status-blocked { --wf-outline: var(--stage-blocked, #8b5cf6); }
+
+.glass-theme .workspace-canvas .canvas-wrap .wf-node.wf-workflow-card {
+  --wf-outline: var(--wf-accent);
+  display: flex;
+  flex-direction: column;
+  width: 210px;
+  min-height: 104px;
+  padding: 0 10px;
+}
+
+.wf-workflow-card::before { display: none; }
+.glass-theme .workspace-canvas .wf-workflow-card .wf-node-title {
+  align-items: flex-start;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--glass-text);
+  font-size: 13px;
+}
+
+.wf-node-kind { color: var(--wf-accent); flex: none; font-size: 14px; }
+.wf-workflow-card :is(.wf-node-label, .wf-node-sub, .wf-node-body, .wf-node-footer) {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wf-workflow-card :is(.wf-node-label, .wf-node-sub) { overflow: visible; }
+.wf-workflow-card .wf-node-sub { margin: 0 0 5px; }
+.wf-node .wf-handle {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  background: var(--wf-accent, var(--node-glass-selection));
+  box-shadow: none;
+}
+
+.wf-node-body {
+  min-height: 32px;
+  margin: 0 0 7px;
+  color: var(--glass-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+.wf-node-prompt {
+  display: block;
+  width: 100%;
+  field-sizing: content;
+  resize: none;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  user-select: text;
+}
+.wf-node-prompt::placeholder { color: var(--glass-muted); }
+.wf-node-prompt:focus-visible { outline: 1px solid var(--node-glass-selection); outline-offset: 1px; }
+.wf-node-prompt:read-only { pointer-events: none; }
+
+.wf-workflow-card .wf-node-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  margin: auto -10px 0;
+  padding: 5px 10px 7px;
+  border-top: 1px solid var(--glass-border);
+  text-align: left;
+}
+.wf-workflow-card .wf-status-text, .wf-plan-status {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 5px;
+  max-width: 100%;
+}
+.wf-workflow-card .wf-status-dot, .wf-plan-light {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: .35em;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: none;
+}
+.wf-plan-status { color: var(--glass-muted); }
+.wf-plan-status[data-status="completed"] { color: var(--stage-done, #22c55e); }
+.wf-plan-status[data-status="blocked"] { color: var(--stage-blocked, #a78bfa); }
+.wf-agent-plan.is-working .wf-plan-status { color: var(--stage-running, #f59e0b); }
+.wf-agent-plan.is-working::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--stage-running, #f59e0b);
+  border-radius: inherit;
+  box-shadow: 0 0 14px var(--stage-running, #f59e0b);
+  pointer-events: none;
+  animation: agent-plan-glow 2.4s ease-in-out infinite;
+}
+@keyframes agent-plan-glow {
+  0%, 100% { opacity: .24; }
+  50% { opacity: .8; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wf-agent-plan.is-working::after { animation: none; opacity: .55; }
+}
+
+.glass-theme .workspace-canvas .canvas-wrap .wf-node:not(.is-dragover) {
+  border-color: var(--wf-outline) !important;
+}
+
+.glass-theme .workspace-canvas .react-flow__node.selected > .wf-node:not(.is-dragover) {
+  outline: 1px solid var(--wf-outline);
+  outline-offset: 1px;
+}
+
+.workspace-canvas .react-flow__edge:not(.animated, .selected, :hover) .react-flow__edge-path {
+  stroke: var(--edge-color);
+}
+
+.glass-theme .workspace-canvas .react-flow__node.selected .wf-node:not(.wf-workflow-card),
+.glass-theme .workspace-canvas .canvas-wrap:not(.canvas-raster-mode) .wf-node:not(.wf-workflow-card) {
+  backdrop-filter: var(--node-glass-filter);
+}
+
+.glass-theme .workspace-canvas .wf-vector :is(.wf-vector-body, .vs-stage) {
+  background: transparent;
+}
+
+.glass-theme .workspace-canvas .wf-vector :is(.wf-vector-rail, .vs-node-dock) {
+  background: rgba(0, 0, 0, .17);
+}
+
+.glass-theme .workspace-canvas .wf-vector .wf-vector-title {
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+}
+
+.glass-theme .workspace-canvas .wf-vector .wf-vector-foot {
+  border-radius: 0 0 9px 9px;
+  background: rgba(0, 0, 0, .12);
+}
+
+.glass-theme .workspace-canvas .wf-vector :is(.wf-vector-mode.on, .wf-vector-icon.on) {
+  background: var(--glass-selected);
+  color: var(--glass-text);
+  border-color: var(--node-glass-rim) !important;
+  box-shadow: none;
+}
+
+.glass-theme .workspace-canvas .wf-vector-body:not(.vs-light) .vs-canvas {
+  background: #242424;
+}
+
+.glass-theme .workspace-canvas .wf-vector-body:not(.vs-light) :is(.vs-ruler, .vs-ruler-corner, .vs-zoombar) {
+  background: #2b2b2b;
+  border-color: var(--node-glass-border);
+}
+
+.glass-theme .workspace-canvas .wf-vector-body:not(.vs-light) :is(.vs-tick i, .vs-zoombar button) {
+  color: var(--glass-muted);
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .glass-theme .canvas-wrap {
+    --node-material: var(--glass-base);
+    --node-glass-border: var(--glass-muted);
+    --node-glass-rim: var(--glass-muted);
+    --node-glass-selection: var(--glass-text);
+    --node-glass-filter: none;
+  }
+}

@@ -119,7 +119,7 @@ const WRITE_TOOLS = ['write_file', 'edit_file', 'workbench_edit', 'save_project'
     check('C3 能力：可用工具逐条列出且与传入完全一致（含描述）',
       /- edit_file：精确替换/.test(prompt) && /- read_file：读文件/.test(prompt));
     check('C4 技能：职责技能逐条展开（标题 + 规程）',
-      /【职责技能/.test(prompt) && /先读后写/.test(prompt) && /优先用 edit_file 做精确替换/.test(prompt));
+      /【职责技能/.test(prompt) && /先读后写/.test(prompt) && /优先用 file_ops\(kind=edit\) 做精确替换/.test(prompt));
     check('C5 项目 Skill：与主代理同款标注（不可信数据）并含内容',
       /【项目 Skills/.test(prompt) && /不可信数据/.test(prompt) && /改动前先跑 check:js/.test(prompt));
     check('C6 运行规则：禁止谎报 + 失败要分析重试 + 不绕道 都在',
@@ -218,10 +218,9 @@ const WRITE_TOOLS = ['write_file', 'edit_file', 'workbench_edit', 'save_project'
   {
     const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false, toolsAllowed: [] });
     new SubagentManager({ agent: { runAgentChat: async () => ({}) }, toolkit, cfg: { tools: {} }, registry }).register(registry);
-    // 工具面收敛 L3：派活入口是族工具 `delegate`（旧名 delegate_task 是它的别名）
-    const desc = String(registry.descriptorOf('delegate').description || '');
+    const desc = String(registry.descriptorOf('delegate_task').description || '');
     const missing = roles.ROLE_NAMES.filter((name) => !desc.includes(name) || !desc.includes(roles.roleLabel(name)));
-    check('E1 delegate 描述里每个角色都带身份名（主代理据此派活）', missing.length === 0, missing.join(','));
+    check('E1 delegate_task 描述里每个角色都带身份名（主代理据此派活）', missing.length === 0, missing.join(','));
     check('E2 描述里带「工作类型」而不仅是角色名（能对上工作与角色）',
       /回答「在哪里/.test(desc) && /跑测试/.test(desc) && /审查/.test(desc), desc.slice(0, 160));
   }

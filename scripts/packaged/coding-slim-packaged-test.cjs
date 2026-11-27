@@ -46,13 +46,8 @@ app.whenReady().then(async () => {
     const store = new ScalarStore(root);
     store.set('node:n1:goal', '保留基础属性读取', 'node');
     const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false });
-    /**
-     * 工具面收敛（L1）：`query_scalars` 并入 `retrieve_context` 的 scalar 模式，
-     * 且后者在 ragEnabled=false 时**仍然注册**（它是标量库唯一入口）。
-     * 判据因此改成「标量能力可用」而不是「注册了哪个名字」。
-     */
-    assert.ok(registry.contains('retrieve_context'));
-    assert.ok(registry.listAliases().some((a) => a.name === 'query_scalars' && a.family === 'retrieve_context'));
+    assert.ok(registry.contains('query_scalars'));
+    assert.ok(!registry.contains('retrieve_context'));
     const result = await registry.execute('query_scalars', { key: 'node:n1:goal' }, new AgentToolContext({ projectRoot: root, scalarStore: store, ragConfig: { enabled: false } }));
     assert.equal(result.ok, true);
     assert.equal(result.data.items[0].value, '保留基础属性读取');

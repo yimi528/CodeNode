@@ -1,9 +1,8 @@
-import { create, type StateCreator } from 'zustand';
+import { create } from 'zustand';
 import { useGraphStore } from './graphStore';
 import { useProjectStore } from './projectStore';
 import { useUiStore } from './uiStore';
 import { applyStreamDelta, warnUnknownDelta } from '../lib/sessionDelta';
-import { conversationTitle, firstTitleMessage } from '../lib/conversationTitle';
 import type { RagGrounding, SessionCanvas, SessionDoc, SessionMsg, ToolRecord } from '../types';
 
 const uid = (p: string) => `${p}-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
@@ -69,7 +68,7 @@ interface SessionState {
   /** 新建项目：创建画布1（对话根），并把灵魂问候写入全局对话 */
   initProject: (greeting?: string, soulPrompt?: string) => void;
   /** 每条用户指令开始时：把上一个画布标记完成，新建下一个空白画布并切换 */
-  beginWorkSession: (prompt: string, summary?: string) => void;
+  beginWorkSession: (prompt: string) => void;
   /** 用户手动新建空白画布 */
   newCanvas: () => void;
   newConversation: (options?: { preserveDraft?: boolean }) => void;
@@ -86,7 +85,9 @@ interface SessionState {
 
   getDocument: () => SessionDoc;
   pushUser: (content: string, attachments?: SessionMsg['attachments']) => void;
-  beginTurn: (turnId?: string) => void;
+  beginTurn: () => void;
+  updateMessage: (index: number, patch: Partial<SessionMsg>) => void;
+  updateRun: (runId: string, patch: Partial<SessionMsg['run']>) => void;
   streamDelta: (d: {
     document?: SessionDoc;
     content?: any;
@@ -97,10 +98,10 @@ interface SessionState {
     exitStatus?: any;
     diff?: string;
     changes?: SessionMsg['backendChanges'];
-    codeVerification?: import('../types').CodeVerificationReport;
+    taskAcceptance?: import('../types').TaskAcceptanceReport; codeVerification?: import('../types').CodeVerificationReport;
     fileChange?: { path?: string; kind?: string; detail?: string };
     kind?: string;
-    continuing?: boolean;
+    state?: string;
     text?: string;
     toolCalls?: unknown;
     saved?: { filePath?: string };
@@ -147,9 +148,9 @@ interface SessionState {
    * （不再发给模型），摘要卡（`compaction:true`）原文进历史。幂等：同一份摘要重复到达不叠卡。
    */
   compactHistory: (payload: { envelope: string; summary?: string; windowNumber?: number; tokensBefore?: number; tokensAfter?: number; keptUserTurns?: number }) => void;
-  finishTurn: (reply: string, reasoning: string, tools: ToolRecord[], grounding?: RagGrounding, status?: 'done' | 'truncated' | 'limit_reached') => void;
+  finishTurn: (reply: string, reasoning: string, tools: ToolRecord[], grounding?: RagGrounding) => void;
   failTurn: (error: string) => void;
-  stopTurn: (status?: 'stopped' | 'needs_review') => void;
+  stopTurn: () => void;
   applyAgentDoc: (doc: SessionDoc) => void;
   /** 标记当前画布为 active（就地修改场景下保持当前画布为工作画布） */
   markActive: () => void;
@@ -194,21 +195,11 @@ function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
 }
 
-export function latestConversationMessage(messages: SessionMsg[] = []): SessionMsg | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role === 'assistant' || message?.role === 'user') return message;
-  }
-}
-
 function validMemoryConversationId(value: string | undefined): boolean {
   return /^[\w.-]{1,120}$/.test(value || '') && !['__proto__', 'constructor', 'prototype'].includes(value || '');
 }
 
-function sessionState(visible: boolean): StateCreator<SessionState> {
-  const showGraph = (doc: SessionDoc) => { if (visible) loadGraph(doc); };
-  const toast = (message: string) => { if (visible) useUiStore.getState().setToast(message); };
-  return (set, get) => ({
+export const useSessionStore = create<SessionState>((set, get) => ({
   draftRevision: 0,
   newConversationPending: false,
   sessions: {},
@@ -259,10 +250,10 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
       messages,
       progress: null,
     });
-    showGraph(emptyDoc());
+    loadGraph(emptyDoc());
   },
 
-  beginWorkSession: (prompt, summary) => {
+  beginWorkSession: (prompt) => {
     get().syncActiveGraph();
     const s = get();
     let sessions = { ...s.sessions };
@@ -275,7 +266,7 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
     const usedLabels = new Set(Object.values(sessions).filter(canvas => !canvas.archived).map(canvas => canvas.label));
     let number = 1;
     while (usedLabels.has('画布' + number)) number++;
-    const label = conversationTitle('画布' + number, { content: prompt });
+    const label = '画布' + number;
     const blank: SessionCanvas = {
       id,
       label,
@@ -284,11 +275,10 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
       status: 'active',
       createdAt: Date.now(),
       nodeCount: 0,
-      ...(summary ? { summary } : {}),
     };
     sessions = { ...sessions, [id]: blank };
     order.push(id);
-    showGraph(blank.doc);
+    loadGraph(blank.doc);
     set({ newConversationPending: false, sessions, order, activeId: id, memoryConversationId: s.memoryConversationId || uid('memory'), activePlanSessionId: id, streaming: false, progress: null, plan: null, planUpdatedAt: null, planRunId: null });
   },
 
@@ -301,7 +291,7 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
       const next = s.order.find(other => other !== id && !get().sessions[other]?.archived);
       if (next) get().switchSession(next);
       else {
-        showGraph(emptyDoc());
+        loadGraph(emptyDoc());
         set({ activeId: null, activePlanSessionId: null, progress: null, plan: null, planUpdatedAt: null, planRunId: null, intentVerdict: null });
       }
     } else if (!archived && !s.activeId) get().switchSession(id);
@@ -319,32 +309,29 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
   switchSession: (id) => {
     const s = get();
     if (id === s.activeId || !s.sessions[id]) return;
-    if (s.streaming) { toast('Agent 正在运行，请先停止或等待完成后切换会话'); return; }
+    if (s.streaming) { useUiStore.getState().setToast('Agent 正在运行，请先停止或等待完成后切换会话'); return; }
     // 先把当前画布的最新状态（含自动排版后的节点位置）保存回会话，避免切换后位置丢失/重叠
     get().syncActiveGraph();
     const target = s.sessions[id];
-    showGraph(target.doc);
+    loadGraph(target.doc);
     const savedPlan = s.plansBySessionId[id] || null;
     set({
       activeId: id,
       newConversationPending: false,
-      messages: target.messages || [],
+      messages: target.messages || s.messages,
       memoryConversationId: target.memoryConversationId || s.memoryConversationId,
       activePlanSessionId: id,
       progress: null,
       plan: savedPlan ? savedPlan.items : null,
       planUpdatedAt: savedPlan ? savedPlan.updatedAt : null,
       planRunId: savedPlan ? savedPlan.runId : null,
-      intentVerdict: null,
-      intentUpdatedAt: null,
-      intentRunId: null,
     });
   },
 
   syncActiveGraph: () => {
     const active = get().current();
     if (!active) return;
-    const doc = get().getDocument();
+    const doc = snapshotGraph();
     set((s) => ({
       sessions: { ...s.sessions, [active.id]: { ...active, doc, nodeCount: countNodes(doc), messages: clone(s.messages), memoryConversationId: s.memoryConversationId } },
     }));
@@ -359,7 +346,7 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
     const order: string[] = [];
     for (const s of list) {
       if (!s || !s.id) continue;
-      sessions[s.id] = { ...s, label: conversationTitle(s.label, firstTitleMessage(s.messages)) };
+      sessions[s.id] = s;
       order.push(s.id);
     }
     let id = activeId && sessions[activeId] && !sessions[activeId].archived ? activeId : null;
@@ -384,21 +371,19 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
     }
     if (!id) {
       set({ sessions, order, activeId: null, memoryConversationId: stableMemoryId, memoryTaskEpoch: taskEpoch, activePlanSessionId: null, plansBySessionId: {}, plan: null, planUpdatedAt: null, planRunId: null, streaming: false, messages: messages || [], progress: null });
-      showGraph(emptyDoc());
+      loadGraph(emptyDoc());
       return;
     }
-    const restoredMessages = sessions[id].messages || messages || [];
-    sessions[id] = { ...sessions[id], label: conversationTitle(sessions[id].label, firstTitleMessage(restoredMessages)) };
-    showGraph(sessions[id].doc);
-    set({ sessions, order, activeId: id, memoryConversationId: stableMemoryId, memoryTaskEpoch: taskEpoch, activePlanSessionId: id, plansBySessionId: {}, plan: null, planUpdatedAt: null, planRunId: null, streaming: false, messages: restoredMessages, progress: null });
+    loadGraph(sessions[id].doc);
+    set({ sessions, order, activeId: id, memoryConversationId: stableMemoryId, memoryTaskEpoch: taskEpoch, activePlanSessionId: id, plansBySessionId: {}, plan: null, planUpdatedAt: null, planRunId: null, streaming: false, messages: sessions[id].messages || messages || [], progress: null });
   },
 
-  getDocument: () => visible ? snapshotGraph() : get().current()?.doc || emptyDoc(),
+  getDocument: () => snapshotGraph(),
 
   newConversation: (options) => {
     if (get().streaming) return;
     get().syncActiveGraph();
-    showGraph(emptyDoc());
+    loadGraph(emptyDoc());
     set(state => ({ activeId: null, activePlanSessionId: null, messages: [], progress: null, plan: null, planUpdatedAt: null, planRunId: null, intentVerdict: null, memoryConversationId: uid('memory'), memoryTaskEpoch: state.memoryTaskEpoch + 1, draftRevision: state.draftRevision + (options?.preserveDraft ? 0 : 1), newConversationPending: true }));
   },
 
@@ -427,28 +412,32 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
   },
 
   pushUser: (content, attachments) => {
-    const message: SessionMsg = { role: 'user', content, ...(attachments?.length ? { attachments } : {}) };
-    set((s) => {
-      const active = s.activeId ? s.sessions[s.activeId] : null;
-      const label = active ? conversationTitle(active.label, message) : '';
-      return {
-        messages: [...s.messages, message],
-        ...(active && label !== active.label && { sessions: { ...s.sessions, [active.id]: { ...active, label } } }),
-      };
-    });
-  },
-
-  beginTurn: (turnId) => {
     set((s) => ({
-      streaming: true,
-      messages: [...s.messages, { role: 'assistant', content: '', status: 'running', tools: [], turnId }],
+      messages: [...s.messages, { role: 'user', content, ...(attachments && attachments.length ? { attachments } : {}) }],
     }));
   },
 
+  beginTurn: () => {
+    set((s) => ({
+      streaming: true,
+      messages: [...s.messages, { role: 'assistant', content: '', status: 'running', tools: [] }],
+    }));
+  },
+
+  updateMessage: (index, patch) => set(s => ({ messages: s.messages.map((message, at) => at === index ? { ...message, ...patch } : message) })),
+  updateRun: (runId, patch) => set(s => ({ messages: s.messages.map(message => message.run?.id === runId ? { ...message, run: { ...message.run, ...patch } } : message) })),
+
   streamDelta: (d) => {
     const s = get();
+    if (d.kind === 'state') {
+      const index = s.messages.map(message => message.role).lastIndexOf('assistant');
+      const message = s.messages[index];
+      if (message?.run) get().updateRun(message.run.id, { state: d.state || 'RUNNING', reason: d.reason });
+      return;
+    }
+    if (d.kind === 'done') return;
     if (d.kind === 'model' && d.document?.root) { get().applyAgentDoc(d.document); return; }
-    if (d.kind === 'backend_approval' || d.kind === 'backend_input') return; // ToolDialog handles the interaction.
+    if (d.kind === 'backend_approval') return; // The existing approval dialog owns the user interaction.
     if (['backend_content', 'backend_info', 'backend_terminal'].includes(d.kind || '')) {
       const messages = s.messages.slice();
       const at = messages.map(message => message.role).lastIndexOf('assistant');
@@ -471,6 +460,12 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
       if (at >= 0) messages[at] = { ...messages[at], editedFiles: [...new Set([...(messages[at].editedFiles || []), d.fileChange.path])] };
       set({ messages }); return;
     }
+    if (d.kind === 'task_acceptance' && d.taskAcceptance) {
+      const messages = s.messages.slice();
+      const at = messages.map(message => message.role).lastIndexOf('assistant');
+      if (at >= 0) messages[at] = { ...messages[at], taskAcceptance: d.taskAcceptance };
+      set({ messages }); return;
+    }
     if (d.kind === 'code_verification' && d.codeVerification) {
       const messages = s.messages.slice();
       const at = messages.map(message=>message.role).lastIndexOf('assistant');
@@ -478,7 +473,7 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
       set({messages}); return;
     }
     if (d.kind === 'plan_warning') {
-      toast(String(d.message || '任务计划持久化未完整，请核对运行记录'));
+      useUiStore.getState().setToast(String(d.message || '任务计划持久化未完整，请核对运行记录'));
       return;
     }
     /**
@@ -539,16 +534,18 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
         tokensAfter: d.tokensAfter,
         keptUserTurns: d.keptUserTurns,
       });
-      toast('上下文已压缩（' + (d.windowNumber ? '第 ' + d.windowNumber + ' 次 · ' : '') + (d.tokensBefore || 0) + ' → ' + (d.tokensAfter || 0) + ' tokens）');
+      useUiStore.getState().setToast('上下文已压缩（' + (d.windowNumber ? '第 ' + d.windowNumber + ' 次 · ' : '') + (d.tokensBefore || 0) + ' → ' + (d.tokensAfter || 0) + ' tokens）');
       return;
     }
     if (d.kind === 'compacted' && d.ok === false) {
-      toast('上下文压缩失败：' + (d.reason || '未知原因') + '（已改用硬裁剪兜底）');
+      useUiStore.getState().setToast('上下文压缩失败：' + (d.reason || '未知原因') + '（已改用硬裁剪兜底）');
       return;
     }
     // 超窗自救：供应商真报了超窗 → 立刻压缩重发。必须让用户看到「为什么这一轮慢了一拍」。
     if (d.kind === 'context_overflow') {
-      toast(
+      useUiStore
+        .getState()
+        .setToast(
           d.phase === 'recovering'
             ? '上下文超窗：正在压缩后重试（估算 ' + (d.tokens || 0) + ' tokens，已将本模型窗口下调为 ' + (d.window || 0) + '）'
             : '上下文超窗：本轮未发送（估算 ' + (d.tokens || 0) + ' tokens > 窗口 ' + (d.window || 0) + '）'
@@ -563,15 +560,17 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
       const conflicts = Number((d.counts && d.counts.conflicts) || 0);
       const superseded = Number((d.counts && d.counts.superseded) || 0);
       if (conflicts > 0) {
-        toast('子代理结果有 ' + conflicts + ' 处冲突待裁决（同一资源被不同内容改动，未擅自取舍）');
+        useUiStore
+          .getState()
+          .setToast('子代理结果有 ' + conflicts + ' 处冲突待裁决（同一资源被不同内容改动，未擅自取舍）');
       } else if (superseded > 0) {
-        toast('子代理结果已合并：' + superseded + ' 处被后写的覆盖（两份都留痕）');
+        useUiStore.getState().setToast('子代理结果已合并：' + superseded + ' 处被后写的覆盖（两份都留痕）');
       }
       return;
     }
     // 输出预算被上下文挤压：本轮输出上限临时缩小（如实告知，别让用户以为模型变笨了）
     if (d.kind === 'max_tokens_capped') {
-      toast('上下文偏满：本轮输出上限临时从 ' + (d.from || 0) + ' 降为 ' + (d.to || 0));
+      useUiStore.getState().setToast('上下文偏满：本轮输出上限临时从 ' + (d.from || 0) + ' 降为 ' + (d.to || 0));
       return;
     }
     const msgs = s.messages.map((m) => ({ ...m }));
@@ -579,9 +578,9 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
     if (!last || last.role !== 'assistant') return;
     // 「已保存」是副作用提示，不改气泡内容；未知 kind 兜底时不吞掉它
     if (d.kind === 'saved') {
-      if (visible && d.saved && d.saved.filePath) {
+      if (d.saved && d.saved.filePath) {
         useProjectStore.getState().setProjectFile(d.saved.filePath);
-        toast('Agent 已保存：' + d.saved.filePath);
+        useUiStore.getState().setToast('Agent 已保存：' + d.saved.filePath);
       }
       return;
     }
@@ -631,23 +630,23 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
       // 不再等 finally（那个窗口里界面看起来像没反应）。同时把 streaming 收掉，
       // 避免「已停止」的气泡旁边还挂着「思考中…」。
       last.status = outcome.status;
-      if (outcome.status !== 'done' && !(d.kind === 'truncated' && d.continuing)) set({ messages: msgs, streaming: false });
+      if (outcome.status !== 'done') set({ messages: msgs, streaming: false });
       else set({ messages: msgs });
       return;
     }
     set({ messages: msgs });
   },
 
-  finishTurn: (reply, reasoning, tools, grounding, status = 'done') => {
+  finishTurn: (reply, reasoning, tools, grounding) => {
     const s = get();
     const msgs = s.messages.map((m) => ({ ...m }));
-    const last = latestConversationMessage(msgs);
+    const last = msgs[msgs.length - 1];
     const previousUser = [...msgs].reverse().find((message) => message.role === 'user');
     if (last && last.role === 'assistant') {
       last.content = reply || last.content;
       if (reasoning) last.reasoning = reasoning;
       if (tools && tools.length) last.tools = tools;
-      last.status = status;
+      last.status = 'done';
       if (grounding) last.grounding = grounding;
       if (previousUser) last.feedbackInput = String(previousUser.content || '').slice(0, 12000);
     }
@@ -680,7 +679,7 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
   failTurn: (error) => {
     const s = get();
     const msgs = s.messages.map((m) => ({ ...m }));
-    const last = latestConversationMessage(msgs);
+    const last = msgs[msgs.length - 1];
     if (last && last.role === 'assistant') {
       last.status = 'failed';
       // 已流出的半截内容**不能抹掉**：流式中断时那是用户唯一拿到的东西，
@@ -691,12 +690,12 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
     set({ messages: msgs, streaming: false });
   },
 
-  stopTurn: (status = 'stopped') => {
+  stopTurn: () => {
     const s = get();
     const msgs = s.messages.map((m) => ({ ...m }));
-    const last = latestConversationMessage(msgs);
+    const last = msgs[msgs.length - 1];
     if (last && last.role === 'assistant') {
-      last.status = status;
+      last.status = 'stopped';
     }
     // 停止 → 流式立刻结束。修复前 `streaming` 与单值 `sending` 不同步，存在
     // 「UI 已显示空闲、旧请求尚未收尾」的窗口；现在 `sending` 是派生的 inflight 计数，窗口消失。
@@ -715,13 +714,13 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
       doc: clean,
       nodeCount: countNodes(clean),
     };
-    showGraph(clean);
+    loadGraph(clean);
     const edgeIds = clean.root.edges.map((e) => e.id).filter(Boolean);
     const next = edgeIds.length ? { edgeIds, index: 0, running: true } : null;
     set({ sessions, progress: next });
     // 有新节点：等 React Flow 渲染测量后，按连通分量分块自动整理（而非全部排成一排），
     // 并把排版结果持久化回会话
-    if (visible && newIds.length > 0) {
+    if (newIds.length > 0) {
       const targetId = get().activeId;
       const doLayout = () => {
         // 用户已切走画布：不再对错误画布排版
@@ -786,46 +785,7 @@ function sessionState(visible: boolean): StateCreator<SessionState> {
   },
 
   reset: () => set({ sessions: {}, order: [], activeId: null, memoryConversationId: '', memoryTaskEpoch: 0, activePlanSessionId: null, plansBySessionId: {}, streaming: false, messages: [], progress: null, plan: null, planUpdatedAt: null, intentVerdict: null, intentUpdatedAt: null, intentRunId: null }),
-  });
-}
-
-export const useSessionStore = create<SessionState>(sessionState(true));
-
-export function detachSession() {
-  const source = useSessionStore.getState();
-  const active = source.current();
-  if (!active) return null;
-  const doc = source.getDocument();
-  const store = create<SessionState>(sessionState(false));
-  store.setState({
-    sessions: { [active.id]: { ...active, doc, nodeCount: countNodes(doc), memoryConversationId: source.memoryConversationId } },
-    order: [active.id], activeId: active.id, streaming: source.streaming,
-    ...turnView(source),
-  });
-  return store;
-}
-
-function turnView(state: SessionState) {
-  const { messages, activePlanSessionId, plan, planUpdatedAt, planRunId, plansBySessionId, intentVerdict, intentUpdatedAt, intentRunId, progress } = state;
-  return { messages, activePlanSessionId, plan, planUpdatedAt, planRunId, plansBySessionId, intentVerdict, intentUpdatedAt, intentRunId, progress };
-}
-
-export function mergeDetachedSession(background: SessionState) {
-  const origin = background.current();
-  if (!origin) return;
-  const front = useSessionStore.getState();
-  if (!front.sessions[origin.id]) return;
-  const sessions = { ...front.sessions, [origin.id]: { ...origin, messages: background.messages } };
-  const plansBySessionId = { ...front.plansBySessionId };
-  const plan = background.plansBySessionId[origin.id];
-  if (plan) plansBySessionId[origin.id] = plan;
-  if (front.activeId === origin.id) {
-    loadGraph(origin.doc);
-    useSessionStore.setState({ ...turnView(background), sessions, plansBySessionId, streaming: background.streaming });
-  } else {
-    useSessionStore.setState({ sessions, plansBySessionId });
-  }
-}
+}));
 
 /** 合并工具记录：流式增量按 id 去重（同一调用多次 chunk 只算一条）；最终结果按 name+args 回填到未定结果条目，保留每次真实调度 */
 function mergeTools(current: ToolRecord[], incoming: ToolRecord[]): ToolRecord[] {

@@ -258,13 +258,8 @@ function registryFor(leases, over = {}) {
     assert.deepStrictEqual(keys1, resourceKeysFor('write_file', { filePath: path.join(root, 'a', 'b.txt') }, { projectRoot: root }), '相对/绝对路径必须归一到同一键');
     assert.deepStrictEqual(resourceKeysFor('read_file', { path: 'a/b.txt' }, { projectRoot: root }), [], '读不加锁');
     assert.deepStrictEqual(resourceKeysFor('workbench_edit', {}, { projectRoot: root }), ['resource:canvas']);
-    // 工具面收敛后 bulk_edit 是 workbench_edit 的别名，资源键按解析后的族名 + kind 推导
-    const bulk = resourceKeysFor('workbench_edit', { kind: 'bulk_create_files', list: [{ path: 'a.txt' }, { path: 'a.txt' }] }, { projectRoot: root });
+    const bulk = resourceKeysFor('bulk_edit', { edits: [{ path: 'a.txt' }, { path: 'a.txt' }] }, { projectRoot: root });
     assert.strictEqual(bulk.length, 1, '同一文件的重复出现只占一把锁');
-    // 族工具按 kind 分流资源：保存工程 ≠ 画布，记忆写入 ≠ 记忆检索
-    assert.deepStrictEqual(resourceKeysFor('workbench_edit', { kind: 'save_project' }, { projectRoot: root }), ['resource:project-save']);
-    assert.deepStrictEqual(resourceKeysFor('memory', { action: 'search', query: 'x' }, { projectRoot: root }), [], '记忆检索不加锁');
-    assert.deepStrictEqual(resourceKeysFor('get_workbench_model', { view: 'focus' }, { projectRoot: root }), [], '视口动作不改文档，不加锁');
   });
 
   // ---- registry.execute 层：闸门真的生效 ----

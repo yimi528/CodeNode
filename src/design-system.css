@@ -1,0 +1,35 @@
+/*
+ * CodeNode design primitives.
+ *
+ * This is the only static :root fallback palette. Runtime themes replace color
+ * tokens from config/ui.themes.json; component styles consume semantic tokens
+ * and must not create another global palette in styles.css.
+ */
+:root {
+  --bg: #0a0e14;
+  --bg-panel: #111720;
+  --bg-panel-2: #17212c;
+  --bg-panel-3: #1d2a38;
+  --border: rgba(166, 187, 211, 0.14);
+  --border-strong: rgba(166, 187, 211, 0.26);
+  --text: #edf4fb;
+  --text-dim: #8797aa;
+  --accent: #78a7ff;
+  --accent-2: #4bd38a;
+  --accent-strong: #4f83ff;
+  --accent-soft: rgba(120, 167, 255, 0.14);
+  --danger: #ff7d94;
+  --warning: #ffc26b;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-dialog: 16px;
+  --motion-fast: 120ms;
+  --motion-standard: 180ms;
+  color-scheme: dark;
+}

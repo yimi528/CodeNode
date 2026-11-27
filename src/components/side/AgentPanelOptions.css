@@ -1,0 +1,12 @@
+.agent-switch-menu .conversation-options {
+  margin: 6px;
+  border-top: 1px solid var(--glass-border);
+}
+.agent-switch-menu .conversation-options > summary {
+  padding: 8px 3px;
+  cursor: pointer;
+}
+.agent-switch-menu .conversation-options .task-acceptance-options {
+  max-height: none;
+  margin: 8px 0 0;
+}

@@ -23,68 +23,44 @@ name: CodeNode
 ```json
 {
   "version": 1,
-  "turns": 97,
-  "reflectedAt": 96,
+  "turns": 6,
+  "reflectedAt": 0,
   "samples": [
     {
-      "id": "95bbe6ee-49f2-4dae-b655-fc7f46c2ebda",
-      "turn": 88,
-      "user": "跑一下 echo hi",
+      "id": "b731798d-c80c-40bf-92c2-6e4648958a09",
+      "turn": 1,
+      "user": "你好，请问你是谁啊",
+      "assistant": "你好，我是 CodeNode，一个工具型编程 Agent。\n\n我能帮你做的事：\n- 探索/分析项目结构与源码（扫描、检索、读文件）\n- 编写与修改代码、执行构建和测试命令\n- 静态代码审查、排查问题\n- 把任务拆成计划并跟踪执行\n\n当前画布是空的，也没有绑定具体项目任务。你想让我做什么？"
+    },
+    {
+      "id": "0553010c-f86d-4605-a35e-08be869fac4d",
+      "turn": 2,
+      "user": "把 a.txt 读出来",
       "assistant": "完成"
     },
     {
-      "id": "8e5bc905-f5e4-4f29-aaca-5f1a30c4da70",
-      "turn": 89,
-      "user": "把 a.txt 里的内容读出来",
+      "id": "bfe98425-9478-4093-8980-8929cc513716",
+      "turn": 3,
+      "user": "把 a.txt 读出来",
       "assistant": "完成"
     },
     {
-      "id": "239eca6f-1d3e-4b22-acec-c88164246b2a",
-      "turn": 90,
-      "user": "这个怎么弄",
+      "id": "5c6d6f0b-1736-4cc2-abc3-8a4c1c2caeb0",
+      "turn": 4,
+      "user": "把 a.txt 读出来",
       "assistant": "完成"
     },
     {
-      "id": "9162f857-5767-4db1-8d7b-9fed355b1828",
-      "turn": 91,
-      "user": "跑一下 echo hi",
+      "id": "b7596194-693c-4aca-b0d7-4b9533adb428",
+      "turn": 5,
+      "user": "把 a.txt 读出来",
       "assistant": "完成"
     },
     {
-      "id": "7199e640-d4c6-4b2d-854e-664f17d2f69d",
-      "turn": 92,
-      "user": "把界面切到全部节点视图",
+      "id": "667f59a3-13e1-4017-82af-fea226696ba9",
+      "turn": 6,
+      "user": "把 a.txt 读出来",
       "assistant": "完成"
-    },
-    {
-      "id": "bdb1c029-266f-4d63-a953-e0ff64f75327",
-      "turn": 93,
-      "user": "写一个 b.txt，内容是 hi",
-      "assistant": "完成"
-    },
-    {
-      "id": "15c0f8a1-c93f-4811-aa29-3bd0d2b7d20d",
-      "turn": 94,
-      "user": "把界面切到全部节点视图",
-      "assistant": "完成"
-    },
-    {
-      "id": "6c9253ff-0a4b-47f2-959f-e0b261b4cfe1",
-      "turn": 95,
-      "user": "跑一下 echo hi",
-      "assistant": "完成"
-    },
-    {
-      "id": "dc2b0804-fe8f-46ea-993f-8207fed6b42a",
-      "turn": 96,
-      "user": "你好",
-      "assistant": "你好，我能为你做什么？"
-    },
-    {
-      "id": "790a56c1-b8bb-4727-8248-2fed017e3d46",
-      "turn": 97,
-      "user": "你是谁",
-      "assistant": "我是原子引擎 · DeepSeek V4.1 Flash"
     }
   ],
   "traits": {}

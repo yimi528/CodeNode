@@ -48,7 +48,7 @@ function newTokenId() {
 
 class ApprovalService {
   /**
-   * @param {{confirm?: Function|null, trace?: Function|null, now?: () => number, ttlMs?: number, runId?: string, taskId?: string, role?: string, projectRoot?: string|null, rules?: Array<any>, riskGate?: Function|null}} [options]
+   * @param {{confirm?: Function|null, trace?: Function|null, now?: () => number, ttlMs?: number, runId?: string, taskId?: string, role?: string, projectRoot?: string|null, rules?: Array<any>, loadRules?: () => Array<any>, riskGate?: Function|null}} [options]
    */
   constructor(options) {
     const o = options || {};
@@ -68,6 +68,7 @@ class ApprovalService {
      * @type {Array<any>}
      */
     this.rules = Array.isArray(o.rules) ? o.rules : [];
+    this.loadRules = o.loadRules || (() => this.rules);
     /**
      * 风险门禁（意图识别用，**只收紧**）：`(req) => boolean`。
      * 返回 true 表示「这次审批必须问用户」——即使命中免打扰规则也不放行。
@@ -92,7 +93,7 @@ class ApprovalService {
 
   /**
    * 申请审批：只有 confirm 处理器明确返回 true 才签发令牌。
-   * @param {{capability?: string|null, level?: string, what?: string, detail?: string, scope?: any, toolCallId?: string|null, attemptId?: string|null, aliasedTool?: string|null}} req
+   * @param {{capability?: string|null, level?: string, what?: string, detail?: string, scope?: any, actionIds?: string[], forcePrompt?: boolean, toolCallId?: string|null, attemptId?: string|null}} req
    * @returns {Promise<any|null>} 令牌或 null（未批准 / 无审批通道）
    */
   async request(req) {
@@ -103,20 +104,16 @@ class ApprovalService {
       return null;
     }
     // 持久化规则优先：命中即免打扰（但仍然签发令牌、仍然留审计）
-    const ruleHit = approvalRules.matchRule(this.rules, {
-      capability: r.capability || null,
-      tool: r.what || null,
-      // 旧名别名调用：规则文件里可能写的是合并前的名字，这里一并带上供 matchRule 命中
-      aliasedTool: r.aliasedTool || null,
-      level: r.level || 'WRITE',
-    });
+    const hits = approvalRules.matchingRules(this.loadRules(), { tool: r.what, actionIds: r.actionIds,
+      capability: r.capability, level: r.level || 'WRITE' });
+    const ruleHit = hits[0];
     let approved = false;
     /**
      * 风险门禁（意图识别）：命中免打扰规则**也可能**被拉回「问用户」。
      * 这是**单向**的 —— 门禁只能让审批更严，不存在任何让它更容易通过的路径（I1）。
      */
-    let gated = false;
-    if (ruleHit && this.riskGate) {
+    let gated = r.forcePrompt === true;
+    if (!gated && ruleHit && this.riskGate) {
       try {
         gated =
           this.riskGate({
@@ -135,17 +132,19 @@ class ApprovalService {
       approved = true;
       this._emit('approval_rule_hit', {
         ruleId: ruleHit.id,
+        ruleIds: hits.map(hit => hit.id),
+        actionIds: r.actionIds,
         tool: r.what || null,
-        capability: ruleHit.capability || null,
+        capability: ruleHit.requiredCapability || ruleHit.capability || null,
         level: r.level || 'WRITE',
         toolCallId: r.toolCallId || null,
       });
-    } else if (gated) {
+    } else if (gated && ruleHit) {
       // 本该免打扰却被收紧：必须留痕（否则「规则为什么不生效」事后无从归因）
       this._emit('approval_risk_gate', {
         ruleId: ruleHit.id,
         tool: r.what || null,
-        capability: ruleHit.capability || null,
+        capability: ruleHit.requiredCapability || ruleHit.capability || null,
         level: r.level || 'WRITE',
         toolCallId: r.toolCallId || null,
         scope,
@@ -159,6 +158,8 @@ class ApprovalService {
             tool: r.what || null,
             level: r.level || 'WRITE',
             projectRoot: this.projectRoot || null,
+            actionIds: r.actionIds,
+            canRemember: !gated,
             toolCallId: r.toolCallId || null,
             attemptId: r.attemptId || null,
             scope,
@@ -202,23 +203,23 @@ class ApprovalService {
    * 用途：审计 P0-3 的动作级取舍 —— 意图分类唯一能改变的是「本来会放行 → 强制问一次」。
    *   - 命中了免打扰规则（`ruleAllows`）→ 静态层直接放行 → 分类**有意义**；
    *   - 没命中（`wouldAsk`）→ 静态层无论如何都要问用户 → 分类改不了结果，不必先花一次调用。
-   * @param {{capability?: string|null, tool?: string|null, level?: string, scope?: any, aliasedTool?: string|null}} [req]
+   * @param {{capability?: string|null, tool?: string|null, level?: string, scope?: any, actionIds?: string[]}} [req]
    * @returns {{available: boolean, ruleAllows: boolean, wouldAsk: boolean, rule: object|null, scope: any}}
    */
   preview(req = {}) {
     const r = req || {};
     const scope = normalizeScope(r.scope);
-    const ruleHit = approvalRules.matchRule(this.rules, {
+    const ruleHit = approvalRules.matchRule(this.loadRules(), {
+      actionIds: r.actionIds,
       capability: r.capability || null,
       tool: r.tool || null,
-      aliasedTool: r.aliasedTool || null,
       level: r.level || 'WRITE',
     });
     return {
       available: !!this.confirmHandler,
       ruleAllows: !!ruleHit,
       wouldAsk: !ruleHit,
-      rule: ruleHit ? { capability: ruleHit.capability || null, tool: ruleHit.tool || null, level: ruleHit.level || null } : null,
+      rule: ruleHit ? { capability: ruleHit.requiredCapability || ruleHit.capability || null, tool: ruleHit.executor || ruleHit.tool || null, level: ruleHit.level || null } : null,
       scope,
     };
   }

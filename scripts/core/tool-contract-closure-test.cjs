@@ -61,14 +61,15 @@ function context() {
       (d) => d.inputSchema && d.inputSchema.properties && d.inputSchema.additionalProperties !== false,
     );
     check('A1 每个内置工具的 inputSchema 都已闭合（additionalProperties=false）',
-      unclosed.length === 0 && descriptors.length >= 20,
+      unclosed.length === 0 && descriptors.length === 15,
       JSON.stringify({ total: descriptors.length, unclosed: unclosed.map((d) => d.name) }));
 
     const exposed = registry.toOpenAiTools();
     const leaky = exposed.filter((t) => t.function.parameters && t.function.parameters.properties && t.function.parameters.additionalProperties !== false);
     check('A2 下发给模型的 tools 参数同样闭合', leaky.length === 0, JSON.stringify(leaky.map((t) => t.function.name)));
 
-    const nested = exposed.find((t) => t.function.name === 'retrieve_context');
+    const ragRegistry = toolkit.buildDefaultRegistryWithConfig({ ragEnabled: true });
+    const nested = ragRegistry.toOpenAiTools().find((t) => t.function.name === 'retrieve_context');
     check('A3 闭合不影响原有约束（retrieve_context 的 maxItems 仍在）',
       !nested || (nested.function.parameters.properties && JSON.stringify(nested.function.parameters).includes('maxItems')),
       JSON.stringify(nested ? nested.function.parameters : null).slice(0, 200));
@@ -81,7 +82,7 @@ function context() {
       bad.ok === false && bad.data.code === 'INVALID_TOOL_ARGUMENTS' && /maxLine/.test(String(bad.text)),
       JSON.stringify({ ok: bad.ok, code: bad.data && bad.data.code, text: bad.text }));
 
-    const good = await registry.execute('read_file', { path: 'a.txt', maxLines: 2 }, context());
+    const good = await registry.execute('file_ops', { kind: 'read', path: 'a.txt', maxLines: 2 }, context());
     check('B2 正确参数不受影响（maxLines=2 仍可用）',
       good.ok === true && /l1/.test(String(good.text)) && !/l4/.test(String(good.text)),
       JSON.stringify({ ok: good.ok, text: String(good.text).slice(0, 60) }));
@@ -97,16 +98,10 @@ function context() {
 
   // ======================= C. 契约显式化而不改语义 =======================
   {
-    const descriptors = registry.listDescriptors();
+    const descriptors = registry.registeredExecutorNames().map(name => registry.descriptorOf(name));
     const legacy = descriptors.filter((d) => d.source !== 'explicit');
     check('C1 全部工具的契约都是显式声明（source=explicit）', legacy.length === 0, JSON.stringify(legacy.map((d) => d.name)));
 
-    /**
-     * 工具面收敛（docs/tool-consolidation.zh-CN.md）：`fetch_url` / `save_project` / `ui_control`
-     * 已并入族工具，不再是注册工具 —— 它们的语义现在由族工具的 `byKind` 承接。
-     * 所以这里按「族名 + kind」核对，而不是按旧名查 `descriptorOf`（那会返回 null）。
-     */
-    const effective = (name, args) => descriptorLib.effectiveDescriptor(registry.descriptorOf(name), args);
     /** @type {Array<[string, string, any]>} */
     const expectations = [
       // name, 字段, 期望值
@@ -116,24 +111,16 @@ function context() {
       ['write_file', 'mutatesWorkspace', true],
       ['write_file', 'idempotent', true],
       ['execute_shell', 'requiredCapability', 'shell.execute'],
+      ['fetch_url', 'requiredCapability', 'network.request'],
+      ['save_project', 'requiredCapability', 'project.save'],
       ['scan_project', 'requiredCapability', 'workspace.write'],
       ['workbench_edit', 'requiredCapability', 'workspace.write'],
-    ];
-    /** 旧名 → (族名, 参数)：收编后的语义必须逐字等价 */
-    /** @type {Array<[string, string, any, string, string]>} */
-    const absorbedAgainst = [
-      ['fetch_url', 'web', { kind: 'fetch' }, 'requiredCapability', 'network.request'],
-      ['save_project', 'workbench_edit', { kind: 'save_project' }, 'requiredCapability', 'project.save'],
-      ['ui_control', 'get_workbench_model', { view: 'focus' }, 'requiredCapability', 'ui.interact'],
+      ['ui_control', 'requiredCapability', 'ui.interact'],
     ];
     const wrong = [];
     for (const [name, field, expected] of expectations) {
       const d = registry.descriptorOf(name);
       if (!d || d[field] !== expected) wrong.push({ name, field, actual: d && d[field], expected });
-    }
-    for (const [legacyName, family, args, field, expected] of absorbedAgainst) {
-      const d = effective(family, args);
-      if (!d || d[field] !== expected) wrong.push({ name: legacyName + '→' + family, field, actual: d && d[field], expected });
     }
     check('C2 显式契约的语义与 descriptor.cjs 名单一致', wrong.length === 0, JSON.stringify(wrong));
 
@@ -148,25 +135,19 @@ function context() {
       }));
     check('C4 S7 显式审批的画布类工具仍是 WRITE 级',
       registry.descriptorOf('workbench_edit').requiresConfirmation === 'WRITE' &&
-        effective('get_workbench_model', { view: 'focus' }).requiresConfirmation === 'WRITE' &&
-        effective('workbench_edit', { kind: 'save_project' }).requiresConfirmation === 'WRITE',
+        registry.descriptorOf('ui_control').requiresConfirmation === 'WRITE' &&
+        registry.descriptorOf('save_project').requiresConfirmation === 'WRITE',
       JSON.stringify(registry.listDescriptors().filter((d) => d.requiresConfirmation).map((d) => d.name + ':' + d.requiresConfirmation)));
 
-    /**
-     * C5 的口径要跟上族化：族工具的 readOnly 由 `byKind` 决定，族级字段取的是**最保守值**，
-     * 因此不能再用「族级 readOnly === READ_ONLY_TOOLS.has(name)」来判。这里改成：
-     *   ① 非族工具仍按名单核对；
-     *   ② 族工具的每个 kind 都必须能在 byKind 里查到（否则执行时会 fail-closed 成写）。
-     */
-    check('C5 字段名撞车的语义没被漂移：单义工具与 READ_ONLY 名单一致；族工具每个 kind 都有声明',
-      descriptors.every((d) => (descriptorLib.FAMILY_TOOLS.has(d.name)
-        ? !!d.byKind && Object.keys(d.byKind).length > 0
-        : d.readOnly === descriptorLib.READ_ONLY_TOOLS.has(d.name) || d.name === 'scan_project')),
-      JSON.stringify(descriptors.filter((d) => !descriptorLib.FAMILY_TOOLS.has(d.name) && d.readOnly !== descriptorLib.READ_ONLY_TOOLS.has(d.name) && d.name !== 'scan_project').map((d) => d.name)));
+    check('C5 字段名撞车的语义没被漂移：readOnly 名单与后续 declareContract 一致',
+      descriptors.every((d) => d.readOnly === descriptorLib.READ_ONLY_TOOLS.has(d.name) ||
+        // scan_project 是「条件写入者」：名单里在只读集合内，但 mutatesWorkspace=true
+        d.name === 'scan_project'),
+      JSON.stringify(descriptors.filter((d) => d.readOnly !== descriptorLib.READ_ONLY_TOOLS.has(d.name)).map((d) => d.name)));
 
     // 「文件在、工具却没注册」是一种静默漂移：每个工具实现都必须进入默认注册表。
     const implDir = path.join(__dirname, "../../electron/tools/impl");
-    const registeredNames = new Set(toolkit.buildDefaultRegistry().listTools().map((t) => t.name));
+    const registeredNames = new Set(toolkit.buildDefaultRegistry().registeredExecutorNames());
     /** @type {string[]} */
     const missing = [];
     for (const file of fs.readdirSync(implDir)) {

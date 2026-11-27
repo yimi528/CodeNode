@@ -133,12 +133,11 @@ const symbolSite = object({ path: nonempty, symbol: nonempty, startLine: { type:
   endLine: { type: 'integer', minimum: 1 }, column: { type: 'integer', minimum: 1 }, kind: nonempty,
   receiver: str, sourceSha256: nonempty, owner: nullable(symbolDefinition), candidates: list(symbolDefinition),
   candidateCount: nat, resolution: { enum: ['lexical', 'import', 'member-candidate', 'name-only', 'unresolved'] }, ambiguous: bool });
-const symbolNavigation = object({ operation: { enum: ['find_definition', 'find_references', 'get_callers', 'get_callees', 'definition', 'references', 'callers', 'callees'] },
+const symbolNavigation = object({ operation: { enum: ['find_definition', 'find_references', 'get_callers', 'get_callees'] },
   symbol: nonempty, definitions: list(symbolDefinition), definitionCount: nat, definitionsTruncated: bool,
   results: list(choice(symbolDefinition, symbolSite)), count: nat, offset: nat, nextOffset: nullable(nat),
   ambiguous: bool, approximate: { const: true }, sourceVersions: dict(nonempty), limitations: nonempty,
-  kind: { enum: ['definition', 'references', 'callers', 'callees'] },
-  index: object({ indexedFiles: nat, skippedFiles: nat, truncated: bool, parseErrorFiles: nat }) }, undefined, true);
+  index: object({ indexedFiles: nat, skippedFiles: nat, truncated: bool, parseErrorFiles: nat }) });
 const workbenchModel = object({ ...graphStats, view: str, nodes: list(graphNode),
   edges: list(object({ id: nonempty, source: nonempty, sourceHandle: str, target: nonempty, targetHandle: str })) }, [...Object.keys(graphStats), 'view']);
 workbenchModel.allOf = [{ if: { properties: { view: { const: 'full' } } }, then: { required: ['nodes', 'edges'] } }];
@@ -173,107 +172,49 @@ const schemas = {
   ask_user: object({ answer: str }),
   fetch_url: object({ url: nonempty, chars: nat, bytes: nat, truncated: bool }),
   save_project: object({ filePath: nonempty }),
-  // code_review / project_info / analyze_project 已收编进 project_overview（见下方族契约）：
-  // 旧名只是别名，运行期解析到族工具，所以这里**不再**为旧名各留一份契约
-  // （同名键写两遍不仅等于死代码，还会让 checkJs 直接报 TS1117）。
+  code_review: object({ findings: list(object({ severity: str, message: nonempty, line: nullable(integer) })), total: nat, source: str }),
+  project_info: object({ buildSystem: nonempty, mainCandidates: strings, modules: strings, jdks: strings,
+    languages: dict(nat), fileCount: nat, root: nonempty, workerMode: nonempty, cancelled: { const: false }, scanned: nat }),
   scan_project: object({ root: nonempty, workerMode: nonempty, workerFallback: nullable(str),
     sourceFiles: nat, assetFiles: nat, fileCount: nat, languageSummary: dict(nat), tree: strings, appliedToWorkbench: bool,
   }, ['root', 'workerMode', 'sourceFiles', 'assetFiles', 'fileCount', 'languageSummary', 'tree']),
-  get_workbench_model: choice(
-    // 读画布（原 get_workbench_model）。`allOf` 必须挂在**这个分支**上：
-    // 族化之后整份契约是 anyOf，若把 allOf 挂在 anyOf 外层，视口动作的输出
-    // （{view, applied}，没有 nodes）会被「view != counts 必须有 nodes」判失败。
-    workbenchModel,
-    // 视口动作（收编自 ui_control）
-    object({ view: nonempty, applied: { const: true } }, ['view', 'applied']),
+  analyze_project: object({ root: nonempty, workerMode: nonempty, buildSystem: nonempty,
+    mainCandidates: strings, modules: strings, jdks: strings, sourceFileCount: nat, assetFileCount: nat,
+    languageSummary: dict(nat), files: list(object({ relativePath: str, name: str, language: str, ext: str, lineCount: nat })), analyzedFileCount: nat,
+    fileAnalysis: list(object({ path: str, language: str, imports: strings, classes: strings, functions: strings, variables: strings, lineCount: nat })),
+  }, ['root', 'workerMode', 'buildSystem', 'mainCandidates', 'modules', 'jdks', 'sourceFileCount', 'assetFileCount', 'languageSummary', 'files', 'analyzedFileCount']),
+  get_workbench_model: workbenchModel,
+  workbench_edit: object({ created: strings, affected: strings, errors: strings, applied: bool, review: reviewCanvas, partialFailures }, ['created', 'affected', 'applied', 'review']),
+  bulk_edit: choice(
+    object({ action: { enum: ['create_nodes', 'create_assets'] }, nodeIds: strings, count: nat }),
+    object({ action: { const: 'create_files' }, written: strings, count: nat, errors: strings, partialFailures }, ['action', 'written', 'count']),
+    object({ action: { const: 'delete_nodes' }, deleted: strings, count: nat, errors: strings, partialFailures }, ['action', 'deleted', 'count']),
   ),
-  workbench_edit: choice(
-    // 画布编辑（原 workbench_edit）
-    object({ created: strings, affected: strings, errors: strings, applied: bool, review: reviewCanvas, partialFailures }, ['created', 'affected', 'applied', 'review']),
-    // kind=save_project（收编自 save_project）
-    object({ filePath: nonempty, kind: { const: 'save_project' } }, ['filePath', 'kind']),
-    // kind=write_analysis（收编自 write_analysis_md）
-    object({ nodeId: nonempty, name: str, relativePath: str, chars: nat, preview: str, kind: { const: 'write_analysis' } },
-      ['nodeId', 'kind']),
-    // kind=bulk_*（收编自 bulk_edit）。保留旧 `action` 字段（回放/用例仍在读它），故额外放行。
-    choice(
-      object({ kind: { const: 'bulk_create_nodes' }, nodeIds: strings, count: nat }, ['kind', 'nodeIds', 'count'], true),
-      object({ kind: { const: 'bulk_create_files' }, written: strings, count: nat, errors: strings, partialFailures }, ['kind', 'written', 'count'], true),
-      object({ kind: { const: 'bulk_create_assets' }, nodeIds: strings, count: nat }, ['kind', 'nodeIds', 'count'], true),
-      object({ kind: { const: 'bulk_delete_nodes' }, deleted: strings, count: nat, errors: strings, partialFailures }, ['kind', 'deleted', 'count'], true),
-    ),
-  ),
-  // 收编自 query_scalars：mode=scalar / keys / prefix 的那条路径
+  ui_control: object({ action: nonempty, applied: { const: true } }),
+  write_analysis_md: object({ nodeId: nonempty, name: str, relativePath: str, chars: nat, preview: str }),
   query_scalars: object({ key: nullable(str), prefix: nullable(str), query: nullable(str), count: nat,
     items: list(object({ key: nonempty, kind: str, value, ts: num, exact: bool, score: nullable(num) })) }),
-  retrieve_context: choice(
-    object({ query: str, mode: nonempty, queries: strings, keys: strings, sources: list(source), quality,
-      admission: object({ stage: { const: 'retrieval' }, status: { enum: ['candidates_available', 'empty'] }, admitted: bool, candidateCount: nat, finalSupportEvaluated: { const: false }, reason: str }),
-      routing: object({ source: str, decision: str }, ['source', 'decision'], true),
-      index: object({ indexedFiles: nat, chunks: nat, skippedFiles: nat, changedFiles: nat, removedFiles: nat,
-        invalidatedFiles: nat, truncated: bool, candidateChunks: nat, fusedCandidates: nat, retrievalDurationMs: num,
-        graph: object({ expanded: nat, hops: nat }, [], true),
-        rerank: object({ enabled: bool, applied: bool, candidates: nat, error: str }, ['enabled', 'applied', 'candidates']),
-        vector: object({ provider: str, backend: str, error: str }, ['provider'], true),
-      }, ['indexedFiles', 'chunks'], true),
-    }, ['query', 'mode', 'sources', 'quality']),
-    // scalar 模式的空命中 / 前缀查询形态（收编 query_scalars 后 query 可以为空）
-    object({ query: nullable(str), keys: strings, prefix: nullable(str), mode: { const: 'scalar' }, count: nat,
-      key: nullable(str),
-      items: list(object({ key: nonempty, kind: str, value, ts: num, exact: bool, score: nullable(num) })),
-      sources: list(source), quality, admission: { type: 'object' } },
-      ['mode'], true),
-  ),
-  // 长期记忆族（收编 remember/recall）
-  memory: choice(
-    object({ id: nonempty, scope: { enum: ['project', 'user'] }, duplicate: bool, version: { type: 'integer', minimum: 1 },
-      replacedIds: strings, total: nat, evicted: nat, evictedIds: list(nullable(str)) }, ['id', 'scope']),
-    object({ entries: list(memoryEntry), matched: bool, scope: { enum: ['project', 'user', 'all'] }, terms: strings }, ['entries', 'matched']),
-  ),
+  retrieve_context: object({ query: str, mode: nonempty, queries: strings, keys: strings, sources: list(source), quality,
+    admission: object({ stage: { const: 'retrieval' }, status: { enum: ['candidates_available', 'empty'] }, admitted: bool, candidateCount: nat, finalSupportEvaluated: { const: false }, reason: str }),
+    routing: object({ source: str, decision: str }, ['source', 'decision'], true),
+    index: object({ indexedFiles: nat, chunks: nat, skippedFiles: nat, changedFiles: nat, removedFiles: nat,
+      invalidatedFiles: nat, truncated: bool, candidateChunks: nat, fusedCandidates: nat, retrievalDurationMs: num,
+      graph: object({ expanded: nat, hops: nat }, [], true),
+      rerank: object({ enabled: bool, applied: bool, candidates: nat, error: str }, ['enabled', 'applied', 'candidates']),
+      vector: object({ provider: str, backend: str, error: str }, ['provider'], true),
+    }, ['indexedFiles', 'chunks'], true),
+  }, ['query', 'mode', 'sources', 'quality']),
   remember: object({ id: nonempty, scope: { enum: ['project', 'user'] }, duplicate: bool, version: { type: 'integer', minimum: 1 },
     replacedIds: strings, total: nat, evicted: nat, evictedIds: list(nullable(str)) }),
   recall: object({ entries: list(memoryEntry), matched: bool, scope: { enum: ['project', 'user', 'all'] }, terms: strings }, ['entries', 'matched']),
   read_skill: choice(object({}), object({ name: nonempty, instructions: str, truncated: bool, chars: nat }, ['name', 'instructions', 'truncated'])),
   view_image: object({ image: object({ path: nonempty, mime: { enum: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] },
     bytes: nat, dataUrl: nonempty, note: nullable(str) }) }),
-  // 出网族（收编 fetch_url/web_search/dify_call）
-  web: choice(
-    object({ url: nonempty, chars: nat, bytes: nat, truncated: bool }, ['url', 'chars']),
-    object({ query: nonempty, backend: { enum: ['searxng', 'tavily', 'brave', 'serper', 'google', 'custom'] }, count: nat,
-      results: list(object({ title: str, url: str, snippet: str })) }, ['query', 'backend', 'count']),
-    object({ kind: { enum: ['workflow', 'chat'] }, inputKeys: strings, inputs: dict(value), query: str,
-      output: value, elapsedMs: nat, status: str, taskId: nullable(str), runId: nullable(str), conversationId: nullable(str), error: nullable(str),
-    }, ['kind', 'inputKeys', 'inputs', 'output', 'elapsedMs', 'status', 'taskId', 'runId', 'conversationId', 'error']),
-  ),
   web_search: object({ query: nonempty, backend: { enum: ['searxng', 'tavily', 'brave', 'serper', 'google', 'custom'] }, count: nat,
     results: list(object({ title: str, url: str, snippet: str })) }),
   dify_call: object({ kind: { enum: ['workflow', 'chat'] }, inputKeys: strings, inputs: dict(value), query: str,
     output: value, elapsedMs: nat, status: str, taskId: nullable(str), runId: nullable(str), conversationId: nullable(str), error: nullable(str),
   }, ['kind', 'inputKeys', 'inputs', 'output', 'elapsedMs', 'status', 'taskId', 'runId', 'conversationId', 'error']),
-  // 符号导航族（收编 find_definition/find_references/get_callers/get_callees）
-  // 复用同一份**严格**契约：族执行体就是原执行体，输出形状逐字不变（越宽等于放弃校验）
-  symbol_nav: symbolNavigation,
-  // 列文件族（收编 find_files/list_directory）
-  list_files: object({ count: nat, offset: nat, nextOffset: nullable(nat), files: strings, path: str }, ['count', 'offset'], true),
-  // 项目画像族（收编 project_info/analyze_project/code_review）
-  project_overview: choice(
-    object({ buildSystem: nonempty, mainCandidates: strings, modules: strings, jdks: strings,
-      languages: dict(nat), fileCount: nat, root: nonempty, workerMode: nonempty, cancelled: { const: false }, scanned: nat }, ['buildSystem', 'root']),
-    object({ root: nonempty, workerMode: nonempty, buildSystem: nonempty,
-      mainCandidates: strings, modules: strings, jdks: strings, sourceFileCount: nat, assetFileCount: nat,
-      languageSummary: dict(nat), files: list(object({ relativePath: str, name: str, language: str, ext: str, lineCount: nat })), analyzedFileCount: nat,
-      fileAnalysis: list(object({ path: str, language: str, imports: strings, classes: strings, functions: strings, variables: strings, lineCount: nat })),
-    }, ['root', 'workerMode', 'buildSystem', 'sourceFileCount', 'analyzedFileCount']),
-    object({ findings: list(object({ severity: str, message: nonempty, line: nullable(integer) })), total: nat, source: str }, ['findings', 'total', 'source']),
-  ),
-  code_review: object({ findings: list(object({ severity: str, message: nonempty, line: nullable(integer) })), total: nat, source: str }),
-  project_info: object({ buildSystem: nonempty, mainCandidates: strings, modules: strings, jdks: strings,
-    languages: dict(nat), fileCount: nat, root: nonempty, workerMode: nonempty, cancelled: { const: false }, scanned: nat }),
-  analyze_project: object({ root: nonempty, workerMode: nonempty, buildSystem: nonempty,
-    mainCandidates: strings, modules: strings, jdks: strings, sourceFileCount: nat, assetFileCount: nat,
-    languageSummary: dict(nat), files: list(object({ relativePath: str, name: str, language: str, ext: str, lineCount: nat })), analyzedFileCount: nat,
-    fileAnalysis: list(object({ path: str, language: str, imports: strings, classes: strings, functions: strings, variables: strings, lineCount: nat })),
-  }, ['root', 'workerMode', 'buildSystem', 'mainCandidates', 'modules', 'jdks', 'sourceFileCount', 'assetFileCount', 'languageSummary', 'files', 'analyzedFileCount']),
   discover_tools: choice(
     object({ enabled: strings, hidden: strings, matched: { const: 0 }, groups: str }, ['enabled', 'hidden', 'matched']),
     object({ enabled: strings, exposed: strings, matched: nat, hiddenRemaining: strings }),
@@ -304,33 +245,10 @@ const schemas = {
     rejected: list(object({ taskId: str, reason: str })), stale: list(object({ taskId: str, reason: str })) }),
 };
 
-/**
- * 注意：原先这里给 `schemas.get_workbench_model` 挂过一条「view != counts 就必须有 nodes」的 allOf。
- * 工具面收敛后它外层是 anyOf（读画布 | 视口动作），外层 allOf 会误伤视口动作的输出，
- * 因此该约束已经并入 `workbenchModel` 分支自身（见上面的定义）。
- */
-
-
-/**
- * 族工具（工具面收敛）的输出契约：**成员契约的分支并集**。
- *
- * 为什么不各写一份：族执行体就是成员执行体（dispatch 后原样返回），输出必然落在成员契约里；
- * 重写一份只会漂移。这里把成员的 anyOf 摊平一层，避免 anyOf 套 anyOf。
- * `schemas[...]` 同时保留成员键：舞台注册表（子代理与旧模块的直接注册）仍按旧名声明契约。
- */
-function anyOfMembers(memberNames) {
-  const branches = [];
-  for (const name of memberNames) {
-    const schema = schemas[name];
-    if (!schema) continue;
-    if (Array.isArray(schema.anyOf)) branches.push(...schema.anyOf);
-    else branches.push(schema);
-  }
-  return { anyOf: branches };
-}
-schemas.delegate = anyOfMembers(['delegate_task', 'delegate_tasks']);
-schemas.subagent_read = anyOfMembers(['get_subagent_task', 'inspect_subagent_retry', 'merge_subagent_results']);
-schemas.subagent_control = anyOfMembers(['cancel_subagent_task', 'retry_subagent_task', 'review_subagent_result']);
+schemas.get_workbench_model.allOf = [
+  { if: { properties: { view: { not: { const: 'counts' } } } }, then: { required: ['nodes'] } },
+  { if: { properties: { view: { const: 'full' } } }, then: { required: ['edges'] } },
+];
 
 function declareOutputContracts(registry, names) {
   for (const name of names) {

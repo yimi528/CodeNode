@@ -55,4 +55,4 @@ A stream retry resends the whole turn — a half-received answer is never append
 | Budgets and cost attribution | `electron/requestBudget.cjs`, `electron/contextBudget.cjs`, `electron/costLedger.cjs`, `electron/costAttribution.cjs` |
 | Permissions, approvals, sandbox | `electron/tools/registry.cjs`, `electron/approvalRules.cjs`, `electron/sandbox.cjs` |
 
-Relevant acceptance: `npm run test:resume`, `test:side-effect-idem`, `test:run-rollback`, `test:agent-limits`, `test:context-budget`, `test:sandbox`, `test:runtime-gate` (asserts these capabilities are really wired up rather than merely present in the source). Deeper background on why recovery is built this way is in [the harness notes](agent-harness-and-workflow-recommendations.md) (Chinese).
+Relevant acceptance: `npm run test:resume`, `test:side-effect-idem`, `test:run-rollback`, `test:agent-limits`, `test:context-budget`, `test:sandbox`, `test:runtime-gate` (asserts these capabilities are really wired up rather than merely present in the source). Deeper background on why recovery is built this way is in [the harness notes](proposals/agent-harness-and-workflow-recommendations.md) (Chinese).

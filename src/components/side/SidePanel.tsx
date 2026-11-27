@@ -6,17 +6,15 @@ import { useUiStore, type SideTab } from '../../store/uiStore';
 import AgentPanel from './AgentPanel';
 import NodePanel from './NodePanel';
 import ProjectPanel from './ProjectPanel';
-import PreviewPanel from './PreviewPanel';
 
 const TABS: { id: SideTab; label: string; title: string }[] = [
   { id: 'agent', label: 'Agent', title: 'Agent 对话与会话画布' },
   { id: 'node', label: '节点', title: '选中节点属性' },
   { id: 'project', label: '文件', title: '项目文件树' },
-  { id: 'preview', label: '预览', title: '文件内容预览' },
 ];
 
 /**
- * 左侧统一侧栏：Agent 对话 + 节点属性 + 项目文件树 + 文件预览，全部收进同一个 tab 面板。
+ * 左侧统一侧栏：Agent 对话 + 节点属性 + 项目文件树，全部收进同一个 tab 面板。
  * 宽窗口里由 .side-panel 在 flex 布局中占位；窄窗口里由媒体查询改为左侧浮层。
  */
 export default function SidePanel() {
@@ -30,8 +28,6 @@ export default function SidePanel() {
 
   const selectedId = useGraphStore((s) => s.selectedId);
   const nodeCount = useGraphStore((s) => s.nodes.length);
-  const filePath = useProjectStore((s) => s.selected?.relPath ?? null);
-  const fileDirty = useProjectStore((s) => s.dirty);
   const hasTree = useProjectStore((s) => s.tree.length > 0);
   const messageCount = useSessionStore((s) => s.messages.length);
   const streaming = useSessionStore((s) => s.streaming);
@@ -40,7 +36,7 @@ export default function SidePanel() {
     if (selectedId) setSideTab('node');
   }, [selectedId, setSideTab]);
 
-  const openFileInPreview = useCallback(() => setSideTab('preview'), [setSideTab]);
+  const openEditor = useCallback(() => setSideTab('project'), [setSideTab]);
 
   /** ⌘P / Ctrl+P：跳到项目标签并聚焦过滤框 */
   const focusFilter = useCallback(() => {
@@ -50,6 +46,7 @@ export default function SidePanel() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useUiStore.getState().tutorialOpen) return;
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       if (e.key.toLowerCase() !== 'p') return;
       e.preventDefault();
@@ -91,7 +88,6 @@ export default function SidePanel() {
           )}
           {tab === 'node' && <span className="sp-head-meta">{nodeCount} 节点</span>}
           {tab === 'project' && hasTree && <span className="sp-head-meta">文件树</span>}
-          {tab === 'preview' && filePath && <span className="sp-head-meta">只读</span>}
         </div>
         <button className="icon-btn sp-close" title="收起侧栏 (Ctrl+B)" onClick={() => setSideOpen(false)}>
           »
@@ -115,7 +111,6 @@ export default function SidePanel() {
                 <span className={`sp-tab-dot ${streaming ? 'is-busy' : ''}`} />
               )}
               {t.id === 'node' && selectedId && <span className="sp-tab-dot" />}
-              {t.id === 'preview' && filePath && <span className={`sp-tab-dot ${fileDirty ? 'is-warn' : ''}`} />}
             </button>
           );
         })}
@@ -123,9 +118,8 @@ export default function SidePanel() {
 
       <div className="sp-body">
         {tab === 'agent' && <AgentPanel />}
-        {tab === 'node' && <NodePanel onOpenFile={openFileInPreview} />}
-        {tab === 'project' && <ProjectPanel onOpen={openFileInPreview} />}
-        {tab === 'preview' && <PreviewPanel onBack={() => setSideTab('project')} />}
+        {tab === 'node' && <NodePanel />}
+        {tab === 'project' && <ProjectPanel onOpen={openEditor} />}
       </div>
     </aside>
   );

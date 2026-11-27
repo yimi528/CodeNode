@@ -73,6 +73,7 @@ function read(root, userData) {
     try{if(!command)throw new Error('请先配置 ACP 命令');require('./stdioRpc.cjs').resolveCommand(command);availability[name]={installed:true};}
     catch{availability[name]={installed:false,reason:command?'未找到本机命令 '+command:'请先配置 ACP 命令'};}
   }
+  for(const name of config.backends){const info=require('./diagnostics.cjs').describe(profiles[name]||{...config.defaults,backend:name,executable:config.commands[name]},null,root||userData);availability[name]={...availability[name],...info};}
   return { settings: project || machine, machine, project, profiles,availability, scope: project ? 'project' : 'machine' };
 }
 function write(root, userData, scope, input, options={}) {
@@ -94,4 +95,23 @@ function conversationBinding(root,conversationId){
  const binding=Object.hasOwn(bindings,String(conversationId))?bindings[String(conversationId)]:null;
  return binding&&typeof binding.epoch==='string'?{epoch:binding.epoch,settings:normalize(binding.settings)}:null;
 }
-module.exports = { config, normalize, read, write,conversationBinding };
+
+function readForSession(root, userData, sessionId, conversationId) {
+  const backend = read(root, userData);
+  const binding = conversationBinding(root, conversationId || sessionId);
+  const prior = root && sessionId
+    ? require('./runExternal.cjs').previousSession(root, String(sessionId), { conversationId, epoch: binding?.epoch })
+    : null;
+  return { ...backend, sessionSettings: prior?.session?.adapterSettings || binding?.settings };
+}
+
+function applyComposerOverrides(current, overrides) {
+  if (overrides?.externalAccess === undefined && overrides?.externalModel === undefined) return current;
+  return normalize({
+    ...current,
+    sandbox: overrides.externalAccess ?? current.sandbox,
+    model: overrides.externalModel ?? current.model,
+  });
+}
+
+module.exports = { config, normalize, read, write, conversationBinding, readForSession, applyComposerOverrides };

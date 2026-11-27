@@ -1,4 +1,16 @@
-/** 验证 Agent 循环的默认迭代上限、项目覆盖、工具调用预算和结果截断。 */
+/**
+ * agent-limits-test.cjs —— 循环硬上限从源码常量变成可配置（P5）
+ *
+ * 缺口（审查 §3 P2「预算维度只有 token 与硬编码轮数/调用数」）：
+ *   MAX_TOOL_ITERATIONS = 12 / MAX_TOTAL_TOOL_CALLS = 100 / DATA_TRUNCATE_CAP = 120000
+ *   是 agent.cjs 里的源码常量，项目/用户无法按场景调整（也没有任何配置键能覆盖）。
+ *
+ * 修法：agent.max_tool_iterations / agent.max_total_tool_calls / agent.data_truncate_cap
+ * 三个配置键，默认值与旧常量逐字一致（不配就完全等价）。
+ *
+ * 判据：默认值不变（防止配置化顺手改了行为）；配小了之后**真实循环**确实按新上限停下，
+ * 且 stopReason / 文案如实说明是「上限」而不是「失败」。
+ */
 'use strict';
 
 const assert = require('assert');
@@ -61,11 +73,11 @@ async function runLoop(options) {
 }
 
 (async () => {
-  // ======================= A. 默认值与项目覆盖 =======================
+  // ======================= A. 默认值与旧常量逐字一致 =======================
   {
     const d = agent.parseLimitsConfig({});
-    check('A1 默认 maxToolIterations=500', d.maxToolIterations === 500, String(d.maxToolIterations));
-    check('A2 默认 maxTotalToolCalls=1000', d.maxTotalToolCalls === 1000, String(d.maxTotalToolCalls));
+    check('A1 默认 maxToolIterations=12', d.maxToolIterations === 12, JSON.stringify(d));
+    check('A2 默认 maxTotalToolCalls=100', d.maxTotalToolCalls === 100, JSON.stringify(d));
     check('A3 默认 dataTruncateCap=120000', d.dataTruncateCap === 120000, JSON.stringify(d));
     const c = agent.parseLimitsConfig({
       'agent.max_tool_iterations': '4',
@@ -75,8 +87,6 @@ async function runLoop(options) {
     check('A4 配置键可覆盖', c.maxToolIterations === 4 && c.maxTotalToolCalls === 7 && c.dataTruncateCap === 5000, JSON.stringify(c));
     const clamped = agent.parseLimitsConfig({ 'agent.max_tool_iterations': '0' });
     check('A5 越界值被钳制到区间内（0 → 1，不会变成「不限制」）', clamped.maxToolIterations === 1, String(clamped.maxToolIterations));
-    const raised = agent.parseLimitsConfig({ 'agent.max_tool_iterations': '501' });
-    check('A6 项目配置的最高值为 500', raised.maxToolIterations === 500, String(raised.maxToolIterations));
   }
 
   // ======================= B. 迭代上限真实生效 =======================
@@ -95,19 +105,6 @@ async function runLoop(options) {
     check('B2 stopReason=iteration_limit（不是 FAILED）', out.stopReason === 'iteration_limit', JSON.stringify({ stopReason: out.stopReason, error: out.error }));
     check('B3 文案说明是「迭代上限」而不是执行失败', /迭代上限/.test(String(out.error || '')), String(out.error));
     check('B4 状态机终态为 LIMIT_REACHED', out.state === 'LIMIT_REACHED', String(out.state));
-  }
-  {
-    const projectRoot = path.join(root, 'default-iterations');
-    fs.mkdirSync(projectRoot);
-    fs.writeFileSync(path.join(projectRoot, 'a.txt'), 'hello\n', 'utf8');
-    const { out, modelCalls } = await runLoop({
-      projectRoot,
-      runId: 'run-default-iterations',
-      limits: agent.loadConfig(projectRoot).limits,
-      script: [{ toolCalls: [{ name: 'read_file', args: { path: 'a.txt' } }] }],
-    });
-    check('B5 默认配置跑满 500 轮模型迭代', modelCalls === 500, String(modelCalls));
-    check('B6 跑满默认轮次后返回 iteration_limit', out.stopReason === 'iteration_limit', String(out.stopReason));
   }
 
   // ======================= C. 单次运行的工具调用总数上限 =======================

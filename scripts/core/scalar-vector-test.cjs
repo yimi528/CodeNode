@@ -62,16 +62,10 @@ async function main() {
   assert.ok(records.some((r) => r.key === 'node:n2:prompt'));
   assert.ok(records.some((r) => r.key === 'node:n2:label'));
 
-  // ---- 3. 标量查询（收编进 retrieve_context 的 mode=scalar；旧名 query_scalars 是别名） ----
+  // ---- 3. query_scalars 工具（注册 + 端到端） ----
   const standaloneRegistry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false });
-  /**
-   * 工具面收敛（L1）：`query_scalars` 并入 `retrieve_context` 的 scalar 模式。
-   * 因此「基础标量能力仍然可用」的判据从「注册了 query_scalars」改成
-   * 「retrieve_context 在、且 mode=scalar 端到端能取到值」——这才是能力的真实入口。
-   */
-  assert.ok(standaloneRegistry.contains('retrieve_context'), '关闭 RAG 后标量查询入口仍然可用');
-  assert.ok(standaloneRegistry.listAliases().some((a) => a.name === 'query_scalars' && a.family === 'retrieve_context'),
-    '旧名 query_scalars 保留为 retrieve_context 的别名');
+  assert.ok(standaloneRegistry.contains('query_scalars'), '关闭 RAG 后基础标量工具仍然可用');
+  assert.ok(!standaloneRegistry.contains('retrieve_context'), '关闭 RAG 后可选检索工具被移除');
   const standaloneContext = new AgentToolContext({ projectRoot: root, scalarStore: store2, ragConfig: { enabled: false } });
   const standalone = await standaloneRegistry.execute('query_scalars', { key: 'node:n1:prompt' }, standaloneContext);
   assert.equal(standalone.ok, true);
@@ -80,7 +74,7 @@ async function main() {
   assert.ok(prefixResult.data.items.length >= 3);
   clearScalarCache();
   const registry = toolkit.buildDefaultRegistryWithConfig({ toolsEnabled: true, ragEnabled: true });
-  assert.ok(registry.listTools().some((t) => t.name === 'retrieve_context'), '应注册 retrieve_context');
+  assert.ok(registry.listTools().some((t) => t.name === 'query_scalars'), '应注册 query_scalars');
   const toolContext = new AgentToolContext({ projectRoot: root, scalarStore: getScalarStore(root), ragConfig: { enabled: true } });
   const qr = await registry.execute('query_scalars', { key: 'node:n1' }, toolContext);
   assert.strictEqual(qr.ok, true);

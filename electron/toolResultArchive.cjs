@@ -6,7 +6,7 @@ const MARKER = '【工具结果快照】';
 const DIRECTORY = '.codenode/runs/tool-results';
 const MAX_BYTES = 2 * 1024 * 1024;
 const RUN_BYTES = 16 * 1024 * 1024;
-const ELIGIBLE = new Set(['read_file', 'search_files', 'list_files', 'execute_shell', 'poll_job']);
+const ELIGIBLE = new Set(['read_file', 'search_files', 'find_files', 'execute_shell', 'poll_job']);
 const digest = (text) => createHash('sha256').update(text).digest('hex');
 
 function createArchive(root, options = {}) {

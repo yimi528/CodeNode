@@ -1,4 +1,4 @@
-import { memo, useEffect,useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useState } from 'react';
 import { Orb } from '@yogesharc/thinking-orbs';
 import type { SessionMsg } from '../../types';
 import FileChangesCard from './FileChangesCard';
@@ -6,7 +6,8 @@ import { useProjectStore } from '../../store/projectStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
 import { useTextReveal } from '../../hooks/useTextReveal';
-import MessageMarkdown from './MessageMarkdown';
+
+const MessageMarkdown = lazy(() => import('./MessageMarkdown'));
 
 /** 对话正文与简洁文件变更；工具和推理记录保留在运行数据中。 */
 export function MessageView({ msg, isLatest = true, isStreaming = false }: {
@@ -63,6 +64,7 @@ export function MessageView({ msg, isLatest = true, isStreaming = false }: {
   if (msg.role === 'user') {
     return (
       <div className="cs-msg cs-msg-user">
+        <span className="cs-msg-label">你</span>
         {msg.attachments && msg.attachments.length > 0 && (
           <div className="cs-msg-images">
             {msg.attachments.map((a, i) => (
@@ -79,7 +81,7 @@ export function MessageView({ msg, isLatest = true, isStreaming = false }: {
             ))}
           </div>
         )}
-        {msg.content && <div className="cs-msg-text">{msg.content}</div>}
+        <div className="cs-msg-text">{msg.content}</div>
         {msg.content&&<div className="cs-msg-feedback"><button type="button" onClick={()=>void copy()}>{copied?'已复制':'复制'}</button></div>}
       </div>
     );
@@ -100,7 +102,7 @@ export function MessageView({ msg, isLatest = true, isStreaming = false }: {
       {msg.status === 'truncated' ? <div className="cs-msg-state cs-msg-state-warn" role="status">已截断（触到模型长度上限，回复「继续」可接着写）</div> : null}
       {msg.status === 'failed' ? <div className="cs-msg-state cs-msg-state-error" role="status">本轮失败（详见下方错误说明）</div> : null}
       <div className="cs-msg-text cs-msg-markdown" data-revealing={display.revealing ? 'true' : 'false'}>
-        <MessageMarkdown text={display.text} />
+        {display.text && <Suspense fallback={display.text}><MessageMarkdown text={display.text} /></Suspense>}
         {display.revealing && <span className="cs-typewriter-cursor" aria-hidden="true" />}
       </div>
       <FileChangesCard message={msg} />

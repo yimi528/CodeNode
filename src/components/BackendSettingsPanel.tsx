@@ -1,3 +1,4 @@
+import './BackendDiagnostics.css';
 import { useEffect, useState } from 'react';
 import backendConfig from '../../config/agent.backends.json';
 import type { AgentBackendSettings } from '../types';
@@ -16,6 +17,7 @@ export default function BackendSettingsPanel() {
   const [message, setMessage] = useState('');
   const [argsText, setArgsText] = useState('');
   const [acpText, setAcpText] = useState('{}');
+  const [diagnostics,setDiagnostics] = useState<BackendDiagnosticsDto|null>(null);
   const [agentInfo, setAgentInfo] = useState<any>(null);
   const isAcp = backendConfig.acpBackends.includes(settings.backend);
   const isMsp = (backendConfig.mspBackends as readonly string[]).includes(settings.backend);
@@ -34,6 +36,7 @@ export default function BackendSettingsPanel() {
     }).catch(error => { if (alive) setMessage(String(error)); }).finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; };
   }, [root]);
+  useEffect(()=>setDiagnostics(null),[settings,argsText,acpText]);
   const save = async (inherit = false) => {
     if (busy || streaming || !window.codenode) return;
     setBusy(true); setMessage('');
@@ -64,6 +67,8 @@ export default function BackendSettingsPanel() {
       if (!Array.isArray(args) || args.some(item => typeof item !== 'string')) { setMessage('启动参数必须是 JSON 字符串数组'); return; }
       const result = await window.codenode.backendStatus(root, { ...settings, args, ...(isAcp ? { acp: JSON.parse(acpText) } : {}) });
       if (useProjectStore.getState().root !== root) return;
+      setDiagnostics(result.diagnostics || null);
+      window.dispatchEvent(new Event('codenode-backend-settings'));
       const c = result.capabilities;
       setMessage(!result.ok || !c?.available ? result.error || c?.error || '后端不可用' : c.backend === 'builtin' ? 'CodeNode 可用。' : `${c.backend}${c.version ? ' ' + c.version : ''} ${c.protocol||'agent protocol'} 握手成功；${c.resume?'可恢复会话。':'不支持恢复会话。'}检测不会保存配置，认证由本机 Agent 管理。`);
     } catch (error) { if (useProjectStore.getState().root === root) setMessage(String(error)); }
@@ -85,13 +90,13 @@ export default function BackendSettingsPanel() {
   return <div className="agent-execution-settings backend-settings-panel" data-testid="backend-settings">
     <h3>Agent 后端</h3>
     <label className="settings-row"><span>配置范围</span><select aria-label="后端配置范围" value={scope} disabled={disabled} onChange={e => setScope(e.target.value as 'machine' | 'project')}><option value="machine">本机默认</option><option value="project" disabled={!root}>当前项目覆盖</option></select></label>
-    <label className="settings-row"><span>执行后端</span><select aria-label="执行后端" value={settings.backend} disabled={disabled} onChange={e => { const backend=e.target.value as AgentBackendSettings['backend']; setSettings(s=>({...s,backend,executable:backendCommands[backend]||'',args:backendArgs[backend]||[]})); setArgsText(JSON.stringify(backendArgs[backend]||[],null,2)); }}>{backendConfig.backends.map(backend => <option value={backend} key={backend}>{backendConfig.labels[backend as keyof typeof backendConfig.labels]}</option>)}</select></label>
+    <label className="settings-row"><span>执行后端</span><select aria-label="执行后端" value={settings.backend} disabled={disabled} onChange={e => { const backend=e.target.value as AgentBackendSettings['backend']; setDiagnostics(null); setSettings(s=>({...s,backend,executable:backendCommands[backend]||'',args:backendArgs[backend]||[]})); setArgsText(JSON.stringify(backendArgs[backend]||[],null,2)); }}>{backendConfig.backends.map(backend => <option value={backend} key={backend}>{backendConfig.labels[backend as keyof typeof backendConfig.labels]}</option>)}</select></label>
     {settings.backend !== 'builtin' && <>
-      <label className="settings-row"><span>启动命令或可执行文件</span><input aria-label="后端启动命令" value={settings.executable} disabled={disabled} onChange={e => setSettings(s => ({ ...s, executable: e.target.value }))} /></label>
+      <label className="settings-row"><span>启动命令或可执行文件</span><input aria-label="后端启动命令" value={settings.executable} disabled={disabled} onChange={e => {setDiagnostics(null);setSettings(s => ({ ...s, executable: e.target.value }));}} /></label>
       {<label className="settings-row"><span>启动参数（JSON 数组）</span><textarea aria-label="后端启动参数" value={argsText} disabled={disabled} rows={3} onChange={e => setArgsText(e.target.value)} /></label>}
       {settings.backend==='deepseek-harness' && <label className="settings-row"><span>Harness home（留空跟随 Agent）</span><input aria-label="Harness home" value={settings.home} disabled={disabled} onChange={e=>setSettings(s=>({...s,home:e.target.value}))}/></label>}
       {external && <label className="settings-row"><span>{permissionLabel}</span><select aria-label={permissionLabel} value={settings.sandbox} disabled={disabled} onChange={e => setSettings(s => ({ ...s, sandbox: e.target.value as AgentBackendSettings['sandbox'] }))}><option value="read-only">只读／拒绝扩权请求</option><option value="workspace-write">允许项目修改／逐次审批</option></select></label>}
-      {permissionEnforcement === 'unavailable' && <p className="settings-scope backend-permission-warning" role="note">该 Agent 不实现权限请求，只读与逐次审批都无法约束它的文件、命令和网络操作；选择它即代表信任其自身沙箱配置。</p>}
+      {permissionEnforcement === 'unavailable' && <p className="settings-scope backend-permission-warning" role="note">该 Agent 不实现协议权限请求，无法提供逐次审批。CodeNode 仅在连接检查显示文件系统隔离已生效时提供外层写入边界；隔离降级时只应在可信项目中使用。</p>}
       {isMsp && <>
         <label className="settings-row"><span>MSP 模型（留空跟随 Muse）</span><input aria-label="MSP 模型" value={settings.model} disabled={disabled} onChange={e => setSettings(s => ({ ...s, model: e.target.value }))} /></label>
         <p className="settings-scope">Muse Code 通过 Muse Session Protocol（MSP）接入：CodeNode 启动 <code>muse serve</code> 子进程，把执行项、权限请求、补充输入、取消和最终消息映射到统一后端契约。Muse 的会话编号不跨重启保存，也不注入 CodeNode 工具；工作区改动保留在所选项目中，由 CodeNode 独立核对文件差异。</p>
@@ -107,6 +112,7 @@ export default function BackendSettingsPanel() {
       <p className="settings-scope">所有外部 Agent 统一接入：支持 ACP 的走 ACP stdio，Muse Code 走 MSP。Codex 使用已安装的 codex-acp 适配器；Claude Code 使用 claude-agent-acp（旧名 claude-code-acp）；Qwen Code、Qoder、MiniMax Code、Kimi Code、CodeBuddy、Hermes、OpenCode、OpenClaw 使用各自的原生 ACP 入口；DeepSeek 使用 dsh --profile acp；自定义 ACP 可填写现有命令和参数。登录、模型默认值和原生工具由 Agent 自身管理，不自动下载。只读策略拒绝权限扩权请求，写入策略逐次询问；权限请求不是操作系统沙箱，不声明权限请求的 Agent 无法被约束。外部费用可能未知，CodeNode 会独立核对文件差异与验收结果。</p>
     </>}
     <div className="settings-row"><button onClick={() => void save()} disabled={disabled || scope === 'project' && !root}>保存后端</button><button onClick={() => void check()} disabled={disabled}>检测当前配置</button>{root && <button onClick={() => void save(true)} disabled={disabled}>项目跟随本机默认</button>}</div>
+    {diagnostics && <section className="backend-diagnostics" aria-label="后端诊断"><strong>{diagnostics.label}</strong><p>{diagnostics.error}</p>{diagnostics.fixes.map(fix=><p key={fix}>{fix}</p>)}{diagnostics.isolation&&<p>文件隔离：{diagnostics.isolation.filesystemIsolation?'已生效':'未提供'} · 进程隔离：{diagnostics.isolation.processIsolation?'已生效':'未提供'}</p>}{diagnostics.evidence&&<p>历史验证：{diagnostics.evidence.date} · {diagnostics.evidence.platform} · {diagnostics.evidence.version} · {diagnostics.evidence.coverage.join('、')}。待验证：{diagnostics.evidence.incomplete.join('、')}。</p>}<small>连接检查不证明真实任务、权限拒绝或取消恢复通过。外部后端仍属实验性能力。</small></section>}
     {message && <p className="settings-scope" role="status">{message}</p>}
   </div>;
 }

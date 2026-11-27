@@ -9,24 +9,28 @@ const sandbox=require('../../electron/sandbox.cjs');
 const {runExternal}=require('../../electron/backends/runExternal.cjs');
 const {redact}=require('../../electron/redaction.cjs');
 
-const requested=process.argv.find(arg=>arg.startsWith('--backends='))?.slice('--backends='.length);
+// npm script provides a default; an explicit user flag appended after `--` must win.
+const requested=process.argv.filter(arg=>arg.startsWith('--backends=')).at(-1)?.slice('--backends='.length);
 const backends=(requested||'hermes,opencode').split(',').map(value=>value.trim()).filter(Boolean);
 const liveBackends=['qwen','opencode','openclaw','qoder','minimax','kimi','hermes','codebuddy','claude','pi','acp'];
 if(!backends.length||backends.some(name=>!liveBackends.includes(name))){
   console.error('Usage: node scripts/tools/agent-backend-live-workflow.cjs [--backends=hermes,opencode]');process.exit(2);
 }
 function inputObject(value){if(value&&typeof value==='object')return value;try{return JSON.parse(String(value||''));}catch{return{};}}
-function approvedPath(root,value){if(typeof value!=='string'||!value)return'';const absolute=path.isAbsolute(value)?path.resolve(value):path.resolve(root,value);const relative=path.relative(root,absolute);return relative&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative)?relative.replace(/\\/g,'/'):'';}
+function approvedPath(root,value){if(typeof value!=='string'||!value)return'';const canonicalRoot=sandbox.canonicalPath(root),absolute=sandbox.canonicalPath(path.isAbsolute(value)?value:path.resolve(root,value));const relative=path.relative(canonicalRoot,absolute);return relative&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative)?relative.replace(/\\/g,'/'):'';}
 function createApproval(root,counters){
   return async(_level,what,detail)=>{
     let request={};try{request=JSON.parse(String(detail||'{}'));}catch{}
-    const subject=request.subject||{},tool=request.toolCall||{},raw=inputObject(tool.rawInput||tool.arguments);
-    const action=[String(what||''),String(request.title||''),String(subject.kind||''),String(tool.name||'')].join(' ').toLowerCase();
-    if(/execute|terminal|command|shell/.test(action)||subject.kind==='execute'){counters.denied++;return false;}
-    const file=approvedPath(root,subject.path||raw.path||raw.filePath||raw.file);
+    const subject=request.subject||{},tool=request.toolCall||{},rawInput=inputObject(tool.rawInput||tool.arguments);
+    const raw=inputObject(rawInput.arguments||rawInput.input||rawInput),toolName=String(tool.name||rawInput.tool||rawInput.name||'');
+    const action=[String(what||''),String(request.title||''),String(subject.kind||''),String(tool.kind||''),String(tool.title||''),toolName].join(' ').toLowerCase();
+    if(/execute|terminal|command|shell/.test(action)||subject.kind==='execute'){counters.denied++;counters.requests.push({what:String(what||''),kind:String(subject.kind||tool.kind||''),tool:toolName,file:'',allowed:false});return false;}
+    const diffPath=Array.isArray(tool.content)?tool.content.find(item=>item?.type==='diff'&&typeof item.path==='string')?.path:'';
+    const file=approvedPath(root,subject.path||raw.path||raw.filePath||raw.file||diffPath);
     const write=/write|edit|patch|apply/.test(action);
     const read=/read|search|inspect|view/.test(action);
     const allowed=write?file==='math.cjs':read?['math.cjs','math.test.cjs'].includes(file):false;
+    counters.requests.push({what:String(what||''),kind:String(subject.kind||tool.kind||''),tool:toolName,file,allowed});
     if(allowed)counters.approved++;else counters.denied++;
     return allowed;
   };
@@ -42,11 +46,11 @@ async function main(){
       cfg.editing={...cfg.editing,autoVerify:true,blockOnFailure:true,lintCommand:'node -e "process.exit(0)"',testCommand:'node --test math.test.cjs',timeoutSeconds:30,maxVerificationRuns:1};
       const userDataDir=path.join(root,'.userdata');fs.mkdirSync(userDataDir,{recursive:true});
       const sandboxPolicy=sandbox.resolvePolicy({mode:'off'},{projectRoot:root,userDataDir});
-      const permission={approved:0,denied:0};const controller=new AbortController();
-      const timer=setTimeout(()=>controller.abort(),120000);const startedAt=Date.now();
+      const permission={approved:0,denied:0,requests:[]};const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),150000);const startedAt=Date.now();
       let result;
       try{
-        result=await runExternal({projectRoot:root,requestId:'live-workflow-'+backend+'-'+Date.now(),prompt:'Fix math.cjs so the existing node:test test passes. Do not edit math.test.cjs. Do not run commands or install dependencies; CodeNode will run the test independently after your edits. Reply with exactly AGENT_LIVE_WORKFLOW_DONE after editing.',history:[],canvasSummary:'',goalWriteScope:['math.cjs'],settings:{...config.defaults,backend,executable:config.commands[backend],args:config.defaultArgs[backend]||[],sandbox:'workspace-write',turnTimeoutMs:70000},cfg,sandboxPolicy,signal:controller.signal,onDelta:()=>{},confirm:createApproval(root,permission),verifyRun:async hook=>{
+        result=await runExternal({projectRoot:root,requestId:'live-workflow-'+backend+'-'+Date.now(),prompt:'The complete current content of math.cjs is: module.exports=(a,b)=>a-b; Replace that single file with exactly: module.exports=(a,b)=>a+b; Do not search, read files, edit math.test.cjs, run commands, or install dependencies. Use one file edit/write operation, then reply exactly AGENT_LIVE_WORKFLOW_DONE. CodeNode will run the test independently.',history:[],canvasSummary:'',goalWriteScope:['math.cjs'],settings:{...config.defaults,backend,executable:config.commands[backend],args:config.defaultArgs[backend]||[],sandbox:'workspace-write',turnTimeoutMs:110000},cfg,sandboxPolicy,signal:controller.signal,onDelta:()=>{},confirm:createApproval(root,permission),verifyRun:async hook=>{
           const command=String(hook.command||'');let argv;
           if(command==='node -e "process.exit(0)"')argv=['-e','process.exit(0)'];
           else if(command==='node --test math.test.cjs')argv=['--test','math.test.cjs'];
@@ -57,11 +61,12 @@ async function main(){
       }finally{clearTimeout(timer);}
       const summary={backend,state:result?.state||'FAILED',stopReason:result?.stopReason||null,accepted:result?.ok===true,sentinel:String(result?.reply||'').includes('AGENT_LIVE_WORKFLOW_DONE'),verified:result?.codeVerification?.verified===true,changedFiles:result?.changes?.files?.map(file=>file.path)||[],goalScopeViolations:result?.goalScopeViolations||[],toolCalls:(result?.toolCalls||[]).map(call=>({name:call.name,ok:call.ok,callId:call.callId})),permissions:permission,latencyMs:Date.now()-startedAt,...(result?.error?{error:String(redact(result.error)).slice(0,500)}:{}),...(result?.backendErrorCode!=null?{backendErrorCode:result.backendErrorCode}:{}),...(result?.backendErrorMethod?{backendErrorMethod:result.backendErrorMethod}:{}),...(result?.backendErrorDetails!=null?{backendErrorDetails:redact(result.backendErrorDetails)}:{}),...(result?.backendStderr?{backendStderr:redact(result.backendStderr).slice(-2500)}:{})};
       results.push(summary);console.log(JSON.stringify(summary));
-    }catch(error){const summary={backend,state:'FAILED',stopReason:null,accepted:false,sentinel:false,verified:false,changedFiles:[],goalScopeViolations:[],toolCalls:[],permissions:{approved:0,denied:0},latencyMs:0,error:String(redact(error?.message||error)).slice(0,500)};results.push(summary);console.log(JSON.stringify(summary));}
+    }catch(error){const summary={backend,state:'FAILED',stopReason:null,accepted:false,sentinel:false,verified:false,changedFiles:[],goalScopeViolations:[],toolCalls:[],permissions:{approved:0,denied:0,requests:[]},latencyMs:0,error:String(redact(error?.message||error)).slice(0,500)};results.push(summary);console.log(JSON.stringify(summary));}
     finally{const resolved=path.resolve(root);if(path.dirname(resolved)===fs.realpathSync(os.tmpdir())&&path.basename(resolved).startsWith('codenode-agent-workflow-'+backend+'-'))fs.rmSync(resolved,{recursive:true,force:true,maxRetries:10,retryDelay:200});}
   }
   const failed=results.some(result=>result.accepted!==true||result.verified!==true||result.changedFiles.length!==1||result.changedFiles[0]!=='math.cjs'||result.goalScopeViolations.length>0);
-  console.log('REAL AGENT FILE WORKFLOW: '+(failed?'FAIL':'PASS')+' ('+results.length+' ACP backends; isolated workspace; command approval denied; independent node:test)');
+  console.log('REAL AGENT FILE WORKFLOW: '+(failed?'FAIL':'PASS')+' ('+results.length+' ACP backends; isolated workspace; file approvals scoped; independent node:test)');
   if(failed)process.exitCode=1;
 }
-main().catch(error=>{console.error(String(redact(error?.stack||error)));process.exitCode=1;});
+if(require.main===module)main().catch(error=>{console.error(String(redact(error?.stack||error)));process.exitCode=1;});
+module.exports={inputObject,approvedPath,createApproval};

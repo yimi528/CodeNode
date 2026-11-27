@@ -1,6 +1,6 @@
+import { nodePresentation } from '../nodes/presentation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IntentBadge } from './IntentBadge';
-import { highlightCode } from '../lib/highlightCode';
 import { workflowReadiness } from '../lib/workflowRunState';
 import { useGraphStore } from '../store/graphStore';
 import { useProjectStore } from '../store/projectStore';
@@ -108,165 +108,6 @@ function lineDiff(before: string, after: string) {
   return rows;
 }
 
-function diagnoseCode(path: string, value: string) {
-  const problems: { line: number; message: string }[] = [];
-  const stack: { char: string; line: number }[] = [];
-  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
-  value.split(/\r?\n/).forEach((line, index) => {
-    for (const char of line) {
-      if ('([{'.includes(char)) stack.push({ char, line: index + 1 });
-      else if (')]}'.includes(char)) {
-        const top = stack.pop();
-        if (!top || top.char !== pairs[char]) problems.push({ line: index + 1, message: `括号不匹配：${char}` });
-      }
-    }
-  });
-  for (const item of stack) problems.push({ line: item.line, message: `缺少闭合括号：${item.char}` });
-  if (/\.json$/i.test(path) && value.trim()) {
-    try { JSON.parse(value); } catch (error) { problems.push({ line: 1, message: `JSON 解析失败：${String(error).replace(/^SyntaxError:\s*/, '').slice(0, 120)}` }); }
-  }
-  return problems.slice(0, 30);
-}
-
-function commandFromNode(node: Node): string | null {
-  const prompt = String((node.data as Record<string, unknown> | undefined)?.prompt || '').trim();
-  const explicit = prompt.match(/^(?:run:|\$)\s*(.+)$/i);
-  if (explicit?.[1]) return explicit[1].trim();
-  if (/^(npm|npx|node|git|python3?|py|java|javac|mvn|mvnw|gradle|go|cargo|cmd|powershell|pwsh)\b/i.test(prompt)) return prompt;
-  return null;
-}
-
-function topoNodes(nodes: Node[], edges: { source: string; target: string }[]) {
-  const indegree = new Map(nodes.map((n) => [n.id, 0]));
-  const outgoing = new Map(nodes.map((n) => [n.id, [] as string[]]));
-  for (const edge of edges) {
-    if (!indegree.has(edge.source) || !indegree.has(edge.target)) continue;
-    outgoing.get(edge.source)!.push(edge.target);
-    indegree.set(edge.target, indegree.get(edge.target)! + 1);
-  }
-  const queue = nodes.filter((n) => indegree.get(n.id) === 0).map((n) => n.id);
-  const order: Node[] = [];
-  while (queue.length) {
-    const id = queue.shift()!;
-    const node = nodes.find((n) => n.id === id);
-    if (node) order.push(node);
-    for (const next of outgoing.get(id) || []) {
-      indegree.set(next, indegree.get(next)! - 1);
-      if (indegree.get(next) === 0) queue.push(next);
-    }
-  }
-  for (const node of nodes) if (!order.some((x) => x.id === node.id)) order.push(node);
-  return order;
-}
-
-export function EditorPanel() {
-  const selected = useProjectStore((s) => s.selected);
-  const draft = useProjectStore((s) => s.draft);
-  const searchMatches = useProjectStore((s) => s.searchMatches);
-  const searching = useProjectStore((s) => s.searching);
-  const searchProject = useProjectStore((s) => s.searchProject);
-  const openFile = useProjectStore((s) => s.openFile);
-  const dirty = useProjectStore((s) => s.dirty);
-  const updateDraft = useProjectStore((s) => s.updateDraft);
-  const saveSelected = useProjectStore((s) => s.saveSelected);
-  const revertDraft = useProjectStore((s) => s.revertDraft);
-  const conflict = useProjectStore((s) => s.conflict);
-  const forceSaveSelected = useProjectStore((s) => s.forceSaveSelected);
-  const acceptExternalFile = useProjectStore((s) => s.acceptExternalFile);
-  const mergeExternalFile = useProjectStore((s) => s.mergeExternalFile);
-  const [saving, setSaving] = useState(false);
-  const [query, setQuery] = useState('');
-  const [tabs, setTabs] = useState<string[]>([]);
-  const [showCompletions, setShowCompletions] = useState(false);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLPreElement>(null);
-  const editorTarget = useUiStore((s) => s.editorTarget);
-
-  useEffect(() => {
-    if (!selected || !editorTarget || selected.relPath !== editorTarget.path) return;
-    const line = Math.max(1, Math.min(editorTarget.line, draft.split('\n').length));
-    const offset = draft.split('\n').slice(0, line - 1).reduce((sum, part) => sum + part.length + 1, 0);
-    requestAnimationFrame(() => {
-      const editor = editorRef.current;
-      if (!editor) return;
-      editor.focus();
-      editor.setSelectionRange(offset, offset);
-      editor.scrollTop = Math.max(0, (line - 4) * 18.6);
-      if (highlightRef.current) highlightRef.current.scrollTop = editor.scrollTop;
-      useUiStore.getState().setEditorTarget(null);
-    });
-  }, [selected?.relPath, editorTarget, draft]);
-
-  // 幂等追加：不能在依赖里再读 tabs，否则 StrictMode 双次执行 / 陈旧闭包会重复插入同一路径
-  useEffect(() => {
-    if (selected?.relPath) {
-      setTabs((list) => (list.includes(selected.relPath) ? list : [...list, selected.relPath]));
-    }
-  }, [selected?.relPath]);
-
-  const save = async () => {
-    setSaving(true);
-    const ok = await saveSelected();
-    setSaving(false);
-    if (ok) useUiStore.getState().setToast(`已保存 ${selected?.relPath || '文件'}`);
-  };
-
-  // Hook 必须在任何条件 return 之前调用：此前 useMemo 被放在 `if (!selected) return`
-  // 之后，未选中文件时少调一个 Hook、选中后多调一个，React 会抛
-  // "Rendered more hooks than during the previous render." 并卸载整棵树 -> 界面全白。
-  const problems = useMemo(
-    () => (selected ? diagnoseCode(selected.relPath, draft) : []),
-    [selected, draft]
-  );
-
-  if (selected?.relPath.toLowerCase().endsWith('.cnode')) return <div className="dock-empty">工程文件通过工作台修改。</div>;
-  if (!selected) return <div className="dock-empty">从左侧项目树点击文件，开始编辑。支持多文件标签、保存、撤销和 Diff 对比。</div>;
-  const lines = draft.split(/\r?\n/).length;
-  const language = selected.relPath.split('.').pop()?.toUpperCase() || 'TEXT';
-  const completionItems = ['const', 'function', 'return', 'async', 'await', 'if', 'else', 'for', 'try', 'catch', 'console.log'];
-  const closeTab = (path: string) => {
-    const next = tabs.filter((item) => item !== path);
-    setTabs(next);
-    if (path === selected.relPath && next.length) void openFile(next[next.length - 1]);
-  };
-  return (
-    <div className="dock-editor">
-      <div className="dock-editor-tabs">{tabs.map((path) => <button key={path} className={path === selected.relPath ? 'active' : ''} onClick={() => { void openFile(path); }}><span>{path.split('/').pop()}</span><i onClick={(e) => { e.stopPropagation(); closeTab(path); }}>×</i></button>)}</div>
-      <div className="dock-file-head">
-        <span className="dock-file-path">{selected.relPath}{dirty ? ' · 未保存' : ''}</span>
-        <span className="dock-language">{language}</span>
-        <span className="dock-file-meta">{lines} 行 · {draft.length} 字符</span>
-        <div className="dock-search"><input value={query} placeholder="搜索项目…" onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void searchProject(query); }} /><button onClick={() => void searchProject(query)} disabled={!query.trim() || searching}>{searching ? '…' : '查找'}</button></div>
-        <button onClick={revertDraft} disabled={!dirty}>撤销修改</button>
-        <button className="dock-primary" onClick={() => void save()} disabled={!dirty || saving}>{saving ? '保存中…' : '保存文件'}</button>
-      </div>
-      {query.trim() && <div className="dock-search-results">{searchMatches.length ? searchMatches.map((match) => <button key={`${match.path}:${match.line}`} onClick={() => { void openFile(match.path); }}>{match.path}:{match.line}<span>{match.text}</span></button>) : <span>{searching ? '搜索中…' : '没有匹配结果'}</span>}</div>}
-      {conflict && <div className="dock-conflict"><span>文件在外部被修改，当前草稿未覆盖外部内容。</span><button onClick={mergeExternalFile}>三方合并</button><button onClick={acceptExternalFile}>载入外部版本</button><button className="dock-danger" onClick={() => void forceSaveSelected()}>强制覆盖外部版本</button></div>}
-      <div className="dock-problems"><strong>{problems.length ? `问题 ${problems.length}` : '无问题'}</strong>{problems.map((problem, index) => <span key={index}>L{problem.line} {problem.message}</span>)}<button onClick={() => setShowCompletions((value) => !value)}>补全 ⌘Space</button></div>
-      {showCompletions && <div className="dock-completions">{completionItems.map((item) => <button key={item} onClick={() => { const el = editorRef.current; if (!el) return; const start = el.selectionStart; updateDraft(draft.slice(0, start) + item + draft.slice(el.selectionEnd)); setShowCompletions(false); requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start + item.length, start + item.length); }); }}>{item}</button>)}</div>}
-      <div className="dock-code-wrap">
-        <div className="dock-line-numbers" aria-hidden="true">{Array.from({ length: lines }, (_, i) => <span key={i}>{i + 1}</span>)}</div>
-        <div className="dock-code-surface">
-          <pre ref={highlightRef} className="dock-code-highlight" aria-hidden="true" dangerouslySetInnerHTML={{ __html: highlightCode(draft) + '\n' }} />
-          <textarea
-            ref={editorRef}
-            className="dock-code-editor"
-            value={draft}
-            spellCheck={false}
-            onChange={(e) => updateDraft(e.target.value)}
-            onScroll={(e) => { if (highlightRef.current) { highlightRef.current.scrollTop = e.currentTarget.scrollTop; highlightRef.current.scrollLeft = e.currentTarget.scrollLeft; } }}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); void save(); }
-              if ((e.metaKey || e.ctrlKey) && e.code === 'Space') { e.preventDefault(); setShowCompletions((value) => !value); }
-              if (e.key === 'Tab') { e.preventDefault(); const el = e.currentTarget; const start = el.selectionStart; const end = el.selectionEnd; updateDraft(draft.slice(0, start) + '  ' + draft.slice(end)); requestAnimationFrame(() => el.setSelectionRange(start + 2, start + 2)); }
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function DiffPanel() {
   const selected = useProjectStore((s) => s.selected);
   const draft = useProjectStore((s) => s.draft);
@@ -323,6 +164,7 @@ function TerminalPanel() {
 }
 
 function RunsPanel() {
+  const showFlow = useUiStore(s => s.preferences.visibleActions.includes('flow'));
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
   const updateNodeData = useGraphStore((s) => s.updateNodeData);
@@ -581,7 +423,7 @@ function RunsPanel() {
     const [toolsResult, cfg] = await Promise.all([api.agentTools(root), api.agentConfig(root)]);
     const availableModels = [cfg.model, ...(cfg.models || []).flatMap((model) => [model.id, model.label, model.model])];
     const missing = missingTemplateDeps(deps, {
-      tools: (toolsResult.tools || []).map((tool) => tool.name),
+      tools: [...(toolsResult.executorNames || []), ...(toolsResult.tools || []).map((tool) => tool.name)],
       models: availableModels,
       tree: useProjectStore.getState().tree,
     });
@@ -681,6 +523,7 @@ function RunsPanel() {
       <div className="dock-run-toolbar"><div><strong>连续执行</strong><span className="dock-file-meta">按连线拓扑顺序运行；失败或停止后可继续未完成节点</span></div><div><button onClick={() => { cancel.current = true; }} disabled={!running}>停止</button>
       {/* #7：「全部停止」出口 —— 并发下必须能一次停干净所有在跑的请求（含被覆盖的那条控制权） */}
       <button className="dock-danger" onClick={stopEverything} disabled={!sending}>全部停止 Agent</button>
+      {showFlow && <button disabled={!nodes.length} onClick={() => { runFlow(); useUiStore.getState().setToast('数据流已计算'); }}>计算数据流</button>}
       <button onClick={() => void inspectTemplate()} disabled={running || !root}>导入模板</button>
       <button onClick={() => void exportTemplate()} disabled={running || !nodes.length}>导出模板</button>
       <button className="dock-primary" onClick={() => void start()} disabled={running || !readiness.ready}>{running ? '执行中…' : resumeAvailable ? '继续执行' : '开始执行'}</button></div></div>
@@ -830,7 +673,7 @@ function RunsPanel() {
         <span>隔离 {metrics.sandbox?.backend || 'none'}{metrics.sandbox?.degraded?.length ? '（降级：' + metrics.sandbox.degraded.join('/') + '）' : ''}</span>
         {metrics.alerts?.length ? <span className="dock-metrics-alert">{metrics.alerts[metrics.alerts.length - 1].message}</span> : null}
       </div>}
-      <div className="dock-run-list">{items.map((item) => <div className={`dock-run-item ${item.status}`} key={item.id}><span className="dock-run-dot" /><div className="dock-run-main"><div><strong>{item.label}</strong><span className="dock-run-type">{item.type}</span><span className="dock-run-status">{item.status}</span>{item.attempts ? <span className="dock-run-type">尝试 {item.attempts} 次</span> : null}</div>{item.input && <details><summary>消费的上游结果</summary><pre>{item.input}</pre></details>}{item.failure && <div className="task-trace-warning">{item.failure}</div>}{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
+      <div className="dock-run-list">{items.map((item) => <div className={`dock-run-item ${item.status}`} key={item.id}><span className="dock-run-dot" /><div className="dock-run-main"><div><strong>{item.label}</strong><span className="dock-run-type">{nodePresentation(item.type).label}</span><span className="dock-run-status">{item.status}</span>{item.attempts ? <span className="dock-run-type">尝试 {item.attempts} 次</span> : null}</div>{item.input && <details><summary>消费的上游结果</summary><pre>{item.input}</pre></details>}{item.failure && <div className="task-trace-warning">{item.failure}</div>}{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
       <RunReplayPanel />
     </div>
   );

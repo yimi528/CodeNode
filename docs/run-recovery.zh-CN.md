@@ -55,4 +55,4 @@ Run 是 CodeNode 的工作单元：一次带显式状态、可审计工具契约
 | 预算与成本归属 | `electron/requestBudget.cjs`、`electron/contextBudget.cjs`、`electron/costLedger.cjs`、`electron/costAttribution.cjs` |
 | 权限、审批、沙箱 | `electron/tools/registry.cjs`、`electron/approvalRules.cjs`、`electron/sandbox.cjs` |
 
-相关验收：`npm run test:resume`、`test:side-effect-idem`、`test:run-rollback`、`test:agent-limits`、`test:context-budget`、`test:sandbox`、`test:runtime-gate`（后者断言这些能力确实接线可用，而不只是源码里出现过）。设计背景见[借鉴建议文档](agent-harness-and-workflow-recommendations.md)。
+相关验收：`npm run test:resume`、`test:side-effect-idem`、`test:run-rollback`、`test:agent-limits`、`test:context-budget`、`test:sandbox`、`test:runtime-gate`（后者断言这些能力确实接线可用，而不只是源码里出现过）。设计背景见[借鉴建议文档](proposals/agent-harness-and-workflow-recommendations.md)。

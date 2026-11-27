@@ -62,6 +62,7 @@
                 "type": "object",
                 "properties": {
                   "label": { "type": "string" },
+                  "boundary": { "type": "string", "enum": ["", "start", "end", "both"] },
                   "subtitle": { "type": "string" },
                   "goal": { "type": "string" },
                   "status": { "type": "string", "enum": ["pending", "running", "done", "failed", "blocked"] },

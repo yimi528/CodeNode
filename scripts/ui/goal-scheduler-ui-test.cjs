@@ -24,6 +24,7 @@ const verify=(goalId,taskId,criterionId,delayed=false)=>{
   const command='node -e "'+(delayed?'setTimeout(()=>{'+check+'},1200)':check)+'"';
   return js(`(async()=>{const off=window.codenode.onToolRequest(r=>{if(r.type==='confirm')window.codenode.respondToolRequest(r.id,{ok:true});});try{return await window.codenode.goalVerify(${[project,goalId,taskId,criterionId,command].map(a=>JSON.stringify(a)).join(',')});}finally{off();}})()`);
 };
+function cleanup(){try{hostRuntime?.close();}catch{}try{if(win&&!win.isDestroyed())win.destroy();}catch{}const resolved=path.resolve(root);assert.equal(fs.realpathSync(path.dirname(resolved)),fs.realpathSync(os.tmpdir()));assert.ok(path.basename(resolved).startsWith('codenode-goal-scheduler-ui-'));try{fs.rmSync(resolved,{recursive:true,force:true,maxRetries:10,retryDelay:100});}catch{}}
 app.whenReady().then(async()=>{try{
   await until(()=>win&&js('!!window.__codenodeProject').catch(()=>false),'renderer stores');
   await js(`window.__codenodeUi.getState().updatePreferences({autoSaveEnabled:false})`);
@@ -46,10 +47,13 @@ app.whenReady().then(async()=>{try{
     await until(()=>js(`!!document.querySelector('[aria-label="Task 负责人编辑"]')`),'Task owner editor');
     const firstOwner='release-review-'+theme+' password=owner-secret';
     assert.equal(await js(`document.querySelector('[aria-label="Task 负责人编辑"]').value`),'main','new Tasks default to the main Agent owner marker');
-    await js(`(()=>{const input=document.querySelector('[aria-label="Task 负责人编辑"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(firstOwner)});input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.goal-graph-editor button').click();})()`);
+    await js(`(()=>{const input=document.querySelector('[aria-label="Task 负责人编辑"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(firstOwner)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await until(()=>js(`[...document.querySelectorAll('.goal-graph-editor button')].some(button=>button.textContent==='保存节点'&&!button.disabled)`),'owner edit ready to save');
+    await js(`[...document.querySelectorAll('.goal-graph-editor button')].find(button=>button.textContent==='保存节点').click()`);
     await until(async()=>(await audit(goalId)).tasks[0].owner===firstOwner,'Task owner saved into the Goal contract');
     await js(`(()=>{const select=document.querySelector('[aria-label="Task 优先级编辑"]');select.value='high';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-    await sleep(80);await js(`document.querySelector('.goal-graph-editor button').click()`);
+    await until(()=>js(`document.querySelector('[aria-label="Task 优先级编辑"]')?.value==='high'&&[...document.querySelectorAll('.goal-graph-editor button')].some(button=>button.textContent==='保存节点'&&!button.disabled)`),'priority edit ready to save');
+    await js(`[...document.querySelectorAll('.goal-graph-editor button')].find(button=>button.textContent==='保存节点').click()`);
     await until(async()=>(await audit(goalId)).tasks[0].priority==='high','Task priority persisted from the shared theme editor');
     await until(()=>js(`document.querySelector('.goal-graph-node .goal-graph-owner')?.textContent.includes(${JSON.stringify(firstOwner)})`),'Task owner displayed on its graph node');
     await js(`(()=>{const input=document.querySelector('.pp-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'调度期间保留的草稿');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
@@ -65,7 +69,7 @@ app.whenReady().then(async()=>{try{
     await until(()=>js('!document.querySelector(".goal-task-graph")'),'Goal editor unmounted');
     await js(`(()=>{document.querySelector('[aria-label="关闭目标编辑"]').click();window.__codenodeUi.getState().updatePreferences({workbenchView:'conversation'});})()`);
     assert.equal(await js('!!document.querySelector(".goal-task-graph")'),false,'the Goal graph component is unmounted');
-    const view=()=>js(`JSON.stringify({session:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input').value,model:document.querySelector('.pp-model')?.textContent,side:window.__codenodeUi.getState().sideOpen,tab:window.__codenodeUi.getState().sideTab})`);
+    const view=()=>js(`JSON.stringify({session:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input').value,model:document.querySelector('.model-connection-trigger')?.title,side:window.__codenodeUi.getState().sideOpen,tab:window.__codenodeUi.getState().sideTab})`);
     const stateBefore=await view();
     await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme==='light'?'dark':'light')}})`);await sleep(100);
     assert.equal(await view(),stateBefore,'theme changes preserve session, messages, draft, model and sidebar while execution is waiting');
@@ -233,6 +237,6 @@ app.whenReady().then(async()=>{try{
   await until(async()=>(await audit(costGoal.value.id)).tasks.find(t=>t.id===costFinal.value.id).executionStatus==='failed','cumulative ACP cost delta cancels over-budget second turn');
   const costOverrun=await audit(costGoal.value.id);assert.ok(Math.abs(costOverrun.budget.knownCostUsd-0.06)<1e-9);assert.equal(costOverrun.budget.overLimit,true);assert.equal(costOverrun.complete,false);
   console.log('GOAL SCHEDULER UI: PASS (real main/preload/renderer/ACP, independent progression, per-run token cap, cumulative cost reservation/cancellation, unknown-usage reconciliation, reload, acceptance and both themes preserving user state)');
-  app.quit();
+  cleanup();app.exit(0);
 }catch(error){console.error(error);console.error('Scheduler runtime:',{closed:hostRuntime?.scheduler.closed,running:hostRuntime?.scheduler.running,bindings:[...hostRuntime?.scheduler.bindings.values()||[]].map(b=>({root:b.root,ready:b.ready}))});try{console.error(await js(`(async()=>{const result=await window.codenode.goalList(${JSON.stringify(project)});return JSON.stringify({goals:result.value?.goals.map(g=>({title:g.title,execution:g.execution,tasks:g.tasks.map(t=>({status:t.status,executionStatus:t.executionStatus,autoAdvance:t.autoAdvance,lastRun:t.lastRun}))})),ui:document.querySelector('.goal-graph-message')?.textContent,root:window.__codenodeProject.getState().root,inflight:window.__codenodeChat.getState().inflight.size(),messages:window.__codenodeSession.getState().messages.slice(-2)});})()`));}catch{}app.exit(1);}});
-app.on('quit',()=>{hostRuntime?.close();const resolved=path.resolve(root);assert.equal(path.dirname(resolved),fs.realpathSync(os.tmpdir()));assert.ok(path.basename(resolved).startsWith('codenode-goal-scheduler-ui-'));try{fs.rmSync(resolved,{recursive:true,force:true,maxRetries:10,retryDelay:100});}catch{}});
+app.on('quit',cleanup);

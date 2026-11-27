@@ -105,39 +105,19 @@ const REGISTRY_KEYS = [
     const registry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: true });
     const specs = registry.listTools();
     const descriptors = registry.listDescriptors();
-    check('B1 每个注册工具都有契约，且字段齐全', specs.length === descriptors.length && descriptors.length >= 20 &&
+    check('B1 每个注册工具都有契约，且字段齐全', specs.length === descriptors.length && descriptors.length === 15 &&
       descriptors.every((d) => REGISTRY_KEYS.every((k) => d[k] !== undefined)), JSON.stringify({ specs: specs.length, descriptors: descriptors.length }));
     check('B2 契约顺序与工具顺序一致（UI 可对照）', descriptors.every((d, i) => d.name === specs[i].name));
     check('B3 describeAll() 与 listDescriptors() 一一对应', registry.describeAll().length === descriptors.length &&
       registry.describeAll().every((s, i) => s.name === descriptors[i].name));
-    /**
-     * 工具面收敛（docs/tool-consolidation.zh-CN.md）：`query_scalars` 并进 `retrieve_context`，
-     * `get_workbench_model` 收编了 ui_control 的视口动作（族级 readOnly=false，由 byKind 决定）。
-     * 所以这里判据改成「按 kind 解出后的语义」——直接查族级 descriptor 会误判。
-     */
     check('B4 只读工具确实都在 READ_ONLY_TOOLS 里（含 retrieve_context / get_workbench_model / poll_job）',
-      ['read_file', 'retrieve_context', 'poll_job'].every((n) => registry.descriptorOf(n).readOnly === true) &&
-      descriptorLib.effectiveDescriptor(registry.descriptorOf('get_workbench_model'), { view: 'full' }).readOnly === true,
-      JSON.stringify({
-        read_file: registry.descriptorOf('read_file').readOnly,
-        retrieve_context: registry.descriptorOf('retrieve_context').readOnly,
-        poll_job: registry.descriptorOf('poll_job').readOnly,
-        get_workbench_model_full: descriptorLib.effectiveDescriptor(registry.descriptorOf('get_workbench_model'), { view: 'full' }).readOnly,
-      }));
+      ['read_file', 'retrieve_context', 'get_workbench_model', 'poll_job', 'query_scalars'].every((n) => registry.descriptorOf(n).readOnly === true),
+      JSON.stringify(['read_file', 'retrieve_context', 'get_workbench_model', 'poll_job', 'query_scalars'].map((n) => registry.descriptorOf(n).readOnly)));
     check('B5 写工具都不是只读（fail-closed：未声明即 write）',
-      ['write_file', 'edit_file', 'workbench_edit', 'execute_shell'].every((n) => registry.descriptorOf(n).readOnly === false) &&
-      // 收编后：bulk_edit / save_project / ui_control 是 workbench_edit / get_workbench_model 的 kind
-      descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).readOnly === false &&
-      descriptorLib.effectiveDescriptor(registry.descriptorOf('get_workbench_model'), { view: 'focus' }).readOnly === false,
-      JSON.stringify({
-        write_file: registry.descriptorOf('write_file').readOnly,
-        workbench_edit: registry.descriptorOf('workbench_edit').readOnly,
-        save_project_kind: descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).readOnly,
-      }));
-    check('B6 save_project 在族里仍声明 requiresConfirmation=WRITE（合并前后一致）',
-      descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).requiresConfirmation === 'WRITE' &&
-      descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).requiredCapability === 'project.save',
-      JSON.stringify(descriptorLib.effectiveDescriptor(registry.descriptorOf('workbench_edit'), { kind: 'save_project' }).requiresConfirmation));
+      ['write_file', 'edit_file', 'bulk_edit', 'workbench_edit', 'save_project', 'execute_shell', 'ui_control'].every((n) => registry.descriptorOf(n).readOnly === false));
+    check('B6 save_project 是显式契约（唯一行为有变化：执行前需用户确认）',
+      registry.descriptorOf('save_project').source === 'explicit' && registry.descriptorOf('save_project').requiresConfirmation === 'WRITE' &&
+      registry.descriptorOf('save_project').confirmationEnforced === true);
     check('B7 execute_shell / poll_job 自管超时（timeoutMs=0），避免注册表和工具各设一层超时',
       registry.descriptorOf('execute_shell').timeoutMs === 0 && registry.descriptorOf('poll_job').timeoutMs === 0,
       JSON.stringify({ shell: registry.descriptorOf('execute_shell').timeoutMs, poll: registry.descriptorOf('poll_job').timeoutMs }));
@@ -255,18 +235,17 @@ const REGISTRY_KEYS = [
       confirm: async (level, what) => { confirmCalls.push({ level, what }); return false; },
       saveProject: async () => { saved += 1; return path.join(root, 'workflow.cnode'); },
     });
-    const denied = await registry.execute('workbench_edit', { kind: 'save_project' }, deniedContext);
+    const denied = await registry.execute('save_project', {}, deniedContext);
     check('F3 用户不批准 → 工具不执行（APPROVAL_DENIED，副作用计数为 0）',
       denied.ok === false && denied.data.code === 'APPROVAL_DENIED' && saved === 0, JSON.stringify({ ok: denied.ok, code: denied.data.code, saved }));
-    // 收编后审批请求的 what 是族工具名（workbench_edit），kind 从参数看
-    check('F4 确认请求带上了 WRITE 级别与工具名', confirmCalls.length === 1 && confirmCalls[0].level === 'WRITE' && confirmCalls[0].what === 'workbench_edit',
+    check('F4 确认请求带上了 WRITE 级别与工具名', confirmCalls.length === 1 && confirmCalls[0].level === 'WRITE' && confirmCalls[0].what === 'save_project',
       JSON.stringify(confirmCalls));
 
     const approvedContext = makeContext({
       confirm: async () => true,
       saveProject: async () => { saved += 1; return path.join(root, 'workflow.cnode'); },
     });
-    const approved = await registry.execute('workbench_edit', { kind: 'save_project' }, approvedContext);
+    const approved = await registry.execute('save_project', {}, approvedContext);
     check('F5 用户批准 → 正常执行', approved.ok === true && saved === 1 && approved.data.filePath.endsWith('workflow.cnode'), JSON.stringify({ ok: approved.ok, saved }));
 
     // 旧 register() 的写工具不会被注册表级确认拦下：用一个「内部不自我确认」的旧接口写工具验证——
@@ -280,6 +259,184 @@ const REGISTRY_KEYS = [
     check('F6 旧 register() 合成的契约（requiresConfirmation=false）不触发注册表级确认（S7 起画布类写工具改用 declareContract 显式声明）',
       legacyWrite.ok === true && fs.readFileSync(path.join(root, 'legacy-ok.txt'), 'utf8') === 'L\n',
       JSON.stringify({ ok: legacyWrite.ok, text: String(legacyWrite.text).slice(0, 40) }));
+  }
+
+  // New invocation spellings route to the original executor and output contract.
+  {
+    const registry = toolkit.buildDefaultRegistryWithConfig({ ragEnabled: false });
+    let prompts = 0;
+    const context = makeContext({ confirm: async () => { prompts++; return true; } });
+    const oldArgs = { kind: 'preference', key: 'editor', content: 'use vim', value: 'vim' };
+    const newArgs = { action: 'save', memoryKind: 'preference', key: 'editor', content: 'use vim', value: 'vim' };
+    assert.deepStrictEqual(registry.resolveCall('remember', oldArgs), registry.resolveCall('memory', newArgs));
+    const first = await registry.execute('remember', oldArgs, context);
+    assert.equal(first.ok, true, first.text);
+    assert.ok(first.data.id);
+    const saved = await registry.execute('memory', newArgs, context);
+    assert.equal(saved.ok, true, saved.text);
+    assert.equal(saved.data.duplicate, true);
+    assert.equal(saved.data.id, first.data.id);
+    assert.equal(saved.data.version, first.data.version);
+    assert.equal(saved.data.total, first.data.total);
+    assert.equal(prompts, 2);
+    assert.equal(oldArgs.kind, 'preference');
+    assert.equal(newArgs.memoryKind, 'preference');
+    const oldRead = await registry.execute('recall', { query: 'vim' }, context);
+    const newRead = await registry.execute('memory', { action: 'search', query: 'vim' }, context);
+    assert.equal(newRead.ok, true);
+    assert.deepStrictEqual(newRead.data, oldRead.data);
+    assert.equal(prompts, 2);
+    assert.deepStrictEqual(registry.resolveCall('query_scalars', { key: 'a,b' }),
+      registry.resolveCall('retrieve_context', { mode: 'scalar', keys: ['a','b'] }));
+    assert.equal(registry.resolveCall('get_workbench_model', { view: 'typo' }).error.data.code, 'INVALID_TOOL_ARGUMENTS');
+    assert.equal((await registry.execute('recall', { action: 'save', content: 'unexpected' }, context)).ok, false);
+    assert.equal(prompts, 2);
+    check('G1 旧记忆参数、结果、确认次数及标量参数与新写法兼容', true);
+  }
+
+  {
+    const context = makeContext();
+    const registry = toolkit.buildDefaultRegistryWithConfig({
+      toolsAllowed: ['find_files', 'ui_control', 'workbench_edit.create', 'query_scalars'],
+      toolsDeny: ['get_workbench_model.zoom'], ragEnabled: false,
+    });
+    const hasError = (name, args) => registry.resolveCall(name, args).error?.data.code;
+    assert.equal(hasError('list_files', { kind: 'dir' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('list_directory', {}), 'PERMISSION_DENIED');
+    assert.equal(registry.resolveCall('list_files', { kind: 'glob', pattern: '*.txt' }).error, null);
+    const glob = await registry.execute('list_files', { kind: 'glob', pattern: '*.txt' }, context);
+    assert.equal(glob.ok, true);
+    assert.deepStrictEqual(glob.data, (await registry.execute('find_files', { pattern: '*.txt' }, context)).data);
+    assert.equal(hasError('ui_control', { action: 'zoom' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('get_workbench_model', { view: 'zoom' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('get_workbench_model', { view: 'focus' }), undefined);
+    assert.equal(hasError('get_workbench_model', {}), 'PERMISSION_DENIED');
+    assert.equal(hasError('workbench_edit', { kind: 'save_project' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('workbench_edit', { operations: [{action:'create'}, {action:'delete'}] }), 'PERMISSION_DENIED');
+    assert.equal(hasError('retrieve_context', { mode: 'file', query: 'vim' }), 'PERMISSION_DENIED');
+    assert.equal(hasError('retrieve_context', { mode: 'scalar', key: 'a' }), undefined);
+    assert.equal(registry.contains('list_files'), true);
+    const exposed = registry.toOpenAiTools().map(tool => tool.function);
+    assert.deepStrictEqual(exposed.find(tool => tool.name === 'workbench_edit').parameters.properties.operations.items.properties.action.enum, ['create']);
+    assert.ok(!exposed.find(tool => tool.name === 'get_workbench_model').parameters.properties.view.enum.includes('zoom'));
+    registry.register('late_tool', 'extension', {}, () => AgentToolResult.ok('unexpected'));
+    assert.equal(hasError('late_tool', {}), 'PERMISSION_DENIED');
+    const denyOnly = toolkit.buildDefaultRegistryWithConfig({toolsDeny:['list_directory']});
+    assert.equal(denyOnly.resolveCall('list_files', { kind:'dir' }).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(denyOnly.resolveCall('list_files', { kind:'glob' }).error, null);
+    const reviewer = toolkit.buildDefaultRegistryWithConfig({role:'reviewer', toolsAllowed:['analyze_project','project_info']});
+    assert.equal(reviewer.resolveCall('project_overview', {kind:'structure'}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(reviewer.resolveCall('project_overview', {kind:'info'}).error, null);
+    const oldCanvasReader = toolkit.buildDefaultRegistryWithConfig({toolsAllowed:['get_workbench_model']});
+    assert.equal(oldCanvasReader.resolveCall('get_workbench_model', {view:'counts'}).error, null);
+    assert.equal(oldCanvasReader.resolveCall('get_workbench_model', {view:'focus'}).error.data.code, 'PERMISSION_DENIED');
+    const colliding = toolkit.buildDefaultRegistry();
+    colliding.register('memory.search', 'existing extension', {}, () => AgentToolResult.ok('extension'));
+    toolkit.filterByConfig(colliding, {toolsAllowed:['memory.search']});
+    assert.equal(colliding.resolveCall('memory.search', {}).error, null);
+    assert.equal(colliding.resolveCall('recall', {query:'x'}).error.data.code, 'PERMISSION_DENIED');
+    const lateCollision = toolkit.buildDefaultRegistryWithConfig({toolsAllowed:['memory.search']});
+    lateCollision.register('memory.search', 'late extension', {}, () => AgentToolResult.ok('unexpected'));
+    assert.equal(lateCollision.contains('memory.search'), false);
+    assert.equal(lateCollision.resolveCall('memory.search', {}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(lateCollision.resolveCall('memory', {action:'search', query:'x'}).error, null);
+    const wholeFamily = toolkit.buildDefaultRegistryWithConfig({toolsAllowed:['list_files'], toolsDeny:['list_files.dir']});
+    assert.deepStrictEqual(wholeFamily.listTools().map(spec => spec.name), ['list_files']);
+    check('G2 动作名单、角色交集、整批校验与模型可见范围', true);
+  }
+
+  {
+    const context = makeContext();
+    const registry = toolkit.buildDefaultRegistryWithConfig({ discoverTools:true });
+    const first = registry.toOpenAiTools().map(entry => entry.function);
+    const surface = first.find(spec => spec.name === 'list_files');
+    assert.deepStrictEqual(surface.parameters.properties.kind.enum, ['glob','dir']);
+    assert.ok(first.some(spec => spec.name === 'search_files'));
+    assert.ok(first.every(spec => !['find_files','list_directory'].includes(spec.name)));
+    const dirArgs = { path:'.', recursive:true, offset:1 };
+    const old = await registry.execute('list_directory', dirArgs, context);
+    const modern = await registry.execute('list_files', { kind:'dir', ...dirArgs }, context);
+    assert.ok(old.ok && modern.ok, modern.text);
+    assert.deepStrictEqual(modern.data, old.data);
+    assert.equal(modern.text, old.text);
+    assert.deepStrictEqual((await registry.execute('list_files', {}, context)).data,
+      (await registry.execute('list_directory', {}, context)).data);
+    assert.equal((await registry.execute('list_files', { kind:'dir', pattern:'*' }, context)).data.code, 'INVALID_TOOL_ARGUMENTS');
+    assert.equal((await registry.execute('list_files', { kind:'other' }, context)).data.code, 'INVALID_TOOL_ARGUMENTS');
+    registry.setExposure(['discover_tools']);
+    const discover = await registry.execute('discover_tools', { query:'find_files' }, context);
+    assert.deepStrictEqual(discover.data.enabled, ['list_files']);
+    assert.equal(registry.isExposed('find_files'), false);
+    assert.equal(registry.isExposed('list_files'), true);
+    registry.setExposure(['list_directory']);
+    assert.deepStrictEqual(registry.schemaInfo().names, ['list_files']);
+
+    const reviewer = toolkit.buildDefaultRegistryWithConfig({ role:'reviewer', toolsAllowed:['list_files'] });
+    const spec = reviewer.schemaInfo().tools[0].function;
+    assert.equal(spec.name, 'list_files');
+    assert.deepStrictEqual(spec.parameters.properties.kind.enum, ['glob']);
+    assert.ok(!Object.hasOwn(spec.parameters.properties, 'path'));
+    assert.equal((await reviewer.execute('list_files', { kind:'dir' }, context)).data.code, 'PERMISSION_DENIED');
+    assert.equal((await reviewer.execute('list_directory', {}, context)).data.code, 'PERMISSION_DENIED');
+    assert.ok((await reviewer.execute('list_files', { kind:'glob', pattern:'*.txt' }, context)).ok);
+    const dirOnly = toolkit.buildDefaultRegistryWithConfig({ discoverTools:true, toolsAllowed:['list_directory', 'discover_tools'] });
+    assert.deepStrictEqual(dirOnly.schemaInfo().tools[0].function.parameters.properties.kind.enum, ['dir']);
+    assert.ok(!Object.hasOwn(dirOnly.schemaInfo().tools[0].function.parameters.properties, 'pattern'));
+    assert.equal((await dirOnly.execute('find_files', { pattern:'*.txt' }, context)).data.code, 'PERMISSION_DENIED');
+    assert.ok((await dirOnly.execute('list_files', {}, context)).ok);
+    dirOnly.setExposure(['discover_tools']);
+    const hiddenGlob = await dirOnly.execute('discover_tools', { query: 'find_files' }, context);
+    assert.ok(hiddenGlob.ok);
+    assert.deepStrictEqual(hiddenGlob.data.enabled, []);
+    assert.equal(dirOnly.isExposed('list_files'), false);
+    const discoverDir = await dirOnly.execute('discover_tools', { query: 'list_directory' }, context);
+    assert.deepStrictEqual(discoverDir.data.enabled, ['list_files']);
+    const none = toolkit.buildDefaultRegistryWithConfig({ toolsDeny:['list_files'] });
+    assert.ok(!none.contains('list_files') && !none.contains('find_files') && !none.contains('list_directory'));
+    check('G3 统一 schema、旧目录参数和返回兼容、按动作校验角色与配置', true);
+  }
+
+  {
+    const r = toolkit.buildDefaultRegistryWithConfig({ ragEnabled:false, role:'reviewer', toolsAllowed:['project_overview.review','retrieve_context.exact','get_workbench_model.full'] });
+    const params = name => r.schemaInfo().tools.find(tool => tool.function.name === name).function.parameters;
+    assert.deepStrictEqual(params('project_overview').properties.kind.enum, ['review']);
+    assert.deepStrictEqual(params('retrieve_context').properties.mode.enum, ['exact']);
+    assert.deepStrictEqual(params('get_workbench_model').properties.view.enum, ['full']);
+    assert.equal(r.resolveCall('project_overview', {kind:'info'}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(r.resolveCall('get_workbench_model', {view:'focus'}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(r.resolveCall('retrieve_context', {mode:'exact',key:'node:a'}).name, 'query_scalars');
+    assert.ok(r.resolveCall('retrieve_context', {mode:'file',query:'anything'}).error);
+
+    const n = toolkit.buildDefaultRegistryWithConfig({ toolsAllowed:['memory.save','workbench_edit.save_project'] });
+    assert.deepStrictEqual(n.schemaInfo().tools.find(tool => tool.function.name === 'memory').function.parameters.properties.action.enum, ['save']);
+    assert.equal(n.resolveCall('memory', {action:'search',query:'x'}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(n.resolveCall('memory', {action:'save',memoryKind:'fact',content:'x'}).args.kind, 'fact');
+    assert.deepStrictEqual(n.schemaInfo().tools.find(tool => tool.function.name === 'workbench_edit').function.parameters.properties.kind.enum, ['save_project']);
+    assert.equal(n.resolveCall('workbench_edit', {action:'create'}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(n.resolveCall('workbench_edit', {kind:'save_project'}).name, 'save_project');
+    check('G4 其他合并工具仅公布获准动作，保留旧执行器和权限', true);
+  }
+
+  {
+    const registry = toolkit.buildDefaultRegistryWithConfig({
+      toolsAllowed: ['file_ops', 'terminal.poll', 'project_overview.scan'],
+      toolsDeny: ['file_ops.write', 'edit_file'],
+    });
+    const kinds = name => registry.schemaInfo().tools.find(tool => tool.function.name === name).function.parameters.properties.kind.enum;
+    assert.deepStrictEqual(kinds('file_ops'), ['read', 'image']);
+    assert.deepStrictEqual(kinds('terminal'), ['poll']);
+    assert.deepStrictEqual(kinds('project_overview'), ['scan']);
+    assert.equal(registry.resolveCall('file_ops', { kind:'write' }).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(registry.resolveCall('edit_file', {}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(registry.resolveCall('execute_shell', {}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(registry.resolveCall('project_info', {}).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(registry.resolveCall('terminal', { kind:'poll', jobId:'test' }).error, null);
+    assert.equal(registry.resolveCall('project_overview', { kind:'scan' }).error, null);
+
+    const reviewer = toolkit.buildDefaultRegistryWithConfig({ role:'reviewer', toolsAllowed:['file_ops','terminal'] });
+    assert.equal(reviewer.resolveCall('file_ops', { kind:'write' }).error.data.code, 'PERMISSION_DENIED');
+    assert.equal(reviewer.resolveCall('terminal', { kind:'run' }).error.data.code, 'PERMISSION_DENIED');
+    check('G5 文件、终端和扫描同时受动作配置及角色约束', true);
   }
 
   console.log(failures === 0 ? 'TOOL DESCRIPTOR TEST: PASS' : 'TOOL DESCRIPTOR TEST: FAIL (' + failures + ')');

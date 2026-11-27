@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   useReactFlow,
@@ -6,19 +6,30 @@ import {
   type NodeChange,
   type EdgeChange,
   type Connection,
+  type Dimensions,
   type Node,
   type Edge,
 } from '@xyflow/react';
 import { useGraphStore } from '../store/graphStore';
 import { useUiStore } from '../store/uiStore';
 import { useSessionStore } from '../store/sessionStore';
+import { projectPlanOnCanvas } from '../lib/planCanvas';
+import { useCanvasPlan } from '../lib/useCanvasPlan';
+import { readMaterial } from '../lib/materialFile';
+import { newNodeId } from '../lib/nodePlacement';
 import { nodeTypes } from '../nodes';
 import { edgeTypes } from '../edges';
 import { childIdsOf, computeChildren, parentIdOf, isDescendantOf } from '../lib/flow';
 import { useSpacePan } from '../hooks/useSpacePan';
-import WorkflowCanvasLayer from './WorkflowCanvasLayer';
+import { isWorkflowStage } from '../lib/workflowRunState';
+import WorkflowCanvasLayer, { CANVAS_GRID_SIZE } from './WorkflowCanvasLayer';
+import CanvasTooltip from './CanvasTooltip';
+import NodeActions from './NodeActions';
+import CanvasActions from './CanvasActions';
+import CanvasQuickActions from './CanvasQuickActions';
+import './canvasControls.css';
 
-const NODE_CLICK_TOLERANCE = 4;
+const snapGrid: [number, number] = [CANVAS_GRID_SIZE, CANVAS_GRID_SIZE];
 
 function collectHiddenIds(nodes: Node[]): Set<string> {
   const hidden = new Set<string>();
@@ -129,8 +140,18 @@ function lineHitsEdge(dragPts: Pt[], edgePts: Pt[]): Pt | null {
 export default function Canvas() {
   const rasterSupported = typeof document !== 'undefined' && !!document.createElement('canvas').getContext('2d');
   const { spacePressed } = useSpacePan();
+  const [hand, setHand] = useState(false);
+  const [minimap, setMinimap] = useState(false);
+  const [links, setLinks] = useState(true);
+  const [snap, setSnap] = useState(false);
+  const panning = spacePressed || hand;
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
+  const { plan, sourceId } = useCanvasPlan();
+  const [planMeasurements, setPlanMeasurements] = useState<{ sourceId: string | null; sizes: Record<string, Dimensions> }>();
+  const planSizes = planMeasurements?.sourceId === sourceId ? planMeasurements?.sizes : undefined;
+  const planCanvas = useMemo(() => projectPlanOnCanvas(plan, sourceId, nodes, edges, planSizes), [plan, sourceId, nodes, edges, planSizes]);
+  const hasPlanNodes = planCanvas.previewIds.size > 0;
   const onNodesChange = useGraphStore((s) => s.onNodesChange);
   const onEdgesChange = useGraphStore((s) => s.onEdgesChange);
   const onConnect = useGraphStore((s) => s.onConnect);
@@ -149,12 +170,6 @@ export default function Canvas() {
   const progress = useSessionStore((s) => s.progress);
   const { fitView, getViewport, setViewport: rfSetViewport, screenToFlowPosition } = useReactFlow();
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const copyDrag = useRef<{ id: string; pointerId: number; start: Pt; bounds: DOMRect } | null>(null);
-  const [copyPreview, setCopyPreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const clearCopyDrag = () => {
-    copyDrag.current = null;
-    setCopyPreview(null);
-  };
 
   const dragState = useRef<{
     id: string;
@@ -184,7 +199,7 @@ export default function Canvas() {
     const refit = () => {
       if (timer != null) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        if (useGraphStore.getState().nodes.length > 0) {
+        if (useGraphStore.getState().nodes.length > 0 || hasPlanNodes) {
           fitView({ padding: 0.2, duration: 220 });
         }
       }, 180);
@@ -195,7 +210,7 @@ export default function Canvas() {
       observer.disconnect();
       if (timer != null) window.clearTimeout(timer);
     };
-  }, [fitView, sideOpen, sideWidth, dockOpen]);
+  }, [fitView, sideOpen, sideWidth, dockOpen, hasPlanNodes]);
 
   // Agent 进度扫描：沿画布连线逐条推进高亮
   useEffect(() => {
@@ -206,11 +221,11 @@ export default function Canvas() {
   }, [progress?.index, progress?.running]);
 
   const hiddenIds = collectHiddenIds(nodes);
-  const visibleNodes = nodes.filter((n) => !hiddenIds.has(n.id));
-  const visibleEdges = edges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target));
-  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const visibleNodes = planCanvas.nodes.filter((n) => !hiddenIds.has(n.id));
+  const visibleEdges = planCanvas.edges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target));
+  const byId = new Map(planCanvas.nodes.map((n) => [n.id, n]));
   const visibleNodeIds = new Set(visibleNodes.map((n) => n.id));
-  const renderableEdges = visibleEdges.filter((edge) => {
+  const renderableEdges = links ? visibleEdges.filter((edge) => {
     const endpointIds = visualEdgeNodeIds(edge, byId, visibleEdges);
     const source = byId.get(endpointIds.source);
     const target = byId.get(endpointIds.target);
@@ -221,7 +236,7 @@ export default function Canvas() {
       source?.type !== 'scope' &&
       target?.type !== 'scope'
     );
-  });
+  }) : [];
 
   const displayEdges = renderableEdges.map((e) => {
     const base = {
@@ -268,60 +283,27 @@ export default function Canvas() {
     <div
       ref={canvasRef}
       className={`canvas-wrap${rasterSupported ? ' canvas-raster-mode' : ''}`}
-      onPointerDownCapture={(e) => {
-        if (e.button !== 0 || !e.altKey || e.ctrlKey || e.metaKey || spacePressed) return;
-        const target = e.target as Element;
-        const owner = target.closest<HTMLElement>('.react-flow__node[data-id]');
-        if (!owner || target.closest('.nodrag,.react-flow__handle,.vs-scope,input,textarea,select,button,a[href],[contenteditable="true"]')) return;
-        const node = nodes.find((item) => item.id === owner.dataset.id);
-        if (!node || node.draggable === false || (node.dragHandle && !target.closest(node.dragHandle))) return;
-        copyDrag.current = {
-          id: node.id,
-          pointerId: e.pointerId,
-          start: { x: e.clientX, y: e.clientY },
-          bounds: owner.getBoundingClientRect(),
-        };
-        e.preventDefault();
-        e.stopPropagation();
-        e.currentTarget.setPointerCapture(e.pointerId);
-        owner.focus({ preventScroll: true });
-      }}
-      onPointerMove={(e) => {
-        const drag = copyDrag.current;
-        if (!drag || drag.pointerId !== e.pointerId) return;
-        const dx = e.clientX - drag.start.x;
-        const dy = e.clientY - drag.start.y;
-        if (Math.hypot(dx, dy) < 4) {
-          setCopyPreview(null);
-          return;
+      onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
+      onDrop={async event => {
+        const files = Array.from(event.dataTransfer.files);
+        if (!files.length || event.defaultPrevented) return;
+        event.preventDefault();
+        const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const sessions = useSessionStore.getState();
+        if (!sessions.current()) sessions.newCanvas();
+        const owner = useSessionStore.getState().activeId;
+        for (const [i, file] of files.entries()) {
+          try {
+            const material = await readMaterial(file);
+            if (owner !== useSessionStore.getState().activeId) return;
+            useGraphStore.getState().addNode({ id: newNodeId(material.type), type: material.type,
+              position: { x: position.x + 28 * i, y: position.y + 40 * i }, data: { status: 'pending', ...material.data } });
+          } catch (error) { useUiStore.getState().setToast(String(error)); }
         }
-        const canvas = e.currentTarget.getBoundingClientRect();
-        setCopyPreview({
-          x: drag.bounds.left - canvas.left + dx,
-          y: drag.bounds.top - canvas.top + dy,
-          width: drag.bounds.width,
-          height: drag.bounds.height,
-        });
       }}
-      onPointerUp={(e) => {
-        const drag = copyDrag.current;
-        if (!drag || drag.pointerId !== e.pointerId) return;
-        clearCopyDrag();
-        if (Math.hypot(e.clientX - drag.start.x, e.clientY - drag.start.y) < 4) {
-          setSelectedIds(useGraphStore.getState().selectedIds.filter((id) => id !== drag.id));
-          return;
-        }
-        const canvas = e.currentTarget.getBoundingClientRect();
-        if (e.clientX < canvas.left || e.clientX >= canvas.right || e.clientY < canvas.top || e.clientY >= canvas.bottom) return;
-        const start = screenToFlowPosition(drag.start, { snapToGrid: false });
-        const end = screenToFlowPosition({ x: e.clientX, y: e.clientY }, { snapToGrid: false });
-        const graph = useGraphStore.getState();
-        graph.pasteNodes(graph.copyNodes([drag.id]), { x: end.x - start.x, y: end.y - start.y });
-      }}
-      onPointerCancel={clearCopyDrag}
-      onLostPointerCapture={clearCopyDrag}
+      data-pan-tool={panning || undefined}
       onMouseDown={(e) => {
-        if (e.button === 2 && e.ctrlKey) {
+        if (!panning && links && e.button === 2 && e.ctrlKey && !(e.target instanceof Element && e.target.closest('.canvas-actions, .canvas-quick-actions, .canvas-minimap'))) {
           const rect = e.currentTarget.getBoundingClientRect();
           const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
           const screenPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -379,19 +361,33 @@ export default function Canvas() {
         edges={displayEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange as (changes: NodeChange[]) => void}
+        onNodesChange={(changes: NodeChange[]) => {
+          const graphChanges = [];
+          const previewSizes: Record<string, Dimensions> = {};
+          for (const change of changes) {
+            if (!('id' in change) || !planCanvas.previewIds.has(change.id)) graphChanges.push(change);
+            else if (change.type === 'dimensions' && change.dimensions) previewSizes[change.id] = change.dimensions;
+          }
+          if (graphChanges.length) onNodesChange(graphChanges);
+          if (Object.keys(previewSizes).length) setPlanMeasurements((current) => ({
+            sourceId,
+            sizes: { ...(current?.sourceId === sourceId ? current?.sizes : {}), ...previewSizes },
+          }));
+        }}
         onEdgesChange={onEdgesChange as (changes: EdgeChange[]) => void}
         onConnect={onConnect as (conn: Connection) => void}
-        panOnDrag={spacePressed ? true : [1]}
+        panOnDrag={panning ? true : [1]}
         panOnScroll={spacePressed}
         panActivationKeyCode={null}
-        selectionOnDrag
+        selectionOnDrag={!panning}
+        selectionKeyCode={panning ? null : 'Shift'}
+        nodesDraggable={!panning}
+        nodesConnectable={!panning}
+        elementsSelectable={!panning}
+        snapToGrid={snap}
+        snapGrid={snapGrid}
         selectionMode={SelectionMode.Full}
-        multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
-        // 空白处拖动即可框选，Shift 留给逐个加选或减选节点。
-        selectionKeyCode={null}
-        nodeClickDistance={NODE_CLICK_TOLERANCE}
-        nodeDragThreshold={NODE_CLICK_TOLERANCE}
+        multiSelectionKeyCode="Control"
         deleteKeyCode={null}
         onMoveEnd={() => setViewport(getViewport())}
         onNodeDragStart={(e, node) => {
@@ -423,7 +419,7 @@ export default function Canvas() {
             useUiStore.getState().setHoverScopeId(next);
           }
         }}
-        onNodeDragStop={(_, node) => {
+        onNodeDragStop={(e, node) => {
           const ds = dragState.current;
           const st = useGraphStore.getState();
           const target = findHoverScope(node) ?? hoverScope.current;
@@ -434,7 +430,7 @@ export default function Canvas() {
             // Ctrl + 拖出范围：从原 scope 中移出
             for (const id of ds.ids) {
               const current = st.nodes.find((n) => n.id === id);
-              if (current && !target) st.removeFromScope(id);
+              if (current && (e.altKey || !target)) st.removeFromScope(id);
               else if (current && target && target !== parentIdOf(current) && target !== id) st.addToScope(id, target);
             }
           } else if (target && target !== oldParent) {
@@ -450,6 +446,7 @@ export default function Canvas() {
         }}
         onEdgeContextMenu={(e, edge: Edge) => {
           e.preventDefault();
+          if (panning) return;
           const st = useGraphStore.getState();
           if (e.ctrlKey && e.shiftKey) {
             // Ctrl+Shift+右键：在连线上创建纯几何中转点
@@ -465,7 +462,7 @@ export default function Canvas() {
         onEdgeMouseLeave={() => setHoveredEdgeId(null)}
         onEdgeClick={(e, edge: Edge) => {
           // Ctrl+Shift 点击连线：新增纯几何中转点
-          if (e.ctrlKey && e.shiftKey) {
+          if (!panning && e.ctrlKey && e.shiftKey) {
             const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
             const wp = ((edge.data as { waypoints?: { x: number; y: number }[] })?.waypoints) || [];
             useGraphStore.getState().updateEdgeData(edge.id, { waypoints: [...wp, { x: Math.round(pos.x), y: Math.round(pos.y) }] });
@@ -478,6 +475,7 @@ export default function Canvas() {
         // 而且它会与「写回 selected 标志」形成 [] → [x] → [] 的往复更新环。
         // 选中改由 onNodeClick / onPaneClick（事件期，非渲染期）同步。
         onNodeClick={(e, node: Node) => {
+          if (panning || planCanvas.previewIds.has(node.id)) return;
           const target=e.target as HTMLElement;
           // Inner editing has its own selection and key handler; Ctrl-click must not deselect its owner.
           if(target.closest?.('.vs-scope'))return;
@@ -485,11 +483,29 @@ export default function Canvas() {
             const owner=target.closest<HTMLElement>('.react-flow__node');
             if(owner){if(!owner.hasAttribute('tabindex'))owner.tabIndex=0;owner.focus({preventScroll:true});}
           }
-          if (!e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) setSelectedIds([node.id]);
+          if (e.altKey) {
+            // Alt+左键：取消该节点选中
+            const st = useGraphStore.getState();
+            st.setSelectedIds(st.selectedIds.filter((id) => id !== node.id));
+          } else if (e.shiftKey || e.ctrlKey || e.metaKey) {
+            // 加选 / 减选
+            const st = useGraphStore.getState();
+            const cur = st.selectedIds;
+            st.setSelectedIds(cur.includes(node.id) ? cur.filter((id) => id !== node.id) : [...cur, node.id]);
+          } else {
+            useGraphStore.getState().setSelectedIds([node.id]);
+          }
+        }}
+        onNodeDoubleClick={(event, node) => {
+          if (panning || planCanvas.previewIds.has(node.id)) return;
+          const ui = useUiStore.getState();
+          if (event.altKey || event.shiftKey || event.ctrlKey || event.metaKey || !isWorkflowStage(node.type)) return;
+          useGraphStore.getState().setSelectedIds([node.id]);
+          ui.setSideTab('node');
         }}
         onPaneClick={() => {
           closeAddMenu();
-          useGraphStore.getState().setSelectedIds([]);
+          if (!panning) useGraphStore.getState().setSelectedIds([]);
         }}
         fitView
         // React Flow 默认 minZoom=0.5。现在画布左右被一级侧栏与对话面板占掉，稍宽的流程
@@ -503,12 +519,13 @@ export default function Canvas() {
         }}
       >
       </ReactFlow>
-      {copyPreview && <div className="canvas-copy-preview" style={{
-        left: copyPreview.x, top: copyPreview.y, width: copyPreview.width, height: copyPreview.height,
-      }} />}
-      {!nodes.length && <div className="canvas-welcome">
-        <p>Shift + A 添加节点</p>
-      </div>}
+      <CanvasActions minimap={minimap} links={links} snap={snap} hasPlanNodes={hasPlanNodes}
+        toggleMinimap={() => setMinimap(active => !active)}
+        toggleLinks={() => setLinks(active => !active)}
+        toggleSnap={() => setSnap(active => !active)} />
+      <NodeActions canvas={canvasRef} />
+      <CanvasTooltip canvas={canvasRef} />
+      <CanvasQuickActions hand={hand} setHand={setHand} />
       {!rasterSupported && cutLine.length > 1 && <svg className="wf-cut-line" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1000 }}>
         <polyline points={cutLine.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#f43f5e" strokeWidth={2} strokeDasharray="6 4" />
       </svg>}

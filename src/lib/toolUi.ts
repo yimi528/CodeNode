@@ -2,12 +2,9 @@ import { useGraphStore } from '../store/graphStore';
 import { useProjectStore } from '../store/projectStore';
 import { useUiStore } from '../store/uiStore';
 import { useToolStore, type ConfirmRequest, type AskRequest } from '../store/toolStore';
-import { ownsActiveView } from '../store/chatStore';
 
 /**
- * 界面动作执行（渲染进程侧接线）。
- * 工具面收敛后由 `get_workbench_model(view=focus/zoom/pan/…)` 触发（原 `ui_control.action`）；
- * 动作名与参数形状保持不变，所以这里只按 action 分发。
+ * ui_control 动作执行（渲染进程侧接线）。
  * 返回是否已执行（action 是否被支持）。
  */
 export function performUiAction(action: string, args: Record<string, unknown>): boolean {
@@ -95,8 +92,14 @@ export function installToolListener(): () => void {
     if (req.type === 'editor_read') {
       const state = useProjectStore.getState();
       const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase();
-      const matches = state.root && state.selected && normalize(state.root + '/' + state.selected.relPath) === normalize(String(req.path || ''));
-      api.respondToolRequest(req.id, { content: matches && (!req.requestId || ownsActiveView(req.requestId)) ? state.draft : null });
+      const selectedPath = normalize(state.selected?.relPath || '');
+      const requestRelativePath = normalize(String(req.relPath || ''));
+      // 主进程已经在受信任的 projectRoot 下计算相对路径。优先比较相对路径，避免 macOS
+      // `/var` 与 `/private/var`、Windows 短路径等真实路径别名让未保存草稿被误判为未打开。
+      const matches = !!(state.selected && requestRelativePath && requestRelativePath !== '..' && !requestRelativePath.startsWith('../')
+        ? selectedPath === requestRelativePath
+        : state.root && state.selected && normalize(state.root + '/' + state.selected.relPath) === normalize(String(req.path || '')));
+      api.respondToolRequest(req.id, { content: matches ? state.draft : null });
       return;
     }
     if (req.type === 'cancel') {
@@ -104,7 +107,7 @@ export function installToolListener(): () => void {
       return;
     }
     if (req.type === 'ui') {
-      const applied = (!req.requestId || ownsActiveView(req.requestId)) && performUiAction(req.action || '', req.args || {});
+      const applied = performUiAction(req.action || '', req.args || {});
       api.respondToolRequest(req.id, { applied });
       return;
     }

@@ -38,7 +38,7 @@ class BackendPort {
       const abort=()=>{void this.driver.close();};context.signal?.addEventListener('abort',abort,{once:true});
       try {
         if(context.signal?.aborted)throw portError('启动已取消','BACKEND_CANCELLED');
-        if(this.name!=='builtin')await this.driver.connect(root);
+        if(this.name!=='builtin')await this.driver.connect(root,context);
         if(context.signal?.aborted)throw portError('启动已取消','BACKEND_CANCELLED');
         this.runtime={state:'ready',available:true,error:null};return this.status();
       } catch(error){this.runtime={state:'failed',available:false,error:String(redact(error.message))};await this.driver.close();throw error;}
@@ -47,7 +47,22 @@ class BackendPort {
     return this.starting;
   }
   async health(context={}) {
-    try{await this.start(context);return {...this.driver.capabilitySnapshot(),...this.describe(),backend:this.name,available:true,state:this.runtime.state};}
+    try{await this.start(context);const policy=context.sandboxPolicy,caps=policy?.capabilities||{};
+      const externalAgentIsolation=this.name==='builtin'?null:{backend:caps.backend||'none',mode:policy?.mode||'off',access:policy?.access||this.settings.sandbox,
+        processIsolation:caps.isolation?.lifetime===true,filesystemIsolation:caps.isolation?.filesystem===true,degraded:policy?.degraded||[]};
+      const snapshot = {...this.driver.capabilitySnapshot(), ...this.describe(), backend:this.name, available:true, state:this.runtime.state,
+        ...(externalAgentIsolation ? {externalAgentIsolation} : {})};
+      if (context.checkSession && this.transport() === 'acp') {
+        try {
+          await this.driver.inspectSession(this.root);
+          return {...snapshot, sessionReady:true};
+        } catch (error) {
+          return {...snapshot, available:false, sessionReady:false, state:'failed',
+            error: error.code === -32000 ? 'ACP 已握手，Agent 需要登录后才能创建会话' :
+              'ACP 已握手，但创建会话失败：' + String(redact(error.message))};
+        }
+      }
+      return snapshot;}
     catch(error){return {...this.describe(),backend:this.name,available:false,state:'failed',error:String(redact(error.message))};}
   }
   status(taskId, context={}) {
@@ -117,10 +132,8 @@ class BackendPort {
     if([...this.tasks.values()].some(t=>t.state==='working'))throw portError('请先结束当前 Task','BACKEND_BUSY');
     await this.start(context);
     if(method==='inspect'){
-      if(typeof this.driver.sessionRequest!=='function')throw portError('该后端不提供 ACP 会话检查','UNSUPPORTED_BACKEND_OPERATION');
-      const info=await this.driver.sessionRequest('session/new',{cwd:this.root,...(this.name==='openclaw'?{}:{mcpServers:[]})});
-      if(info.sessionId&&this.driver.capabilityInfo.sessionCapabilities?.close)await this.driver.rpc.request('session/close',{sessionId:info.sessionId});
-      return {...info,authMethods:this.driver.authMethods,agentCapabilities:this.driver.capabilityInfo};
+      if (typeof this.driver.inspectSession !== 'function') throw portError('该后端不提供 ACP 会话检查','UNSUPPORTED_BACKEND_OPERATION');
+      return this.driver.inspectSession(this.root);
     }
     return this.driver.control(method,params);
   }

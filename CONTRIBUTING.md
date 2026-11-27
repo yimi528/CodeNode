@@ -88,6 +88,7 @@ npm run branch:publish     # delivery -> integration: fast-forward yimi-branch o
 
 - **After a dependency or outside PR is merged into `main`**, run `npm run branch:integrate` on `yimi-branch`, then `git push origin yimi-branch`. The merge commit keeps the source visible (`HEAD^2` is the integration tip).
 - **Before a release or a public demo**, run `npm run branch:publish` so the default branch and the home page show the verified delivery line. It only fast-forwards and never forces; when `main` has commits the delivery line lacks, it refuses and tells you to integrate first.
+- Workflow ownership follows the same split: pushes to `yimi-branch` run CodeNode CI and packaging; PRs into `main` run that CI plus only the optional real-model subset; pushes to `main` run the production gate; version tags use the release workflow. The offline matrix is never duplicated for the same event.
 - Both commands refuse a dirty working tree or an unfinished merge/rebase. `publish` also refuses while local commits are unpushed, unless you pass `--allow-unpushed`. Check drift with `npm run branch:status`: the two once drifted 81 commits apart, which left stale documentation on the repository home page.
 - Pushing to `main` directly is allowed, but **changes to the gates, execution isolation, signing or the release process** should go through a pull request, self-checked with the list in [.github/pull_request_template.md](.github/pull_request_template.md).
 - CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) and the production gate ([production-gate.yml](.github/workflows/production-gate.yml)) run on every branch push and every pull request. Both call `npm test`, and **the gate list is maintained in exactly one place: `scripts/run-all-tests.cjs`**.
@@ -97,3 +98,10 @@ npm run branch:publish     # delivery -> integration: fast-forward yimi-branch o
 
 The version number lives only in `package.json`; tags use `vX.Y.Z`; release artifacts must be signed
 (`npm run release:sign`) — an unsigned Windows portable build gets misreported or tampered with by security software.
+
+Formal releases are created by `.github/workflows/release.yml`. Update `package.json`, append the development log,
+merge the verified commit into `main`, then create the matching `vX.Y.Z` tag. The workflow rejects a tag that does
+not exactly match the package version, does not point at the checked-out commit, or is not contained in `origin/main`.
+It rebuilds and verifies the source, packages Windows/macOS/Linux, requires a valid Windows signing certificate,
+generates `SHA256SUMS.txt`, and only then creates the GitHub Release. Required repository secrets are
+`CODENODE_WIN_CERT_PFX_BASE64` and `CODENODE_WIN_CERT_PASSWORD`; `CODENODE_TIMESTAMP_URL` is an optional variable.

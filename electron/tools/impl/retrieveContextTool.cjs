@@ -66,13 +66,6 @@ function serializeScalar(value) {
 /** 从 args 提取要精确查询的标量 key 列表。 */
 function scalarKeys(args) {
   const keys = [];
-  // 单值 key（可逗号分隔）：收编 query_scalars 后保留的兼容写法
-  if (args.key != null && String(args.key).trim() !== '') {
-    for (const one of String(args.key).split(',')) {
-      const k = one.trim();
-      if (k) keys.push(k);
-    }
-  }
   if (Array.isArray(args.keys)) {
     for (const item of args.keys) {
       const k = String(item || '').trim();
@@ -179,10 +172,8 @@ function scalarBlocks(sources) {
 function register(registry) {
   registry.register(
     'retrieve_context',
-    '本地文件与画布标量检索（含精确标量查询）。auto 同查两类来源；file=BM25；vector=向量优先（需配置向量模型）；hybrid=文件+标量；scalar=仅标量。' +
-      'scalar 模式可给 query 语义匹配，keys 精确取（node:<id>、node:<id>:prompt），prefix 前缀列（node: 列出全部节点）；' +
-      '这是「读画布节点精确属性（prompt/goal/members/filePath）」的入口。' +
-      'query/queries 可多查询融合，path/filePattern 限范围，hops=0..2 追踪代码关系。低匹配时改写查询或深读文件。',
+    '本地文件与画布标量检索。auto 同查两类来源；file=BM25；vector=向量优先（需配置向量模型）；hybrid=文件+标量；scalar=仅标量。' +
+      'query/queries 可多查询融合，keys 查精确标量，path/filePattern 限范围，hops=0..2 追踪代码关系。低匹配时改写查询或深读文件。',
     {
       type: 'object',
       properties: {
@@ -203,9 +194,6 @@ function register(registry) {
           items: { type: 'string' },
           description: '标量精确 key 列表，如 ["node:n1", "node:n2:prompt"]；可选，auto 不提供也能按语义命中',
         },
-        prefix: { type: 'string', description: '标量前缀查询（如 node: 列出全部节点，node:task- 列出该前缀）；与 keys 并用时先精确后前缀' },
-        key: { type: 'string', description: '标量精确 key（可逗号分隔多个，如 node:n1,node:n1:prompt）；等价于 keys 的单值形式' },
-        max: { type: 'integer', description: 'mode=scalar 时最多返回条数，默认 50' },
         path: { type: 'string', description: '可选：限定到项目内目录，如 src 或 docs' },
         filePattern: { type: 'string', description: '可选：文件 glob，如 **/*.ts 或 docs/**' },
         topK: { type: 'integer', description: '返回片段数，默认由 rag.top_k 配置，最大 20' },
@@ -213,54 +201,26 @@ function register(registry) {
         refresh: { type: 'boolean', description: '强制重建索引；通常无需设置，文件变化和工具写入会自动失效' },
         hops: { type: 'integer', minimum: 0, maximum: 2, description: '可选：沿代码定义、调用、引用和导入关系扩展 0–2 跳；默认按问题自动判断' },
       },
-      required: [],
+      required: ['query'],
     },
     async (context, args) => {
       const query = String(args.query || '').trim();
-      const requestedMode = String(args.mode || 'auto').toLowerCase().trim();
+      if (!query) return AgentToolResult.error('缺少 query');
+      const mode = String(args.mode || 'auto').toLowerCase().trim();
       const root = path.resolve(context.projectRoot());
       if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
         return AgentToolResult.error('项目目录不存在：' + root);
       }
       const config = typeof context.ragConfig === 'function' ? context.ragConfig() : {};
-      /**
-       * 工具面收敛后 `retrieve_context` 是**标量库的唯一入口**，所以 ragEnabled=false 时它仍然注册。
-       * 「RAG 已关闭」只约束文件检索路径（file/vector/hybrid），标量路径（scalar/auto）照旧可用 ——
-       * 否则画布节点的精确属性就没人能读了。auto 在 RAG 关闭时自动降级为纯标量。
-       */
-      const ragDisabled = config && config.enabled === false;
-      if (ragDisabled && (requestedMode === 'file' || requestedMode === 'vector')) {
-        return AgentToolResult.error('文件检索已在配置中关闭（rag.enabled=false）；标量查询仍可用：mode=scalar 或留空 mode=auto');
-      }
-      const mode = ragDisabled && (requestedMode === 'auto' || requestedMode === 'hybrid') ? 'scalar' : requestedMode;
-      /**
-       * 收编 `query_scalars` 之后，标量查询允许**只给 keys/prefix 不给 query**（旧用法）。
-       * 但文件/向量检索仍需要 query —— 所以缺 query 且不是标量路径时，明确报错而不是空跑。
-       */
-      const hasScalarSelector = (Array.isArray(args.keys) && args.keys.length) ||
-        String(args.prefix || '').trim() !== '' || String(args.key || '').trim() !== '';
-      if (!query && !(hasScalarSelector && (mode === 'scalar' || mode === 'auto' || mode === 'hybrid'))) {
-        return AgentToolResult.error('缺少 query（标量查询可用 keys 或 prefix 代替，并建议加 mode=scalar）');
-      }
+      if (config && config.enabled === false) return AgentToolResult.error('Agentic RAG 已在配置中关闭');
 
       // ---- 标量层（本地精确 + 语义自动路由，不走云端） ----
       const keys = scalarKeys(args);
-      const prefix = String(args.prefix || '').trim();
       const allowScalar = mode !== 'file' && mode !== 'vector';
-      const scalarMax = Number(args.max) > 0 ? Math.floor(Number(args.max)) : 50;
-      const exactScalar = allowScalar ? scalarLookup(context, keys, Math.min(scalarMax, 20)) : [];
-      // prefix 前缀查询（收编 query_scalars 的 prefix 语义）
-      const prefixScalar = allowScalar && prefix
-        ? (() => {
-            const store = context.scalars();
-            if (!store || typeof store.query !== 'function') return [];
-            try { return store.query({ prefix, max: scalarMax }) || []; }
-            catch { return []; }
-          })()
-        : [];
+      const exactScalar = allowScalar ? scalarLookup(context, keys, 20) : [];
       const minScalarScore = mode === 'auto' ? 30 : mode === 'hybrid' ? 20 : 15;
-      const semanticScalar = allowScalar && query ? scalarSearch(context, query, 12, minScalarScore) : [];
-      const scalarHits = mergeScalarHits([...exactScalar, ...prefixScalar], semanticScalar);
+      const semanticScalar = allowScalar ? scalarSearch(context, query, 12, minScalarScore) : [];
+      const scalarHits = mergeScalarHits(exactScalar, semanticScalar);
       const scalarSources = scalarHits.map(scalarSource);
 
       // scalar 模式：只返回标量结果（精确 + 语义）
@@ -268,7 +228,7 @@ function register(registry) {
         context.audit('retrieve_context mode=scalar query=' + query + ' keys=' + JSON.stringify(keys) + ' hits=' + scalarSources.length);
         if (scalarSources.length === 0) {
           return AgentToolResult.ok(
-            '标量查询无命中。可用 prefix=node: 列出全部节点 key，或用 get_workbench_model 让节点属性先入本地标量库；' +
+            '标量查询无命中。可用 query_scalars prefix=node: 列出全部节点 key，或用 get_workbench_model 让节点属性先入本地标量库；' +
               '也可用 mode=auto 让检索自动在标量/向量库之间路由。',
             { query, keys, mode, sources: [], quality: require('../../rag/admission.cjs').relevanceOnly({ level: 'none', reason: '没有匹配的本地标量' }, require('../../rag/admission.cjs').retrievalAdmission([])), admission: require('../../rag/admission.cjs').retrievalAdmission([]) }
           );
@@ -294,17 +254,7 @@ function register(registry) {
           {
             query,
             keys,
-            prefix: prefix || null,
             mode,
-            /**
-             * `items` 是**收编 query_scalars 后的兼容字段**：旧调用方（与既有用例）按
-             * `data.items[].value` 读标量值，`sources` 是 retrieve_context 的原生口径。
-             * 两个都返回，避免「同一个能力换个入口就读不到值」。
-             */
-            items: scalarHits.map((hit) => ({
-              key: hit.key, kind: hit.kind || 'scalar', value: hit.value,
-              ts: hit.ts || 0, exact: !!hit.exact, score: typeof hit.score === 'number' ? hit.score : null,
-            })),
             sources: scalarSources.map((s) => ({ citation: s.citation, path: s.path, kind: 'scalar', key: s.key, score: s.score, exact: s.exact, coverage: s.coverage, excerpt: s.excerpt })),
             quality: scalarRelevance, admission: scalarAdmission,
           }

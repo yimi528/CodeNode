@@ -17,7 +17,22 @@ const path = require('node:path');
 let BASE = process.env.VECTOR_TEST_URL || '';
 // 默认由操作系统分配空闲端口，避免并发回归撞上旧调试进程。
 let PORT = Number(process.env.VECTOR_TEST_PORT) || 0;
-const EDGE = process.env.VECTOR_TEST_EDGE || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+function browserExecutable() {
+  const candidates = [process.env.VECTOR_TEST_EDGE];
+  if (process.platform === 'win32') candidates.push(
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
+  else if (process.platform === 'darwin') candidates.push(
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium');
+  else for (const command of ['microsoft-edge', 'google-chrome', 'chromium', 'chromium-browser']) {
+    const found = spawnSync('which', [command], { encoding: 'utf8' });
+    if (found.status === 0) candidates.push(String(found.stdout).trim());
+  }
+  return candidates.find(candidate => candidate && fs.existsSync(candidate)) || '';
+}
+const EDGE = browserExecutable();
 const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'edge-vec-'));
 const ROOT_DIR = path.join(__dirname, "../..");
 
@@ -107,7 +122,7 @@ function sleep(ms) {
 }
 
 async function startBrowser() {
-  if (!fs.existsSync(EDGE)) throw new Error('Edge 可执行文件不存在：' + EDGE);
+  if (!EDGE) throw new Error('没有找到可用的 Edge、Chrome 或 Chromium；可用 VECTOR_TEST_EDGE 指定浏览器');
   if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) throw new Error('VECTOR_TEST_PORT 必须是有效端口');
   if (!PORT) {
     const net = require('node:net');
@@ -434,7 +449,7 @@ async function main() {
   await startBrowser();
   const targets = /** @type {any[]} */ (await fetch(`http://127.0.0.1:${PORT}/json`).then((r) => r.json()));
   // 必须挑「被测应用」那个 target：Edge 启动时可能先开自己的内部页（#app-root + 混淆类名 + Edge logo），
-  // 直接取第一个 page target 会连到它上面，表现是一直等不到应用自己的元素。
+  // 直接取第一个 page target 会连到它上面，表现是一直等不到应用自己的元素（.workspace-home / .toolbar）。
   const pages = targets.filter((t) => t.type === 'page');
   const page = pages.find((t) => String(t.url || '').startsWith(BASE)) || pages[0];
   if (!page) throw new Error('没有可用的 page target（Edge 未起来？）');
@@ -453,16 +468,22 @@ async function main() {
 
   try {
     /* ========== 0. 基础加载 ========== */
-    await waitFor(cdp, `!!document.querySelector('.workspace-home') && !document.querySelector('.startup-splash')`, 9000, '主工作区出现');
-    ok('无工程时可见主导航和工程入口', await cdp.eval(`!!document.querySelector('.activity-bar') && !!document.querySelector('[data-project-action="open"]') && !!document.querySelector('[data-project-action="new"]')`));
-    // 等价于「打开工程」：直接载入工程根目录以挂载画布。
+    /* 无项目时直接显示工作台首页，项目操作在首页可用。 */
+    await waitFor(cdp, `!!document.querySelector('.workspace-home')`, 9000, '工作台首页出现');
+    ok('无项目时显示工作台工具栏', await cdp.eval(`!!document.querySelector('.toolbar') && !document.querySelector('.react-flow')`));
+    const gateBtns = await cdp.eval(`[...document.querySelectorAll('.workspace-home-actions button')].map((b) => b.textContent)`);
+    ok(`首页提供打开和新建项目入口（${JSON.stringify(gateBtns)}）`, gateBtns.length >= 2 && gateBtns[0].includes('打开项目') && gateBtns[1].includes('新建项目'));
+    // 等价于「打开工程」：直接把工程根目录载入画布
     await cdp.eval(`window.__codenodeProject.getState().loadRoot('E:\\\\demo')`);
-    await waitFor(cdp, `document.querySelector('.toolbar') && !!window.__codenodeVectorNode`);
+    await cdp.eval(`window.__codenodeUi.getState().updatePreferences({advancedMode:true,vectorEditorEnabled:true})`);
+    await waitFor(cdp, `document.querySelector('.canvas-add-trigger') && !!window.__codenodeVectorNode`, 9000, '按需工具栏与画布 store 就绪');
     out('— Agent 工作台已加载，画布节点 store 工厂已挂载');
 
     /* ========== 1. 在画布上新增画布节点（不再单独占一栏） ========== */
-    ok('工具栏不再进入独立矢量工作区', await cdp.eval(`!/矢量设计工作室/.test(document.querySelector('.toolbar-vector').title)`));
-    await clickEl(cdp, '.toolbar-vector');
+    ok('工具栏不再进入独立矢量工作区', await cdp.eval(`!/矢量设计工作室/.test(document.querySelector('.canvas-add-trigger').title)`));
+    await clickEl(cdp, '.canvas-add-trigger');
+    await waitFor(cdp, "!!document.querySelector('.add-menu-item[data-node-type=vector]')", 3000, '添加节点菜单');
+    await clickEl(cdp, '.add-menu-item[data-node-type=vector]');
     await waitFor(cdp, `!!document.querySelector(${JSON.stringify(NODE)})`, 6000, '画布节点挂载');
     nodeId = await cdp.eval(`document.querySelector('.react-flow__node-vector').dataset.id`);
     ok('画布节点直接出现在 Agent 画布上', Boolean(nodeId));
@@ -646,7 +667,7 @@ async function main() {
     await cdp.eval(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'A', code: 'KeyA', shiftKey: true, bubbles: true, cancelable: true }))`);
     await waitFor(cdp, `!!document.querySelector('.add-menu')`, 4000, 'Shift+A 添加菜单');
     await cdp.eval(`(() => {
-      const item = [...document.querySelectorAll('.add-menu-item')].find(el => el.textContent.includes('画布节点'));
+      const item = [...document.querySelectorAll('.add-menu-item')].find(el => el.dataset.nodeType === 'vector');
       if (!item) throw new Error('添加菜单里没有画布节点项');
       item.click();
       return 'ok';

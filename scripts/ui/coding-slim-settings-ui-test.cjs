@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
     await sleep(100);
     await js(`const input=document.querySelector('.pp-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'保留输入草稿');input.dispatchEvent(new Event('input',{bubbles:true}))`);
     await sleep(60);
-    const snapshot = () => js(`JSON.stringify({id:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input')?.value,model:document.querySelector('.pp-model')?.textContent,sideOpen:window.__codenodeUi.getState().sideOpen,sideTab:window.__codenodeUi.getState().sideTab})`);
+    const snapshot = () => js(`JSON.stringify({id:window.__codenodeSession.getState().activeId,messages:window.__codenodeSession.getState().messages,draft:document.querySelector('.pp-input')?.value,model:document.querySelector('.model-connection-trigger')?.title,sideOpen:window.__codenodeUi.getState().sideOpen,sideTab:window.__codenodeUi.getState().sideTab})`);
     const before = await snapshot();
     await js(`window.__codenodeUi.getState().openSettings('rag')`);
     await waitFor(() => js(`!!document.querySelector('[aria-label="严格答案校验"]')`), 'extension settings');

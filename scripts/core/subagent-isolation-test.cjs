@@ -42,7 +42,7 @@ const ok = (label) => console.log('  ✓ ' + label);
     const reg = toolkit.buildDefaultRegistryWithConfig({ toolsEnabled: true, ragEnabled: true, role: name });
     assert.deepStrictEqual(
       reg.listTools().map((t) => t.name).sort(),
-      roles.roleTools(name).slice().sort(),
+      [...new Set(roles.roleTools(name).map(tool => reg.modelToolName(tool)))].sort(),
       '角色 ' + name + ' 的注册表白名单与角色契约不一致',
     );
     assert.deepStrictEqual(
@@ -52,12 +52,10 @@ const ok = (label) => console.log('  ✓ ' + label);
     );
   }
   assert.ok(roles.rolePrompt('canvas').length > 10, 'canvas 必须有角色提示（旧版静默丢失）');
-  const supervisorReg = new AgentToolRegistry();
+  const supervisorReg = new AgentToolRegistry({ mergeToolSurfaces: true });
   new SubagentManager({}).register(supervisorReg);
-  // 工具面收敛 L3：派活入口是族工具 delegate（kind=single 等价原 delegate_task）
   const delegateSpec = supervisorReg.listTools().find((s) => s.name === 'delegate');
   assert.deepStrictEqual(delegateSpec.inputSchema.properties.role.enum, roles.ROLE_NAMES);
-  assert.ok(delegateSpec.inputSchema.properties.kind.enum.includes('single'), 'delegate 必须声明 kind=single');
   ok('A 角色契约单一来源（' + roles.ROLE_NAMES.join('/') + '，含 canvas 提示与 enum 一致）');
 
   // ---- B. 只读门按角色能力判定 ----
@@ -184,7 +182,7 @@ const ok = (label) => console.log('  ✓ ' + label);
     runId: 'run-test',
   });
   manager.register(supervisor);
-  const done = await supervisor.execute('delegate_task', { role: 'builder', objective: '写文件', stageNodeId: 'stage-1', maxTurns: 5, tokenBudget: 50000 }, context);
+  const done = await supervisor.execute('delegate', { kind: 'single', role: 'builder', objective: '写文件', stageNodeId: 'stage-1', maxTurns: 5, tokenBudget: 50000 }, context);
   assert.strictEqual(done.ok, true);
   assert.strictEqual(observedChildConfig.limits.maxToolIterations, 5, 'maxTurns 必须收紧子代理模型循环');
   assert.strictEqual(observedChildConfig.requestBudget.limit, 50000, 'tokenBudget 必须成为子代理独立预算');

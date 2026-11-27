@@ -1,5 +1,5 @@
 /**
- * 校验：① 开屏结束后直接显示主工作区，最近工程及对话位于左栏
+ * 校验：① 启动门禁不再自动进入最近工程 + 宽屏最近项目区位于操作区右侧
  *      ② Shift+A 菜单含「图像节点」，点击后创建图像节点，并支持粘贴/读项目图片
  * 用法：node scripts/run-electron.cjs scripts/tools/gate-image-check.cjs
  */
@@ -38,7 +38,6 @@ const ok = (n, c, extra = '') => {
 
 let appWin = null;
 let previousRecent = null;
-process.env.CODENODE_USER_DATA_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'cn-workspace-check-'));
 app.on('browser-window-created', (_e, win) => { if (!appWin) appWin = win; });
 require("../../electron/main.cjs");
 
@@ -56,13 +55,7 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(dirA, 'readme.md'), '# dirA\n');
     const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-gate-dirB-'));
     const fileB = path.join(dirB, 'proj-b.cnode');
-    const canvas = { nodes: [], edges: [] };
-    fs.writeFileSync(fileB, require('../../electron/cnode.cjs').encodeCnode({
-      graph: canvas,
-      canvases: { sessions: [{ id: 'fixture-chat', label: '工程交接', root: canvas, status: 'active', messages: [
-        { role: 'user', content: '这条消息来自已保存的工程。' },
-      ] }], messages: [] },
-    }));
+    fs.writeFileSync(fileB, JSON.stringify({ graph: { nodes: [], edges: [] }, canvases: { sessions: [], messages: [] } }));
     // 一张项目内图片，供图像节点"读出"用
     // 内置测试图落盘（自带，不依赖 .cache）
     const imgSrc = writeTestImage(path.join(os.tmpdir(), 'cn-gate-test-' + Date.now() + '.png'));
@@ -70,57 +63,45 @@ app.whenReady().then(async () => {
     fs.mkdirSync(projectImage, { recursive: true });
     fs.copyFileSync(imgSrc, path.join(projectImage, 'pic.png'));
 
-    // ---------- ① 主工作区：重载后先显示最近工程及对话 ----------
+    // ---------- ① 门禁：写入最近列表后重启渲染，必须停在门禁页 ----------
     const seed = JSON.stringify([
       { root: dirB, file: fileB, name: 'proj-b.cnode', openedAt: Date.now() - 3600_000 },
       { root: dirA, name: path.basename(dirA), openedAt: Date.now() - 90_000 },
     ]);
-    await js(`(()=>{ localStorage.setItem('codenode.recentProjects', ${JSON.stringify(seed)}); localStorage.setItem('codenode.lastWorkspace', JSON.stringify({ project: null })); return true; })()`);
+    await js(`(()=>{ localStorage.setItem('codenode.recentProjects', ${JSON.stringify(seed)}); return true; })()`);
     await win.webContents.reload();
-    for (let i = 0; i < 100; i++) {
-      if (await js(`!!document.querySelector('.workspace-home') && !document.querySelector('.startup-splash') && !!document.querySelector('.project-session-row button[title="工程交接"]')`).catch(() => false)) break;
-      await sleep(80);
-    }
+    await sleep(1600);
 
-    const workspace = await js(`(()=>{
-      const main = document.querySelector('.workspace-home');
-      const recent = document.querySelector('.project-navigation');
-      const items = [...document.querySelectorAll('.project-group-label')];
+    const gate = await js(`(()=>{
+      const card = document.querySelector('.gate-card');
+      const main = document.querySelector('.gate-main');
+      const recent = document.querySelector('.gate-recent');
+      const items = [...document.querySelectorAll('.gate-recent-item')];
       const mr = main ? main.getBoundingClientRect() : null;
       const rr = recent ? recent.getBoundingClientRect() : null;
       return {
-        root: window.__codenodeProject.getState().root,
-        actions: [...document.querySelectorAll('.workspace-home-actions button')].map(e => e.textContent.trim()),
-        names: items.map(item => item.textContent.trim()),
-        recentLeftOfMain: !!(mr && rr && rr.right <= mr.left + 1),
-        savedChat: !!document.querySelector('.project-session-row button[title="工程交接"]')
+        atGate: !!card,
+        leftActions: [...document.querySelectorAll('.gate-actions .gate-btn-title')].map((e) => e.textContent.trim()),
+        recentCount: items.length,
+        recentNames: items.map((i) => i.querySelector('.gate-recent-name').textContent.trim()),
+        mainLeftOfRecent: !!(mr && rr && mr.right <= rr.left + 1),
+        workspaceVisible: !!document.querySelector('.canvas-wrap'),
+        fillsWindow: !!(rr && mr && card.getBoundingClientRect().width >= 800 && card.getBoundingClientRect().height >= 500)
       };
     })()`);
-    ok('主界面保留三个工程入口', !workspace.root && workspace.actions.join('/') === '打开工程/新建工程/打开工程文件', JSON.stringify(workspace));
-    ok('左栏显示最近工程和已保存对话', workspace.recentLeftOfMain && workspace.names.length === 2 && workspace.savedChat, JSON.stringify(workspace));
-    fs.writeFileSync(path.join(OUT, 'workspace-home.png'), (await win.webContents.capturePage()).toPNG());
+    console.log('  (debug) gate=' + JSON.stringify(gate));
+    ok('启动停在门禁页（没有自动进入最近工程）', gate.atGate === true && gate.workspaceVisible === false, JSON.stringify(gate));
+    ok('左侧保留三个入口按钮', gate.leftActions.join('/') === '打开工程/新建工程/打开工程文件', gate.leftActions.join('/'));
+    ok('右侧显示最近打开列表', gate.recentCount === 2, JSON.stringify(gate.recentNames));
+    ok('启动器在宽屏使用双栏并占据主要窗口空间', gate.mainLeftOfRecent === true && gate.fillsWindow === true, JSON.stringify(gate));
+    fs.writeFileSync(path.join(OUT, 'gate-wide-launcher.png'), (await win.webContents.capturePage()).toPNG());
 
-    await js(`document.querySelector('.project-session-row button[title="工程交接"]').click()`);
-    for (let i = 0; i < 60; i++) {
-      if (await js(`!!document.querySelector('.conversation-main:not([hidden])') && window.__codenodeSession.getState().activeId === 'fixture-chat'`)) break;
-      await sleep(80);
-    }
-    ok('点击对话后在主区恢复原消息', await js(`document.querySelector('.conversation-main')?.textContent.includes('这条消息来自已保存的工程。')`));
-    const beforeReload = await js('performance.timeOrigin');
-    await win.webContents.reload();
-    for (let i = 0; i < 100; i++) {
-      if (await js(`performance.timeOrigin !== ${beforeReload} && window.__codenodeUi?.getState().booted && !!document.querySelector('.conversation-main:not([hidden])')`).catch(() => false)) break;
-      await sleep(80);
-    }
-    ok('重载后直接恢复上次的工程、对话与页面', await js(`window.__codenodeProject.getState().projectFile===${JSON.stringify(fileB)} && window.__codenodeSession.getState().activeId==='fixture-chat' && document.querySelector('.conversation-main')?.textContent.includes('这条消息来自已保存的工程。')`));
-
-    // 点最近列表里的目录工程，然后切到画布继续校验图像节点。
-    await js(`[...document.querySelectorAll('.project-group')].find(group => group.dataset.projectPath === ${JSON.stringify(dirA)}).querySelector('.project-open').click()`);
+    // 点最近列表里的目录工程 → 进入工作台
+    await js(`(()=>{ const items=[...document.querySelectorAll('.gate-recent-item')]; const dirItem=items.find(i=>!i.textContent.includes('.cnode')); dirItem.click(); return true; })()`);
     await sleep(2200);
-    await js(`document.querySelector('[aria-label="切换到画布"]').click()`);
-    const entered = await js(`({ workspace: !!document.querySelector('.canvas-wrap'), root: window.__codenodeProject.getState().root })`);
+    const entered = await js(`({ workspace: !!document.querySelector('.canvas-wrap'), root: window.__codenodeProject.getState().root, gate: !!document.querySelector('.gate-card') })`);
     console.log('  (debug) entered=' + JSON.stringify(entered));
-    ok('点最近工程可进入画布', entered.workspace && entered.root === dirA, JSON.stringify(entered));
+    ok('点最近记录可进入工作台', entered.workspace === true && !!entered.root, JSON.stringify(entered));
 
     // ---------- ② 图像节点 ----------
     // Shift+A 打开添加菜单

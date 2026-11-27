@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { useUiStore } from './uiStore';
 
 export type FileNode = {
   name: string;
@@ -55,7 +54,7 @@ interface ProjectState {
   revertDraft: () => void;
   setFileFilter: (value: string) => void;
   searchProject: (query: string) => Promise<void>;
-  loadRoot: (root: string) => Promise<void>;
+  loadRoot: (root: string, projectFile?: string | null, preparedTree?: FileNode[]) => Promise<void>;
   setDoc: (doc: DocMeta) => void;
   setProjectFile: (filePath: string | null) => void;
 }
@@ -133,9 +132,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (res.ok && res.root) await get().loadRoot(res.root);
   },
 
-  loadRoot: async (root) => {
-    if (get().root !== root) useUiStore.setState({ filePreviewLocation: null });
-    set({ root, projectFile: null, loading: true, selected: null, draft: '', dirty: false, conflict: null, searchMatches: [], error: null });
+  loadRoot: async (root, projectFile = null, preparedTree) => {
+    // 新建/直接打开 .cnode 时调用方已经知道工程文件。root 与 projectFile 必须在同一次
+    // store 更新中公开，避免更快的按需 UI 观察到「目录已打开但工程文件仍是 null」。
+    set({ root, projectFile, loading: !preparedTree, ...(preparedTree ? { tree: preparedTree } : {}), selected: null, draft: '', dirty: false, conflict: null, searchMatches: [], error: null });
+    if (preparedTree) return;
     if (!window.codenode) {
       set({ tree: [], loading: false, error: '需要 Electron 环境' });
       return;
@@ -153,15 +154,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   refresh: async () => {
-    const root = get().root;
-    if (root) await get().loadRoot(root);
+    const { root } = get();
+    const api = window.codenode;
+    if (!root || !api) return;
+    set({ loading: true, error: null });
+    try {
+      const result = await api.listProject(root);
+      if (get().root !== root) return;
+      if (!result.ok || !result.files) throw Error(result.error || '读取失败');
+      set({ tree: buildTree(result.files), loading: false });
+    } catch (error) {
+      if (get().root === root) {
+        set({ loading: false, error: String(error) });
+      }
+    }
   },
 
   openFile: async (relPath) => {
-    const root = get().root;
-    if (!root || !window.codenode) return;
-    if (get().dirty && get().selected?.relPath !== relPath && !window.confirm('当前文件有未保存修改，确定放弃并打开其他文件吗？')) return;
+    const { root, projectFile, selected, draft, dirty } = get();
+    if (!root || !window.codenode || (dirty && selected?.relPath === relPath)) return;
+    if (dirty && !window.confirm('当前文件有未保存修改，确定放弃并打开其他文件吗？')) return;
     const res = await window.codenode.readProjectFile(root, relPath);
+    const current = get();
+    if (current.root !== root || current.projectFile !== projectFile || current.selected !== selected || current.draft !== draft) return;
     if (res.ok) {
       const content = res.content || '';
       set({ selected: { relPath, content, truncated: !!res.truncated, mtimeMs: res.mtimeMs }, draft: content, dirty: false, conflict: null, error: null });

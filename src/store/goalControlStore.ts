@@ -17,7 +17,7 @@ export const useGoalControlStore=create<GoalControlState>((set,get)=>({goals:[],
       const selectedGoalId=goals.some(g=>g.id===previous.selectedGoalId)?previous.selectedGoalId:goals[0]?.id||null;
       const selectedGoal=goals.find(g=>g.id===selectedGoalId);
       const selectedTask=selectedGoal?.tasks.find(t=>t.id===previous.selectedTaskId);
-      const selectedTaskId=selectedTask&&!['completed','cancelled'].includes(selectedTask.status)?selectedTask.id:null;
+      const selectedTaskId=selectedTask?selectedTask.id:null;
       set({goals,revision:Number(result.value?.revision)||0,selectedGoalId,selectedTaskId,error:''});
     }catch(error){if(useProjectStore.getState().root===root&&ticket===refreshTicket)set({error:error instanceof Error?error.message:String(error)});}
     finally{if(useProjectStore.getState().root===root&&ticket===refreshTicket)set({loading:false});}

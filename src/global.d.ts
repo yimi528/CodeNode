@@ -1,3 +1,8 @@
+interface BranchContextDto {messages:import('./types').SessionMsg[];graph:import('./types').Graph;sessions?:Record<string,import('./types').SessionCanvas>;order?:string[];activeId?:string|null;label?:string;projectFile?:string|null}
+interface BranchCheckpointDto {id:string;label:string;commit:string;tree:string;createdAt:string;context:BranchContextDto}
+interface BranchItemDto {id:string;name:string;path:string;branch:string;status:string;checkpointId:string;available?:boolean;validation?:string}
+interface BranchWorkspaceDto {owner:string;activeId:string;checkpoints:BranchCheckpointDto[];branches:BranchItemDto[];contexts:Record<string,BranchContextDto>}
+interface BackendDiagnosticsDto { backend:string; installed:boolean; state:string; label:string; error:string; fixes:string[]; checkedAt:string|null; evidence:{date:string;platform:string;version:string;source:string;coverage:string[];incomplete:string[]}|null; isolation:{filesystemIsolation:boolean;processIsolation:boolean;backend:string;mode:string;degraded:string[]}|null; experimental:boolean }
 interface ProjectGraphDto {
   revision?: number;
   nodes?: unknown[];
@@ -56,6 +61,25 @@ interface ProjectSearchMatchDto {
   text: string;
 }
 
+type WebSearchProviderDto = 'searxng' | 'tavily' | 'brave' | 'serper' | 'google' | 'custom';
+interface WebSearchSettingsInput {
+  enabled: boolean;
+  provider: WebSearchProviderDto;
+  endpoint: string;
+  apiKey?: string;
+  engineId?: string;
+  maxResults: number;
+  timeoutMs: number;
+  networkAllowed: boolean;
+}
+interface WebSearchSettingsDto extends WebSearchSettingsInput {
+  backend: WebSearchProviderDto;
+  apiKeySet: boolean;
+  apiKeyPreview: string;
+  apiKeyError?: boolean;
+  problems?: string[];
+}
+
 interface ProjectExtensionDto {
   name: string;
   kind: string;
@@ -79,10 +103,11 @@ interface ToolRecordDto {
 }
 
 interface ToolRequestDto {
+  rememberActions?: string[];
   id: string;
-  requestId?: string;
   type: 'confirm' | 'ask' | 'ui' | 'cancel' | 'editor_read';
   path?: string;
+  relPath?: string;
   level?: string;
   what?: string;
   detail?: string;
@@ -151,11 +176,20 @@ interface WorkflowGraphDto {
 }
 
 interface CodenodeApi {
+  branchList:(root:string)=>Promise<{ok:boolean;error?:string;value?:BranchWorkspaceDto}>;
+  branchCheckpoint:(root:string,input:{label:string;context:BranchContextDto})=>Promise<{ok:boolean;error?:string;value?:BranchCheckpointDto}>;
+  branchFork:(root:string,checkpointId:string,name:string)=>Promise<{ok:boolean;error?:string;value?:BranchItemDto}>;
+  branchContext:(root:string,context:BranchContextDto)=>Promise<{ok:boolean;error?:string}>;
+  branchCompare:(root:string,id:string)=>Promise<{ok:boolean;error?:string;value?:{id:string;name:string;patch:string;diff:string;truncated:boolean;context:BranchContextDto}}>;
+  branchPreviewAdopt:(root:string,id:string)=>Promise<{ok:boolean;error?:string;value?:Record<string,unknown>}>;
+  branchAdopt:(root:string,id:string,preview:Record<string,unknown>)=>Promise<{ok:boolean;error?:string;value?:{message:string;validation:string}}>;
+  branchArchive:(root:string,id:string)=>Promise<{ok:boolean;error?:string}>;
+
   workflowState: (root: string, workflowId: string, request: {
     action: 'read' | 'prepare' | 'settle' | 'restart'; graph: WorkflowGraphDto;
-    expectedRevision?: number; nodeId?: string; reviewedAttemptIds?: string[];
+    expectedRevision?: number; nodeId?: string; inspectNodeId?: string; inspectTimeline?: boolean; reviewedAttemptIds?: string[];
     attemptId?: string; ok?: boolean; output?: string;
-  }) => Promise<{ ok: boolean; error?: string; needsReview?: boolean; attemptId?: string; state?: WorkflowStateDto }>;
+  }) => Promise<{ ok: boolean; error?: string; needsReview?: boolean; attemptId?: string; state?: WorkflowStateDto; stageEvidence?: import('./lib/stageScene').StageEvidence | null; stageTimeline?: import('./lib/stageScene').StageRecord[] }>;
   workflowExecute: (root: string, workflowId: string, request: {
     graph: WorkflowGraphDto; nodeId: string; expectedRevision: number; legacyRecovery?: boolean;
   }) => Promise<{ ok: boolean; executionOk?: boolean; output?: string; error?: string; needsReview?: boolean; state?: WorkflowStateDto }>;
@@ -180,13 +214,13 @@ interface CodenodeApi {
   trellisConnectPrepare: (root:string,input:{developer:string}) => Promise<{ok:boolean;value?:import('./lib/trellisCliTypes').TrellisConnectPlan;error?:string}>;
   trellisConnectRead: (root:string,id:string,source:string) => Promise<{ok:boolean;value?:{source:string;content:string;truncated:boolean};error?:string}>;
   trellisConnectApply: (root:string,id:string) => Promise<{ok:boolean;value?:import('./lib/trellisCliTypes').TrellisConnectPlan;error?:string}>;
-  createProject: () => Promise<{ ok: boolean; filePath?: string; root?: string; error?: string }>;
+  createProject: (currentFile?: string) => Promise<{ ok: boolean; filePath?: string; root?: string; error?: string }>;
   listProject: (root: string) => Promise<{ ok: boolean; files?: ProjectFileDto[]; error?: string }>;
   readProjectFile: (
     root: string,
     relPath: string,
-    options?: { binary?: boolean; preview?: boolean }
-  ) => Promise<{ ok: boolean; content?: string; dataUrl?: string; bytes?: number; truncated?: boolean; mtimeMs?: number; error?: string; preview?: import('./lib/filePreview').PreviewContent }>;
+    options?: { binary?: boolean }
+  ) => Promise<{ ok: boolean; content?: string; dataUrl?: string; bytes?: number; truncated?: boolean; mtimeMs?: number; error?: string }>;
   writeProjectFile: (
     root: string,
     relPath: string,
@@ -220,27 +254,31 @@ interface CodenodeApi {
     root: string | null, sessionId?: string | null, conversationId?: string | null
   ) => Promise<{
     configured: boolean;
-    backend?: { availability?: Partial<Record<import('./types').AgentBackendSettings['backend'],{installed:boolean;reason?:string}>>; profiles?: Partial<Record<import('./types').AgentBackendSettings['backend'],import('./types').AgentBackendSettings>>; sessionSettings?: import('./types').AgentBackendSettings; settings: import('./types').AgentBackendSettings; machine: import('./types').AgentBackendSettings; project: import('./types').AgentBackendSettings | null; scope: 'machine' | 'project' };
+    backend?: { availability?: Partial<Record<import('./types').AgentBackendSettings['backend'],{installed:boolean;reason?:string;label?:string;state?:string}>>; profiles?: Partial<Record<import('./types').AgentBackendSettings['backend'],import('./types').AgentBackendSettings>>; sessionSettings?: import('./types').AgentBackendSettings; settings: import('./types').AgentBackendSettings; machine: import('./types').AgentBackendSettings; project: import('./types').AgentBackendSettings | null; scope: 'machine' | 'project' };
     model: string;
     soul: { name: string; greeting: string; style: string; raw: string };
     toolsEnabled: boolean;
     autoExecuteTools?: boolean;
+    fullAccessLocked?: boolean;
     scheduling?: import('./types').SchedulingSettings;
     costSettings?: import('./types').CostSettings;
     subagentRoles?: { name: string; label: string }[];
     ragEnabled: boolean;
     editing?: import('./types').EditingSettings;
     rag?: { enabled: boolean; strictValidation: boolean; provider: string; model: string; base: string; dim: number; dimensions: string; backend: string; milvusAddress?:string;milvusCollection?:string;hasMilvusToken?:boolean;hasKey: boolean; rerankEnabled: boolean; rerankExternal: boolean; bm25K1: number; bm25B: number; vectorWeight: number };
+    webSearch?: WebSearchSettingsDto;
     models?: ModelSpecDto[];
     activeModelId?: string | null;
   }>;
   ragCheck: (root: string | null, settings: { enabled?: boolean; strictValidation?: boolean; provider: string; model: string; base: string; dim: number; dimensions: string; backend: string; milvusAddress?:string;milvusCollection?:string;milvusToken?:string;key?: string; bm25K1: number; bm25B: number; vectorWeight: number }) => Promise<{ ok: boolean; error?: string; dimension?: number; mode?: string }>;
   ragSave: (root: string | null, settings: { enabled?: boolean; strictValidation?: boolean; provider: string; model: string; base: string; dim: number; dimensions: string; backend: string; milvusAddress?:string;milvusCollection?:string;milvusToken?:string;key?: string; bm25K1: number; bm25B: number; vectorWeight: number }) => Promise<{ ok: boolean; error?: string; rebuildRequired?: boolean }>;
+  webSearchCheck: (root: string | null, settings: WebSearchSettingsInput) => Promise<{ ok: boolean; error?: string; provider?: string; count?: number; sample?: { title: string; url: string; snippet: string } | null; message?: string }>;
+  webSearchSave: (root: string | null, settings: WebSearchSettingsInput) => Promise<{ ok: boolean; error?: string; settings?: WebSearchSettingsDto }>;
   editingSave: (root: string, settings: import('./types').EditingSettings) => Promise<{ ok: boolean; error?: string; settings?: import('./types').EditingSettings }>;
   executionSave: (root: string, settings: { autoExecuteTools: boolean }) => Promise<{ ok: boolean; error?: string; settings?: { autoExecuteTools: boolean } }>;
   backendSave: (root: string | null, scope: 'machine' | 'project', settings: import('./types').AgentBackendSettings | null,options?:{conversationId?:string}) => Promise<{ ok: boolean; error?: string; settings?: import('./types').AgentBackendSettings; scope?: 'machine' | 'project' }>;
   backendControl: (root: string | null, settings: import('./types').AgentBackendSettings, method: string, params?: Record<string, unknown>) => Promise<{ ok: boolean; error?: string; value?: any }>;
-  backendStatus: (root: string | null, settings?: import('./types').AgentBackendSettings) => Promise<{ ok: boolean; error?: string; checkedSettings?: import('./types').AgentBackendSettings; capabilities?: { backend: string; available: boolean; authenticated?: boolean | null; protocolVersion?: string; protocol?: string; version?: string; resume?:boolean; hardBudget?: boolean; customTools?: boolean; error?: string; proxySource?: string; commandSandbox?: { readiness: string; lastSetupError: { code: string; message: string } | null; verified: boolean } | null } }>;
+  backendStatus: (root: string | null, settings?: import('./types').AgentBackendSettings) => Promise<{ ok: boolean; error?: string; checkedSettings?: import('./types').AgentBackendSettings; diagnostics?: BackendDiagnosticsDto; capabilities?: { backend: string; available: boolean; authenticated?: boolean | null; protocolVersion?: string; protocol?: string; version?: string; resume?:boolean; hardBudget?: boolean; customTools?: boolean; error?: string; proxySource?: string; commandSandbox?: { readiness: string; lastSetupError: { code: string; message: string } | null; verified: boolean } | null } }>;
   goalList: (root:string|null)=>Promise<{ok:boolean;error?:string;value?:{revision:number;goals:any[];decisions:any[];admissions:any[];settlements:any[];recoveredAdmissions?:{count:number;recovered:any[]}}}>;
   goalSchedulerBind: (root:string|null,ready:boolean)=>Promise<{ok:boolean;error?:string;value?:{root:string}}>;
   goalExecutionStart: (root:string,goalId:string,expectedRevision?:number)=>Promise<{ok:boolean;error?:string;value?:any}>;
@@ -283,7 +321,7 @@ interface CodenodeApi {
   ) => Promise<{ greeting: string; name: string; configured: boolean }>;
   agentTools: (
     root: string | null
-  ) => Promise<{ enabled: boolean; tools: AgentToolSpecDto[] }>;
+  ) => Promise<{ enabled: boolean; tools: AgentToolSpecDto[]; executorNames?: string[] }>;
   agentRuns: (root: string | null) => Promise<Array<{
     runId: string | null;
     status: string;
@@ -461,7 +499,10 @@ interface CodenodeApi {
   agentTimeTravel: (root: string, sourceRunId: string, branchRunId: string, checkpointIndex?: number) => Promise<{
     ok: boolean; runId?: string; parentRunId?: string; checkpointIndex?: number; requiresReview?: boolean; messageCount?: number; error?: string;
   }>;
+  startDictation: () => Promise<{ ok: boolean; error?: string }>;
   agentChat: (payload: {
+    composerOverrides?: import('./types').ComposerOverrides;
+    acceptance?: import('./lib/taskAcceptance').TaskAcceptanceContract;
     projectRoot: string | null;
     goalId?: string;
     taskId?: string;
@@ -497,8 +538,11 @@ interface CodenodeApi {
     reply?: string;
     reasoning?: string;
     toolCalls?: ToolRecordDto[];
+    codeVerification?: import('./types').CodeVerificationReport;
+    taskAcceptance?: import('./types').TaskAcceptanceReport;
     backend?: import('./types').AgentBackendSettings['backend'];
     costUnknown?: boolean;
+    cost?: { costUsd?: number; costKnown?: boolean };
     usage?: unknown;
     grounding?: {
       semantic?: { status: string; supported: boolean | null; safeForDelivery?: boolean };
@@ -567,6 +611,8 @@ interface CodenodeApi {
   }>;
   stopAgent: (requestId: string) => Promise<{ ok: boolean }>;
   onAgentDelta: (cb: (data: {
+    state?: string;
+    reason?: string;
     document?: import('./types').SessionDoc;
     content?: any;
     info?: any;
@@ -577,9 +623,9 @@ interface CodenodeApi {
     diff?: string;
     changes?: import('./types').SessionMsg['backendChanges'];
     codeVerification?: import('./types').CodeVerificationReport;
+    taskAcceptance?: import('./types').TaskAcceptanceReport;
     requestId?: string;
     kind?: string;
-    continuing?: boolean;
     text?: string;
     toolCalls?: unknown;
     toolResult?: unknown;

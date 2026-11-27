@@ -125,10 +125,20 @@ function runtimeFingerprint(){
  return hash.digest('hex');
 }
 
-/** 使用工作台运行配置报告默认上限。 */
+/** 从工作台源码里取硬上限常量，报告里的参数必须来自真实代码而不是复述文档。 */
 function sourceLimits() {
-  const { maxToolIterations, maxTotalToolCalls } = agent.parseLimitsConfig({});
-  return { maxToolIterations, maxTotalToolCalls, source: 'electron/agentRuntimeConfig.cjs' };
+  try {
+    const src = fs.readFileSync(path.join(ROOT, 'electron', 'agent.cjs'), 'utf8');
+    const iter = src.match(/MAX_TOOL_ITERATIONS\s*=\s*(\d+)/);
+    const calls = src.match(/MAX_TOTAL_TOOL_CALLS\s*=\s*(\d+)/);
+    return {
+      maxToolIterations: iter ? Number(iter[1]) : null,
+      maxTotalToolCalls: calls ? Number(calls[1]) : null,
+      source: 'electron/agent.cjs',
+    };
+  } catch {
+    return { maxToolIterations: null, maxTotalToolCalls: null, source: null };
+  }
 }
 
 function listFiles(root, relative = '') {

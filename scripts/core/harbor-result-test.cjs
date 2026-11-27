@@ -29,6 +29,7 @@ assert.equal(executionStatus(nativeResult([],{exception_info:{exception_type:'Ag
     const task=/** @type {any} */ (require('../eval/coding-tasks.cjs')[0]),source='/ci/live';
     const trial=protocol.createTrial(path.join(input,'confirmation/evidence'),task,{mode:'model'});
     for(const event of events)trial.append('events.jsonl',event);
+    trial.save('native-result.json',{result:nativeResult(events)});
     trial.collect(task.fixture,task.fixture,{fixture:task.fixture,behaviorCases:task.behaviorCases});
     trial.save('verifier-environment.json',{verified:true,network:{enforced:true,networkMode:'none'}});
     const trialPath=source+'/confirmation/evidence/trials/'+trial.trialId;
@@ -53,6 +54,14 @@ assert.equal(executionStatus(nativeResult([],{exception_info:{exception_type:'Ag
     assert.equal(corrected.rows[1].phase,'NOT_STARTED');assert.equal(corrected.byArm.baseline.budgetBlocked,1);
     assert.equal(corrected.gradesUnchanged,true);assert.equal(corrected.modelRequests,0);assert.equal(requests,0);
     assert.equal(protocol.hash(fs.readFileSync(summary)),before,'original report must remain unchanged');
+    const {calibrate}=require('../eval/calibrate-trace-metrics.cjs');
+    const calibrated=calibrate(input,path.join(root,'new-metrics'));
+    assert.equal(calibrated.gradesUnchanged,true);assert.equal(calibrated.originalEndpointPreserved,true);
+    assert.equal(calibrated.modelRequests,0);assert.equal(requests,0);
+    assert.equal(calibrated.groups.baseline.observed,0,'no shell call is not a successful shell call');
+    assert.equal(calibrated.groups.improved.planned,1,'unstarted attempts remain in the denominator');
+    trial.save('native-result.json',{result:{toolCalls:[{name:'execute_shell',ok:true}]}});
+    assert.throws(()=>calibrate(input,path.join(root,'inconsistent-metrics')),/disagree/);
     assert.throws(()=>reanalyze(input,path.join(input,'overwrite')),/outside/);
     fs.appendFileSync(planFile,' ');assert.throws(()=>reanalyze(input,path.join(root,'tampered')),/seal/);
     assert.equal(fs.existsSync(path.join(root,'tampered')),false);

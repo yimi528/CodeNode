@@ -10,6 +10,7 @@ const statistics=require('../lib/eval-statistics.cjs');
 const {createLedger}=require('../lib/eval-transport.cjs');
 const {runQualityChecks}=require('../lib/eval-quality.cjs');
 const {reviewPack,validateReview}=require('../lib/eval-reviews.cjs');
+const toolMetrics=require('../lib/eval-tool-metrics.cjs');
 
 function parse(argv) {
   const options=/** @type {Record<string,string>} */ ({});
@@ -92,7 +93,7 @@ function prepare(options) {
     model:options.model||process.env.CODENODE_EVAL_MODEL||'deepseek-chat',apiBase:options['base-url']||process.env.CODENODE_EVAL_BASE_URL||'https://api.deepseek.com',
     profile,isolation:options.isolation||'local-process',graderBackend:options['grader-backend']||(options.isolation==='harbor'?'docker':'process'),
     changedComponent:arms.length===2?'argv tool-guide example':'none',arms,schedule,
-    estimand:'fixed-suite',primaryMetric:'first-shell-valid-contract',minimumEffect:0.05,maxRegression:0.05,
+    estimand:'fixed-suite',primaryMetric:'first-shell-valid-contract',primaryMetricVersion:toolMetrics.VERSION,minimumEffect:0.05,maxRegression:0.05,
     stoppingRule:'fixed planned attempts; stop on unfunded reservations or two consecutive attempts without a completed model response',haltAfterUnavailable:2,
     runtime,quality,taskIds:ids,taskSpecs:tasks,taskHash:protocol.hash(tasks),
     environment:{node:process.version,platform:process.platform,arch:process.arch,cpu:require('node:os').cpus()[0]?.model||'unknown',sharedHost:true},
@@ -120,30 +121,36 @@ function loadRows(directory,plan) {
     return {...entry,state,record};
   });
 }
-function shellMetric(record) {
+function shellMetric(record,version) {
+  if(version!=null&&!['legacy-arg-schema-v1',toolMetrics.VERSION].includes(version))throw Error('Unsupported primary metric version');
   if(!record?.evidence?.directory)return null;
   const file=path.join(record.evidence.directory,'native-result.json');if(!fs.existsSync(file))return null;
   const native=protocol.readJson(file);
   const call=native.result?.toolCalls?.find(c=>c.name==='execute_shell');if(!call)return null;
+  if(version===toolMetrics.VERSION) {
+    const outcome=toolMetrics.classify(call);
+    const accepted=toolMetrics.acceptance(outcome);
+    return accepted===null?null:accepted?1:0;
+  }
   return call.ok===false&&call.data?.code==='ARG_SCHEMA'?0:1;
 }
 function analyze(file) {
   const plan=readPlan(file),directory=path.dirname(file),rows=loadRows(directory,plan);
   const familyCounts={};for(const task of plan.taskSpecs)familyCounts[task.evaluation.family]=(familyCounts[task.evaluation.family]||0)+1;
   const comparison=statistics.compareTasks(plan.taskSpecs.map(task=>({taskId:task.id,family:task.evaluation.family,weight:1/familyCounts[task.evaluation.family],
-    baseline:rows.filter(r=>r.taskId===task.id&&r.arm==='baseline').map(r=>shellMetric(r.record)),
-    improved:rows.filter(r=>r.taskId===task.id&&r.arm==='improved').map(r=>shellMetric(r.record))})),{seed:plan.seed,minimumEffect:plan.minimumEffect,maxRegression:plan.maxRegression});
+    baseline:rows.filter(r=>r.taskId===task.id&&r.arm==='baseline').map(r=>shellMetric(r.record,plan.primaryMetricVersion)),
+    improved:rows.filter(r=>r.taskId===task.id&&r.arm==='improved').map(r=>shellMetric(r.record,plan.primaryMetricVersion))})),{seed:plan.seed,minimumEffect:plan.minimumEffect,maxRegression:plan.maxRegression});
   for(const row of rows) {
     row.availability = !row.record ? 'not-started' : plan.mode==='offline' ? 'scripted' : String(row.record.error||'').includes('EVAL_TOKEN_BUDGET') ? 'budget-not-funded' : row.record.modelSteps===0&&row.record.error ? 'no-completed-model-response' : 'model-response-recorded';
   }
   const byArm=Object.fromEntries(plan.arms.map(arm=>{const subset=rows.filter(r=>r.arm===arm);const counts=statistics.coverage(subset.map(r=>r.record||{protocol:{executionStatus:'NOT_STARTED',gradingStatus:'NOT_RUN',delivered:false}}),subset.length);return [arm,{...counts,modelEvidenceUnavailable:subset.filter(r=>r.availability==='no-completed-model-response').length}];}));
   const ledger=protocol.readJson(plan.budgetLedger);
   const taskIntervals=plan.taskSpecs.map(task=>({taskId:task.id,family:task.evaluation.family,split:task.evaluation.split,
-    arms:Object.fromEntries(plan.arms.map(arm=>{const subset=rows.filter(r=>r.taskId===task.id&&r.arm===arm);const valid=subset.map(r=>shellMetric(r.record)).filter(v=>v!==null);const success=valid.reduce((n,v)=>n+v,0);return [arm,{planned:subset.length,firstShellObserved:valid.length,firstShellValid:success,wilson95:statistics.wilson(success,valid.length),delivered:subset.filter(r=>r.record?.protocol?.delivered).length}];}))}));
-  const analysisHash=protocol.hash(Buffer.concat([fs.readFileSync(__filename),fs.readFileSync(path.resolve(__dirname,'../lib/eval-statistics.cjs'))]));
-  const result={schemaVersion:1,analysis:{sourceHash:analysisHash,updatedAt:new Date().toISOString()},experimentId:plan.experimentId,kind:plan.kind,mode:plan.mode,primaryMetric:plan.primaryMetric,
+    arms:Object.fromEntries(plan.arms.map(arm=>{const subset=rows.filter(r=>r.taskId===task.id&&r.arm===arm);const valid=subset.map(r=>shellMetric(r.record,plan.primaryMetricVersion)).filter(v=>v!==null);const success=valid.reduce((n,v)=>n+v,0);return [arm,{planned:subset.length,firstShellObserved:valid.length,firstShellValid:success,wilson95:statistics.wilson(success,valid.length),delivered:subset.filter(r=>r.record?.protocol?.delivered).length}];}))}));
+  const analysisHash=protocol.hash(Buffer.concat([fs.readFileSync(__filename),fs.readFileSync(path.resolve(__dirname,'../lib/eval-statistics.cjs')),fs.readFileSync(require.resolve('../lib/eval-tool-metrics.cjs'))]));
+  const result={schemaVersion:1,analysis:{sourceHash:analysisHash,updatedAt:new Date().toISOString()},experimentId:plan.experimentId,kind:plan.kind,mode:plan.mode,primaryMetric:plan.primaryMetric,primaryMetricVersion:plan.primaryMetricVersion||'legacy-arg-schema-v1',
     byArm,comparison,taskIntervals,budget:{scope:'shared-ledger',thisExperimentReported:ledger.attempts.filter(a=>rows.some(r=>r.record?.evidence?.trialId===a.identity)).reduce((n,a)=>n+(a.reported||0),0),limit:ledger.limit,charged:ledger.charged,reported:ledger.reported,pending:Object.values(ledger.reservations).reduce((n,v)=>n+Number(v),0),boundViolation:!!ledger.boundViolation},
-    complete:rows.every(r=>r.state.phase==='FINISHED'),rows:rows.map(r=>({id:r.id,taskId:r.taskId,arm:r.arm,trial:r.trial,phase:r.state.phase,protocol:r.record?.protocol||null,availability:r.availability,reportFile:r.state.reportFile||null,firstShellValid:shellMetric(r.record)})),
+    complete:rows.every(r=>r.state.phase==='FINISHED'),rows:rows.map(r=>({id:r.id,taskId:r.taskId,arm:r.arm,trial:r.trial,phase:r.state.phase,protocol:r.record?.protocol||null,availability:r.availability,reportFile:r.state.reportFile||null,firstShellValid:shellMetric(r.record,plan.primaryMetricVersion)})),
     inference:'Fixed-suite diagnostic; small or saturated samples do not establish a generalized improvement.'};
   const previousFile=path.join(directory,'summary.json');
   if(fs.existsSync(previousFile)){const previous=protocol.readJson(previousFile);if(previous.analysis?.sourceHash!==analysisHash){const id=require('node:crypto').randomUUID();protocol.writeNew(path.join(directory,'analysis-history',id+'.json'),previous);if(fs.existsSync(path.join(directory,'summary.md')))fs.copyFileSync(path.join(directory,'summary.md'),path.join(directory,'analysis-history',id+'.md'));}}
@@ -224,4 +231,4 @@ function main(argv) {
   throw Error('命令为 prepare、run、analyze、review-pack、gate');
 }
 if(require.main===module){Promise.resolve().then(()=>main(process.argv.slice(2))).then(result=>{console.log(JSON.stringify(result,null,2));if(result.pass===false)process.exitCode=1;}).catch(error=>{console.error(error.message);process.exitCode=1;});}
-module.exports={prepare,run,analyze,gate,readPlan,freezeRuntime,verifyRuntime,main};
+module.exports={prepare,run,analyze,gate,readPlan,freezeRuntime,verifyRuntime,main,shellMetric};

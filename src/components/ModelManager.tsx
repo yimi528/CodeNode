@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useUiStore } from '../store/uiStore';
 import { useUsageStore, type ModelSpec } from '../store/usageStore';
 
@@ -24,9 +24,23 @@ const groupsOf = (models: ModelSpec[]): ProviderGroup[] => {
   return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
 };
 
-export default function ModelManager() {
-  const open = useUiStore(s => s.modelManagerOpen), close = useUiStore(s => s.closeModelManager), target = useUiStore(s => s.modelConnectionTarget);
+type InlineConnection = {
+  picker: ReactNode;
+  close: () => void;
+  trigger: HTMLButtonElement | null;
+  backendName?: string;
+  useApiConnection?: () => Promise<void>;
+};
+
+export default function ModelManager({ inline }: { inline?: InlineConnection } = {}) {
+  const managerOpen = useUiStore(s => s.modelManagerOpen);
+  const closeManager = useUiStore(s => s.closeModelManager);
+  const requestedTarget = useUiStore(s => s.modelConnectionTarget);
+  const open = !!inline || managerOpen, close = inline?.close || closeManager;
+  const target = inline ? null : requestedTarget;
+  const panel = useRef<HTMLDivElement>(null);
   const activeId = useUsageStore(s => s.modelId);
+  const activeInlineId = inline ? activeId : null;
   const [models, setModels] = useState<ModelSpec[]>([]), [choices, setChoices] = useState<ModelSpec[]>([]);
   const [provider, setProvider] = useState('deepseek'), [providerName, setProviderName] = useState('');
   const [key, setKey] = useState(''), [apiBase, setApiBase] = useState(''), [protocol, setProtocol] = useState('openai'), [modelId, setModelId] = useState('');
@@ -62,17 +76,29 @@ export default function ModelManager() {
       const requested = target ? groups.find(group => group.provider === target.provider && (target.provider !== 'custom' || group.apiBase === target.apiBase)) : null;
       const active = groups.find(group => group.models.some(model => model.id === useUsageStore.getState().modelId));
       const group = requested || active || groups[0];
-      if (group) selectGroup(group);
+      if (inline && !groups.some(item => item.models.some(model => model.apiKeySet || model.auth === 'none'))) startAdd();
+      else if (group) selectGroup(group);
       else { setAdding(true); setProvider('deepseek'); setProviderName('DeepSeek'); setApiBase(''); setProtocol('openai'); }
     }).catch(() => { if (current === epoch.current) setError('无法读取模型配置，请检查配置文件'); });
     return () => { epoch.current++; };
-  }, [open]);
+  }, [open, activeInlineId]);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) close(); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && !busy) close(); };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, [open, busy, close]);
+
+  useEffect(() => {
+    if (!inline || busy) return;
+    const dismiss = (event: PointerEvent) => {
+      const node = event.target as Node;
+      if (node instanceof Element && node.closest('.hermes-picker-layer')) return;
+      if (!panel.current?.contains(node) && !inline.trigger?.contains(node)) inline.close();
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [inline, busy]);
 
   if (!open) return null;
   const discover = async () => {
@@ -101,18 +127,44 @@ export default function ModelManager() {
   };
   const activate = async (id: string) => {
     setBusy(true); setError('');
-    if (!await useUsageStore.getState().setModel(id)) setError('模型切换失败');
-    else { setSelected(id); useUiStore.setState({ modelConnectionTarget: null }); await refresh(); }
-    setBusy(false);
+    if (inline && models.some(model => model.id === id && !model.apiKeySet && model.auth !== 'none')) {
+      setError('请先填写该供应商的 API Key 并连接'); setBusy(false); return;
+    }
+    try {
+      if (!await useUsageStore.getState().setModel(id)) throw new Error('模型切换失败');
+      setSelected(id); useUiStore.setState({ modelConnectionTarget: null }); await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '读取模型失败');
+    } finally { setBusy(false); }
   };
   const startAdd = () => { clearDiscovery(); setAdding(true); setProvider('custom'); setProviderName(''); setApiBase(''); setProtocol('openai'); setModelId(''); setKey(''); setEditingKey(false); };
   const changeProvider = (id: string) => { clearDiscovery(); setProvider(id); setProviderName(providerLabel(id)); setApiBase(''); setProtocol(id === 'anthropic' ? 'anthropic' : id === 'gemini' ? 'gemini' : 'openai'); setModelId(''); setKey(''); setEditingKey(false); };
   const keyless = provider === 'custom' && /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?=[:/]|$)/i.test(apiBase);
   const canDiscover = !!(key.trim() || savedPreview || keyless) && (provider !== 'custom' || !!apiBase.trim());
 
-  return <div className="mm-mask" onClick={() => { if (!busy) close(); }}>
-    <div className="mm-dialog mm-connect-dialog mm-provider-dialog" role="dialog" aria-modal="true" aria-label="模型设置" onClick={event => event.stopPropagation()}>
-      <aside className="mm-provider-sidebar">
+  const switchAgent = async () => {
+    setBusy(true); setError('');
+    try { await inline?.useApiConnection?.(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '切换 Agent 失败'); }
+    finally { setBusy(false); }
+  };
+
+  const modelIdField = <label className="mm-field"><span>模型或部署 ID</span><input className="mm-input" aria-label="模型或部署 ID" disabled={busy} value={modelId} placeholder="供应商未开放模型列表时填写" onChange={event => { setModelId(event.target.value); clearDiscovery(); }} /></label>;
+
+  const protocolField = <label className="mm-field"><span>API 格式</span><select className="mm-input" aria-label="API 格式" disabled={busy} value={protocol} onChange={event => { setProtocol(event.target.value); clearDiscovery(); }}><option value="openai">OpenAI Compatible</option><option value="anthropic">Anthropic Messages</option><option value="gemini">Google Gemini</option></select></label>;
+
+  const modelList = <div className="mm-provider-model-list" role="listbox" aria-label="模型列表">
+            {displayedModels.map(model => <button role="option" aria-selected={(ticket ? selected : activeId) === model.id} key={model.id} disabled={busy} onClick={() => ticket ? setSelected(model.id) : void activate(model.id)}>
+              <span><strong>{model.label}</strong><small>{model.model}</small></span><span className="mm-model-status">{(ticket ? selected : activeId) === model.id ? '✓' : ''}</span>
+            </button>)}
+            {!displayedModels.length && <div className="mm-empty">暂无模型。填写供应商凭据后获取模型列表。</div>}
+          </div>;
+
+  const canSwitch = !!inline?.useApiConnection && !ticket && !key &&
+    connected.some(model => model.id === activeId && (model.apiKeySet || model.auth === 'none'));
+  return <div className={inline ? 'composer-model-box' : 'mm-mask'} ref={panel} onClick={() => { if (!inline && !busy) close(); }}>
+    <div className="mm-dialog mm-connect-dialog mm-provider-dialog" role="dialog" aria-modal={!inline} aria-label={inline ? '模型连接' : '模型设置'} onClick={event => event.stopPropagation()}>
+      {!inline && <aside className="mm-provider-sidebar">
         <div className="mm-provider-brand"><h2>模型设置</h2><p>供应商凭据由旗下模型共享</p></div>
         <div className="mm-provider-list" aria-label="已配置供应商">
           {groups.map(group => <button key={group.key} className={!adding && activeGroup?.key === group.key ? 'active' : ''} onClick={() => selectGroup(group)} disabled={busy}>
@@ -122,36 +174,47 @@ export default function ModelManager() {
           {!groups.length && <div className="mm-provider-empty">尚未配置供应商</div>}
         </div>
         <button className={`mm-provider-add${adding ? ' active' : ''}`} onClick={startAdd} disabled={busy}>＋ 添加供应商</button>
-      </aside>
+      </aside>}
 
       <section className="mm-provider-detail">
-        <header className="mm-provider-head"><div><h3>{adding ? '添加供应商' : activeGroup?.label || providerLabel(provider)}</h3><p>{adding ? '配置一次 Key，之后模型切换自动复用。' : 'API Key 对该供应商下的全部模型生效。'}</p></div><button className="mm-close" aria-label="关闭" disabled={busy} onClick={close}>✕</button></header>
+        <header className="mm-provider-head"><div><h3>{inline ? '模型连接' : adding ? '添加供应商' : activeGroup?.label || providerLabel(provider)}</h3>{!inline && <p>{adding ? '配置一次 Key，之后模型切换自动复用。' : 'API Key 对该供应商下的全部模型生效。'}</p>}</div><button className="mm-close" aria-label="关闭" disabled={busy} onClick={close}>✕</button></header>
         <div className="mm-provider-body">
+          {inline && <fieldset className="model-box-picker" disabled={busy}>
+            <legend>当前模型</legend>
+            {inline.picker}
+          </fieldset>}
           {target && !savedPreview && <div className="mm-error" role="status">{target.label} 所属供应商尚未配置可用凭据。</div>}
           {models.some(model => model.apiKeyError) && <div className="mm-error" role="status">部分旧 Key 无法解密，请更新对应供应商。</div>}
 
-          {adding && <label className="mm-field"><span>供应商</span><select className="mm-input" aria-label="供应商" disabled={busy} value={provider} onChange={event => changeProvider(event.target.value)}>{PROVIDERS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>}
-          {provider === 'custom' && <div className="mm-grid mm-provider-custom-grid">
-            <label className="mm-field"><span>供应商名称</span><input className="mm-input" aria-label="供应商名称" disabled={busy} value={providerName} placeholder="例如公司中转站" onChange={event => { setProviderName(event.target.value); clearDiscovery(); }} /></label>
-            <label className="mm-field"><span>API 格式</span><select className="mm-input" aria-label="API 格式" disabled={busy} value={protocol} onChange={event => { setProtocol(event.target.value); clearDiscovery(); }}><option value="openai">OpenAI Compatible</option><option value="anthropic">Anthropic Messages</option><option value="gemini">Google Gemini</option></select></label>
+          {adding && !inline && <label className="mm-field"><span>供应商</span><select className="mm-input" aria-label="供应商" disabled={busy} value={provider} onChange={event => changeProvider(event.target.value)}>{PROVIDERS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>}
+          {!inline && provider === 'custom' && <div className="mm-grid mm-provider-custom-grid">
+            {!inline && <label className="mm-field"><span>供应商名称</span><input className="mm-input" aria-label="供应商名称" disabled={busy} value={providerName} placeholder="例如公司中转站" onChange={event => { setProviderName(event.target.value); clearDiscovery(); }} /></label>}
+            {protocolField}
           </div>}
-          {provider === 'custom' && <label className="mm-field"><span>Base URL</span><input className="mm-input" aria-label="Base URL" disabled={busy} value={apiBase} placeholder="例如 https://gateway.example.com/v1" onChange={event => { setApiBase(event.target.value); clearDiscovery(); }} /></label>}
-          {!adding && activeGroup?.apiBase && <div className="mm-provider-readonly"><span>Base URL</span><code>{activeGroup.apiBase}</code></div>}
+          {(provider === 'custom' || inline) && <label className="mm-field"><span>Base URL</span><input className="mm-input" aria-label="Base URL" disabled={busy} value={apiBase} placeholder="https://api.example.com/v1" onChange={event => {
+            if (inline) {
+              setProvider('custom'); setAdding(true); setKey(''); setProviderName('');
+            }
+            setApiBase(event.target.value); clearDiscovery();
+          }} /></label>}
+          {!inline && provider !== 'custom' && !adding && activeGroup?.apiBase && <div className="mm-provider-readonly"><span>Base URL</span><code>{activeGroup.apiBase}</code></div>}
 
-          <label className="mm-field"><span>API Key</span><div className="mm-key-row"><input className="mm-input" aria-label="API Key" type={editingKey ? 'password' : 'text'} autoComplete="off" disabled={busy} value={displayKey} placeholder={savedPreview ? '已配置；留空继续使用' : keyless ? '本机服务可留空' : '粘贴供应商 API Key'} onFocus={() => { setEditingKey(true); setKey(''); setPreview(''); }} onBlur={() => setEditingKey(false)} onChange={event => { setKey(event.target.value); clearDiscovery(); }} onKeyDown={event => { if (event.key === 'Enter' && !busy && canDiscover) void discover(); }} /><button className="mm-btn primary" disabled={busy || !canDiscover} onClick={() => void discover()}>{busy ? '连接中…' : savedPreview ? '刷新模型' : '连接'}</button></div>{savedPreview && <small className="mm-provider-shared-note">已保存供应商凭据；切换下方模型无需再次输入。</small>}</label>
+          <label className="mm-field"><span>API Key</span><div className="mm-key-row"><input className="mm-input" aria-label="API Key" type={inline || editingKey ? 'password' : 'text'} autoComplete="off" disabled={busy} value={inline ? key : displayKey} placeholder={savedPreview ? '已配置；留空继续使用' : keyless ? '本机服务可留空' : '粘贴供应商 API Key'} onFocus={() => { setEditingKey(true); if (!inline) { setKey(''); setPreview(''); } }} onBlur={() => setEditingKey(false)} onChange={event => { setKey(event.target.value); clearDiscovery(); }} onKeyDown={event => { if (event.key === 'Enter' && !busy && canDiscover) void discover(); }} /><button className="mm-btn primary" disabled={busy || !canDiscover} onClick={() => void discover()}>{busy ? '连接中…' : savedPreview ? '刷新模型' : '连接'}</button></div>{!inline && savedPreview && <small className="mm-provider-shared-note">已保存供应商凭据；切换下方模型无需再次输入。</small>}</label>
 
-          <details className="mm-connect-note"><summary>手动模型</summary><label className="mm-field"><span>模型或部署 ID</span><input className="mm-input" aria-label="模型或部署 ID" disabled={busy} value={modelId} placeholder="供应商未开放模型列表时填写" onChange={event => { setModelId(event.target.value); clearDiscovery(); }} /></label></details>
+          {!inline && <details className="mm-connect-note"><summary>手动模型</summary>{modelIdField}</details>}
           {error && <div className="mm-error" role="alert">{error}</div>}
 
-          <div className="mm-model-heading"><div><strong>{ticket ? '选择要添加的模型' : '模型列表'}</strong><small>{displayedModels.length ? `${displayedModels.length} 个模型` : '连接供应商后显示模型'}</small></div>{ticket && <button className="mm-btn primary" disabled={!selected || busy} onClick={() => void connect()}>保存并使用</button>}</div>
-          <div className="mm-provider-model-list" role="listbox" aria-label="模型列表">
-            {displayedModels.map(model => <button role="option" aria-selected={(ticket ? selected : activeId) === model.id} key={model.id} disabled={busy} onClick={() => ticket ? setSelected(model.id) : void activate(model.id)}>
-              <span><strong>{model.label}</strong><small>{model.model}</small></span><span className="mm-model-status">{(ticket ? selected : activeId) === model.id ? '✓' : ''}</span>
-            </button>)}
-            {!displayedModels.length && <div className="mm-empty">暂无模型。填写供应商凭据后获取模型列表。</div>}
-          </div>
+          {(!inline || !!ticket) && <>
+          <div className="mm-model-heading"><div><strong>{ticket ? '选择要添加的模型' : '模型列表'}</strong><small>{displayedModels.length ? `${displayedModels.length} 个模型` : '连接供应商后显示模型'}</small></div>{ticket && <button className="mm-btn primary" disabled={!selected || busy} onClick={() => void connect()}>{inline?.backendName ? '保存连接' : '保存并使用'}</button>}</div>
+          {modelList}
+          </>}
         </div>
-        <footer className="mm-provider-foot"><span>凭据使用系统安全存储加密。</span><button className="mm-btn" disabled={busy} onClick={close}>完成</button></footer>
+        {canSwitch && <footer className="mm-provider-foot model-switch-foot">
+          <button className="mm-btn primary" disabled={busy} onClick={() => void switchAgent()}>切换到 CodeNode</button>
+        </footer>}
+        {!inline && <footer className="mm-provider-foot"><span>凭据使用系统安全存储加密。</span>
+          <button className="mm-btn" disabled={busy} onClick={close}>完成</button>
+        </footer>}
       </section>
     </div>
   </div>;

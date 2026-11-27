@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { LocalRagIndex } = require("../../electron/rag/index.cjs");
-const { parseLimitsConfig, runAgentChat } = require("../../electron/agent.cjs");
+const { runAgentChat } = require("../../electron/agent.cjs");
 async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codenode-boundary-'));
   const originalFetch = global.fetch;
@@ -40,7 +40,7 @@ async function main() {
       },
       onDelta: event => events.push(event),
     });
-    assert.strictEqual(requests, parseLimitsConfig({}).maxToolIterations, 'a direct Agent run respects the configured default iteration limit');
+    assert.strictEqual(requests, 12);
     assert.strictEqual(result.stopReason, 'iteration_limit');
     assert.ok(result.error);
     assert.ok(!events.some(event => event.kind === 'done'));

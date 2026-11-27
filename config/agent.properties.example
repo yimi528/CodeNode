@@ -43,6 +43,11 @@ max_tokens=32768
 # （轮次 / 已用工具调用数 / 已改动文件 / 失败次数与最近错误码 / 用量），并要求下一步先交代
 # 「目标 / 已完成 / 下一步」—— 长任务里能显著减少空转与目标漂移。0 = 关闭。
 # agent.progress_every=3
+# 实验行为默认关闭；尚未达到整组改进的默认推广门槛，显式设 true 可独立试用。
+# agent.no_progress.enabled=false   # 重复参数及结果连续出现时提示切换策略；只观测和提示，不强制终止
+# agent.no_progress.rounds=3       # 连续重复工具轮数阈值（2–20），每次运行最多提示两次
+# agent.working_state.enabled=false # 保留目标、待验证假设、修改、检查及下一步；恢复的检查只作为历史记录
+# agent.cache.workspace_versions=true # 内容快照校验搜索等缓存；目录每次刷新，快照不完整时不复用
 #
 # 只读结果缓存白名单里**没有** ask_user：它是交互输入，同一 run 内同问必须再问一次（不复用旧答案）。
 # 瞬时网络错误重试（408/425/429/5xx 与连接失败），不会重试用户取消/超时
@@ -102,9 +107,23 @@ soul_file=config/soul.md
 # agent.tool_profile=auto
 # 白名单：非空时只允许列出的工具（逗号分隔）；留空=全部允许
 # 实际暴露范围还会按角色、任务 profile 和功能配置筛选；画布节点创建/连线统一使用 workbench_edit。
+# 名单可使用旧工具名或精确的「族名.动作」，如 list_files.glob、memory.search、
+# workbench_edit.create、get_workbench_model.focus。旧名仅覆盖该旧工具原有的动作。
+# tools.deny 优先于 tools.allowed，角色权限与功能开关仍须同时满足。
 # tools.allowed=read_file,write_file,edit_file,find_files,search_files,list_directory,get_workbench_model,workbench_edit,ask_user,execute_shell,fetch_url,code_review,scan_project,analyze_project,project_info,save_project,bulk_edit,ui_control,write_analysis_md,retrieve_context,remember,recall,update_plan,read_skill,view_image,worktree
 # 黑名单：禁用某些工具（逗号分隔）
 # tools.deny=execute_shell,bulk_edit
+
+# ---------- 联网搜索（推荐在“设置 → 联网搜索”中配置，Key 会进入系统安全存储） ----------
+# 兼容无界面/便携部署：这些 properties 仍可作为回退配置，但 api_key 会是明文。
+# web_search.enabled=false
+# web_search.provider=searxng       # searxng|tavily|brave|serper|google|custom
+# web_search.endpoint=http://127.0.0.1:8888/search
+# web_search.api_key=
+# web_search.engine_id=             # 仅 Google Programmable Search 的 cx
+# web_search.max_results=5          # 1~20（Google 单次最多 10）
+# web_search.timeout_ms=15000       # 1000~60000
+# web_search.network_allowed=false  # 仅放行 web_search 到所选端点，不开放 shell/MCP 等其他网络能力
 
 # ---------- Agentic RAG（本地、按需、增量） ----------
 # Agent 通过 retrieve_context 自主检索项目源码/文档；不上传索引。
@@ -223,6 +242,7 @@ soul_file=config/soul.md
 # 压缩配额用尽 / 压缩关闭 / 压缩失败回退时，工具结果仍不能把上下文顶爆：请求前把「旧的、超大的
 # 工具结果正文」换成可追溯占位符（消息条数、角色顺序、tool_calls↔tool_call_id 配对一律不动）。
 # agent.context.trim=true                        # 总开关（默认开；关掉即回到旧行为）
+# agent.context.archive_results=false             # 独立开关：旧的大段成功工具结果保存为本地快照，再用 read_file 分页取回；实验项默认关
 # agent.context.max_input_chars=250000           # 单次请求的整段 messages 字符预算（≈70k tokens）
 # agent.context.keep_recent_messages=12          # 最近 N 条消息永不裁
 # agent.context.min_result_chars=2000            # 小于这个长度的工具结果不裁（省不了多少还丢信息）
@@ -240,6 +260,8 @@ soul_file=config/soul.md
 #   * 压缩后的历史 = [system, ...人的轮次, 摘要]（Codex 的 rollout `replacement_history` 就是这个形状：
 #     实测 16 条 user 消息只保留 9 条 —— 被丢的是机器注入的 <codex_internal_context>/<turn_aborted> 那类）。
 # agent.compact.enabled=true                     # 总开关（默认开）
+# agent.compact.budget_aware=false                # 剩余预算预计不足 3 轮时评估一次压缩；摘要与后续请求共用原预算，false 恢复仅按窗口触发
+# agent.budget.wrap_up=false                     # 无法同时负担下一轮与交付时主动收尾；最多一次无工具请求，失败则本地交接，实验项默认关
 # agent.compact.ratio=0.9                        # 触发线 = 有效窗口 × 该比例
 # agent.compact.context_window=0                 # 有效窗口覆盖（0 = 用模型管理里的 contextWindow）
 # agent.compact.fallback_window=128000           # 模型没配上下文窗口时的兜底（宁小勿大）
@@ -303,7 +325,7 @@ soul_file=config/soul.md
 #   待裁决冲突会以 delta/run 事件 `subagent_merge` 暴露，界面会提示（一致的批次不打扰用户）。
 # 工具支持 query + queries 多查询融合；低可信度结果会要求 Agent 继续检索
 # ---------- 执行隔离（sandbox）：Windows 无等价内核方案，边界落在工具层 ----------
-# sandbox.mode=off|best-effort|strict        # 默认 best-effort（尽量上隔离，上不了如实降级）
+# sandbox.mode=off|best-effort|strict        # 默认 best-effort；外部 Agent 缺少文件隔离时仍会拒绝，off 才显式关闭
 # sandbox.network=deny|inherit               # **出厂 deny**（对齐 Codex 的 workspace-write：默认不给网络）
 #   deny    = 疑似联网的命令直接拒绝（PERMISSION_DENIED），不弹确认、不试连；
 #             Linux bwrap / macOS sandbox-exec 下还会真的断网（--unshare-net / deny network*）；

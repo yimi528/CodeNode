@@ -13,14 +13,28 @@ const external = require('../../electron/backends/runExternal.cjs');
 const runStore = require('../../electron/runStore.cjs');
 const { capture, compare } = require('../../electron/backends/workspaceDiff.cjs');
 const { launchEnvironment } = require('../../electron/backends/network.cjs');
+const sandbox = require('../../electron/sandbox.cjs');
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'codenode-backends-')));
 const userData = path.join(root, '.userdata');
 const fixture = path.join(__dirname, '../fixtures/acp-workflow.cjs');
+const preambleFixture = path.join(__dirname, '../fixtures/acp-preamble.cjs');
+for (const liveScript of ['agent-backend-live-smoke.cjs', 'agent-backend-live-workflow.cjs']) {
+  const source=fs.readFileSync(path.join(__dirname, '../tools', liveScript), 'utf8');
+  assert.match(source, /filter\(arg=>arg\.startsWith\('--backends='\)\)\.at\(-1\)/,
+    `${liveScript} must let the explicit trailing --backends flag override the npm default`);
+}
+assert.match(fs.readFileSync(path.join(__dirname,'../tools/agent-backend-live-smoke.cjs'),'utf8'),/args:\[\.\.\.\(config\.defaultArgs\[name\]\|\|\[\]\)\]/,
+  'live smoke must launch each backend with its declared default ACP arguments');
+const fixtureRpcOptions = [];
 class FixtureRpc extends StdioRpc {
-  constructor(command, args, cwd) { super(process.execPath, [fixture], cwd, { spawn: (_file, _args, options) => spawn(process.execPath, [fixture], options) }); }
+  constructor(command, args, cwd, options = {}) {
+    fixtureRpcOptions.push(options);
+    super(process.execPath, [fixture], cwd, { ...options, spawn: (_file, _args, spawnOptions) => spawn(process.execPath, [fixture], spawnOptions) });
+  }
 }
 const selected = { ...settings.config.defaults, backend: 'codex', executable: process.execPath, sandbox: 'workspace-write' };
-const create = () => new BackendPort('codex',selected,new AcpBackend(selected,{StdioRpc:FixtureRpc}));
+const create = (backend = 'codex', config = selected) =>
+  new BackendPort(backend, config, new AcpBackend(config, { StdioRpc: FixtureRpc }));
 const cfg = { editing: { autoVerify: true, blockOnFailure: true, lintCommand: 'node -e "process.exit(0)"', testCommand: 'node math.test.cjs' } };
 function waitFor(predicate, message, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
@@ -40,15 +54,55 @@ async function main() {
   assert.equal(network.env.HTTPS_PROXY, 'http://127.0.0.1:7890/');
   assert.equal(network.proxySource, 'windows-system');
   assert.match(network.env.NO_PROXY, /localhost/); assert.match(network.env.NO_PROXY, /\.example.local/);
+  const macProxy = require('../../electron/backends/network.cjs').parseMacProxy(`<dictionary> {
+  HTTPEnable : 0
+  HTTPProxy : old.local
+  HTTPPort : 8888
+  HTTPSEnable : 1
+  HTTPSProxy : 127.0.0.1
+  HTTPSPort : 7890
+  ExceptionsList : <array> {
+    0 : localhost,*.example.local
+  }
+  __SCOPED__ : <dictionary> {
+    HTTPSEnable : 0
+    HTTPSProxy : ignored
+  }
+}`);
+  const macNetwork = await launchEnvironment({platform:'darwin', env:{}, readProxy:async()=>macProxy});
+  assert.equal(macNetwork.env.HTTPS_PROXY,'http://127.0.0.1:7890/');
+  assert.equal(macNetwork.env.HTTP_PROXY,undefined);
+  assert.match(macNetwork.env.NO_PROXY,/\.example\.local/);
+  assert.equal(macNetwork.proxySource,'macos-system');
   const inherited = await launchEnvironment({ platform: 'win32', env: { HTTPS_PROXY: 'http://explicit:8080', NO_PROXY: 'private.local' }, readProxy: async () => { throw new Error('must not read system'); } });
   assert.equal(inherited.env.HTTPS_PROXY, 'http://explicit:8080'); assert.equal(inherited.env.NO_PROXY, 'private.local');
   const separate = await launchEnvironment({ platform: 'win32', env: {}, readProxy: async () => ({ enabled: 1, server: 'http=127.0.0.1:8080;https=127.0.0.1:8443' }) });
   assert.equal(separate.env.HTTP_PROXY, 'http://127.0.0.1:8080/'); assert.equal(separate.env.HTTPS_PROXY, 'http://127.0.0.1:8443/');
+  /** @type {any} */
+  let guardedLaunch = null;
+  const rpcPolicy = { mode: 'best-effort', externalAgent: true, capabilities: { backend: 'fixture', isolation: { lifetime: true, filesystem: true } } };
+  const guardedRpc = new StdioRpc(process.execPath, [fixture], root, { policy: rpcPolicy,
+    guardedInteractiveSpawn: (spec, options) => { guardedLaunch = { spec, options }; return spawn(spec.file, spec.args, { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); } });
+  await guardedRpc.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'isolation-test', version: '1' } });
+  await guardedRpc.close();
+  assert(guardedLaunch, 'StdioRpc did not call guardedInteractiveSpawn');
+  assert.equal(guardedLaunch?.options.policy, rpcPolicy, 'StdioRpc must launch external runtimes through guardedInteractiveSpawn');
+  const preambleRpc = new StdioRpc(process.execPath, [preambleFixture], root);
+  const preambleResult = await preambleRpc.request('initialize', { protocolVersion: 1 });
+  assert.equal(preambleResult.protocolVersion, 1, 'bounded startup preamble must not break ACP initialization');
+  assert.equal((await preambleRpc.request('ping', {})).pong, true, 'bounded stdout status after initialization must not desynchronize JSON-RPC');
+  assert.match(preambleRpc.stderrTail.join('\n'), /stdout noise.*Rich status after initialize/);
+  assert.equal(require('../../config/agent.backends.json').maxStdoutNoiseLines, 512);
+  assert.equal(require('../../config/agent.backends.json').maxStdoutNoiseBytes, 262144);
+  await preambleRpc.close();
   console.log('BACKEND TEST STAGE: proxy/settings');
   assert.equal(settings.read(root, userData).settings.backend, 'builtin');
   settings.write(root, userData, 'machine', selected);
   const handlers=new Map();
-  require('../../electron/ipc/agent.cjs').register({ipcMain:{handle:(name,handler)=>handlers.set(name,handler)},userDataDir:()=>userData});
+  const ipcMain={handle:(name,handler)=>handlers.set(name,handler)},agentIpc=require('../../electron/ipc/agent.cjs');
+  agentIpc.register({ipcMain,userDataDir:()=>userData});
+  require('../../electron/ipc/backend.cjs').register({ipcMain,userDataDir:()=>userData,activeRequests:agentIpc.activeRequests,
+    agent:require('../../electron/agent.cjs'),sandbox:require('../../electron/sandbox.cjs')});
   const storedBytes=fs.readFileSync(path.join(userData,'backend.json'),'utf8');
   const preview=await handlers.get('agent:backend-status')({},root,{...settings.config.defaults,backend:'builtin'});
   assert.equal(preview.ok,true);assert.equal(preview.capabilities.backend,'builtin','connection check uses unsaved selected settings instead of saved Codex');
@@ -82,7 +136,9 @@ async function main() {
   fs.writeFileSync(path.join(root, 'math.cjs'), 'module.exports = (a,b) => a - b;\n');
   fs.writeFileSync(path.join(root, 'math.test.cjs'), "require('assert').strictEqual(require('./math.cjs')(2,3),5);\n");
   const events = []; const controller = new AbortController();
-  const common = { projectRoot: root, settings: selected, cfg, history: [], canvasSummary: 'task → end',
+  const fakeCaps = { platform: 'fixture', backend: 'sandbox-exec', isolation: { lifetime: true, processCount: false, memory: false, cpu: false, filesystem: true, network: true }, detail: 'fixture' };
+  const sandboxPolicy = sandbox.resolvePolicy({ mode: 'best-effort', network: 'deny' }, { projectRoot: root, userDataDir: userData, capabilities: fakeCaps });
+  const common = { projectRoot: root, settings: selected, cfg, history: [], canvasSummary: 'task → end', sandboxPolicy,
     sessionId: 'canvas-session', onDelta: event => {
       events.push(event);
       if (event.kind === 'start' || event.kind === 'backend_approval' || (event.kind === 'state' && ['RUNNING','WAITING_USER','CANCELLED'].includes(event.state))) {
@@ -100,6 +156,10 @@ async function main() {
   assert.equal(fs.existsSync(path.join(root, 'denied.txt')), false);
   assert(events.some(e => e.kind === 'backend_approval' && e.phase === 'denied'));
   assert(!events.some(e => e.kind === 'command'), 'Protocol fields must not overwrite host event kind');
+  assert(fixtureRpcOptions.some(options => options.policy?.externalAgent === true && options.policy.network === 'inherit'), 'External runtime policy was not passed to the ACP transport');
+  const isolationEvent = events.find(event => event.kind === 'backend_info' && event.info?.externalAgentIsolation);
+  assert.equal(isolationEvent.info.externalAgentIsolation.filesystemIsolation, true);
+  assert.equal(isolationEvent.info.externalAgentIsolation.osSandboxEnforcedByCodeNode, true);
   console.log('BACKEND TEST STAGE: cancelled run persisted');
   const record = external.sessionFromRun(root, 'first');
   assert.equal(record.session.sessionId,'acp-workflow');assert.equal(record.session.protocol,'acp');
@@ -145,6 +205,51 @@ async function main() {
   const blocked = await external.runExternal({ ...common, requestId: 'blocked', prompt: 'resume-edit', resumeRunId: 'disconnected', resumeForce: true, confirm: async () => true }, { createBackend: create });
   assert.equal(blocked.ok, false); assert.match(blocked.error, /仍在运行/);
   console.log('BACKEND TEST STAGE: disconnect and duplicate guard');
+  const composerPolicy = require('../../electron/composerPolicy.cjs');
+  const override = approvalMode => composerPolicy.turnOptions({ composerOverrides: { approvalMode } });
+  assert.equal(override('request').autoExecuteTools, false);
+  assert.equal(override('assist').autoExecuteTools, true);
+  assert.deepEqual(override('custom'), { approvalMode: 'custom' });
+  assert.equal(composerPolicy.canAssistWrite('assist', 'docs/notes.md'), true);
+  for (const rel of ['../escape.md', '.codenode/rules.md', 'AGENTS.md', 'src/main.js']) {
+    assert.equal(composerPolicy.canAssistWrite('assist', rel), false);
+  }
+  assert.equal(composerPolicy.canAssistWrite('request', 'docs/notes.md'), false);
+  const full = { ...common, sessionId: 'full-test', requestId: 'full-denied', approvalMode: 'full', prompt: 'resume-edit' };
+  const deniedFull = await external.runExternal(full, {createBackend: create, authorizeFullAccess: async () => false});
+  assert.equal(deniedFull.state, 'CANCELLED');
+  assert.equal(runStore.readRun(root, full.requestId).length, 0);
+  let prompts = 0;
+  const authorize = async () => { prompts++; return true; };
+  for (const restricted of [{ goalId: 'goal-test' }, { sandboxPolicy: { ...sandboxPolicy, mode: 'strict' } }]) {
+    const refused = await external.runExternal({ ...full, ...restricted }, {createBackend:create, authorizeFullAccess:authorize});
+    assert.equal(refused.ok, false);
+  }
+  assert.equal(prompts, 0);
+  const granted = await external.runExternal({ ...full, requestId:'full-authorized', confirm:async()=>false },
+    {createBackend:create, authorizeFullAccess:authorize});
+  assert.equal(granted.ok, true);
+  assert.equal(prompts, 1);
+  const isolation = runStore.readRun(root, 'full-authorized').find(event => event.type === 'backend_info' && event.info?.externalAgentIsolation)?.info.externalAgentIsolation;
+  assert.equal(isolation?.approvalMode, 'full');
+  assert.equal(isolation?.osSandboxEnforcedByCodeNode, false);
+  assert.equal(isolation?.filesystemIsolation, false);
+  assert.equal(sandboxPolicy.mode, 'best-effort');
+  const existingMath = fs.readFileSync(path.join(root, 'math.cjs'), 'utf8');
+  const composerSession = { ...common, sessionId: 'composer-session', confirm: async () => false };
+  const initialTurn = await external.runExternal({
+    ...composerSession, requestId: 'composer-first', prompt: 'resume-edit',
+  }, { createBackend: create });
+  assert.equal(initialTurn.ok, true);
+  const readOnlyTurn = await external.runExternal({
+    ...composerSession, requestId: 'composer-readonly', prompt: 'resume-edit',
+    adapterSettingsOverride: { ...selected, sandbox: 'read-only' },
+    confirm: async () => { assert.fail('Read-only selection must deny the permission request without prompting'); },
+  }, { createBackend: create });
+  assert.equal(readOnlyTurn.ok, true, readOnlyTurn.error || readOnlyTurn.stopReason || readOnlyTurn.plan?.reason);
+  assert.equal(external.sessionFromRun(root, 'composer-first').session.adapterSettings.sandbox, 'workspace-write');
+  assert.equal(external.sessionFromRun(root, 'composer-readonly').session.adapterSettings.sandbox, 'read-only');
+  assert.equal(fs.readFileSync(path.join(root, 'math.cjs'), 'utf8'), existingMath);
   const before = capture(root); fs.writeFileSync(path.join(root, 'new.txt'), 'new'); fs.unlinkSync(path.join(root, 'math.cjs'));
   const files = compare(before, capture(root)).files;
   assert(files.some(f => f.path === 'new.txt' && f.kind === 'added'));

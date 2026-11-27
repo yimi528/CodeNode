@@ -15,7 +15,7 @@
  *
  * 做法：① 往 localStorage 种一条「最近打开」= 仓库自带示例工程 workflow.cnode；
  *       ② 重载渲染层，点该条目走**真实**打开工程链路；
- *       ③ 断言画布有真实节点，且节点都在可见视口内；
+ *       ③ 断言画布有真实节点、已离开启动门禁页、节点都在可见视口内；
  *          对话态额外断言：assistant 消息已完成、有工具调用记录、画布节点数增加（即真的改图了）。
  * 副作用：对话态会把 Agent 的改动写回示例工程，所以脚本在启动时快照 workflow.cnode、
  *       退出前还原 —— 出图不应在仓库里留下 diff。截图前会重试「显示全部节点」直到所有节点
@@ -59,7 +59,7 @@ app.whenReady().then(async () => {
     }
     await sleep(1500);
     const js = (code) => win.webContents.executeJavaScript(code);
-    /** 轮询渲染状态，等待应用启动及最近工程恢复。 */
+    /** 轮询某个渲染层表达式直到为真（应用可能正在「恢复上次工程」，不能假定门禁页一定在） */
     const pollJs = async (expr, timeoutMs, label) => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
@@ -75,17 +75,30 @@ app.whenReady().then(async () => {
 
     if (!fs.existsSync(DEMO)) throw new Error('缺少示例工程：' + DEMO);
 
-    // ① 种「最近打开」（真实链路入口），然后重载让侧栏读到它
+    // ① 种「最近打开」（真实链路入口），然后重载让工作台读到它
     await pollJs('!!window.__codenodeProject', 30000, '渲染层 bootstrap');
     const seed = JSON.stringify([
       { root: ROOT, file: DEMO, name: path.basename(DEMO), openedAt: Date.now() },
     ]);
-    await js(`(()=>{ localStorage.setItem('codenode.recentProjects', ${JSON.stringify(seed)}); localStorage.setItem('codenode.lastWorkspace', ${JSON.stringify(JSON.stringify({project:{root:ROOT,file:DEMO}, tab:'agent'}))}); return true; })()`);
+    await js(`(()=>{ localStorage.setItem('codenode.recentProjects', ${JSON.stringify(seed)}); return true; })()`);
     await win.webContents.reload();
     await pollJs('!!window.__codenodeChat', 30000, '重载后渲染层 bootstrap');
 
-    // ② 启动时直接恢复示例工程和画布视图。
-    await pollJs(`window.__codenodeProject?.getState().projectFile === ${JSON.stringify(DEMO)} && !document.querySelector('.startup-splash')`, 15000, '恢复示例工程');
+    // 从工作台侧栏打开示例工程。
+    const atHome = await js(`!!document.querySelector('.workspace-home')`);
+    if (atHome) {
+      await pollJs(`!!document.querySelector('.project-group-name')`, 15000, '最近列表渲染');
+      const clicked = await js(`(()=>{
+        const items = [...document.querySelectorAll('.project-group-name')];
+        const hit = items.find((i) => i.closest('[data-project-path]').dataset.projectPath.endsWith('.cnode'));
+        if (!hit) return 'no-item';
+        hit.click();
+        return 'clicked';
+      })()`);
+      console.log('recent project click → ' + clicked);
+    } else {
+      console.log('示例工程已打开');
+    }
     await pollJs(`!!document.querySelector('.canvas-wrap')`, 60000, '进入工作台');
     await sleep(3000);
 
@@ -108,6 +121,7 @@ app.whenReady().then(async () => {
         const msgs = (sess && sess.messages) || [];
         const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
         return {
+          gate: !!document.querySelector('.workspace-home'),
           workspace: !!document.querySelector('.canvas-wrap'),
           nodes: nodes.length,
           inView,
@@ -126,6 +140,7 @@ app.whenReady().then(async () => {
 
     const before = await readState();
     console.log('BEFORE ' + JSON.stringify(before));
+    if (before.gate) failures.push('示例工程尚未打开');
     if (!(before.nodes > 0)) failures.push('画布没有节点');
 
     if (PROMPT) {

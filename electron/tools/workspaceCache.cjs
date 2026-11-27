@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { shouldSkipDir, isSensitivePath } = require('./fsCore.cjs');
-const VERSIONED = new Set(['search_files', 'list_files', 'scan_project', 'project_overview']);
+const VERSIONED = new Set(['search_files', 'find_files', 'scan_project', 'analyze_project', 'project_info', 'code_review']);
 
 // A bounded content snapshot is a cache validity check, never a cached source of tool results.
 async function fingerprint(root, signal) {

@@ -6,6 +6,7 @@ import GoalControlPanel from './side/GoalControlPanel';
 import GoalDraftPanel from './GoalDraftPanel';
 import GoalPanelResize from './GoalPanelResize';
 import { goalAttention } from '../lib/goalAttention';
+import './goalOverview.css';
 
 const stateName: Record<string, string> = { active:'进行中', completed:'已完成', paused:'已暂停', stopped:'已停止', archived:'已归档' };
 const DRAFT_WIDTH = 418;
@@ -131,7 +132,7 @@ export default function GoalOverview() {
         {visible.map(goal => {
           const width = widths[goal.id] || CARD_WIDTH;
           const done = goal.tasks.filter(task => task.status === 'completed').length;
-          const status = goal.status === 'completed' && !goal.complete ? '需重新核验' : stateName[goal.status] || goal.status;
+          const status = goal.status === 'completed' && goal.complete === false ? '需重新核验' : stateName[goal.status] || goal.status;
           return <div className="overview-goal-item" key={goal.id} style={{ flexBasis: width }}>
             <button className="overview-goal-card" data-goal-id={goal.id} aria-expanded={editor && selectedGoalId === goal.id} onClick={() => openEditor(goal.id)}>
               <span className="overview-card-meta">
@@ -181,18 +182,18 @@ export default function GoalOverview() {
 }
 
 export function WorkbenchViewSwitcher(){
- const {preferences,updatePreferences,sideTab,setSideTab,showCanvas}=useUiStore();
- const workbench = sideTab !== 'preview' && sideTab !== 'project';
- const overview = workbench && preferences.workbenchView === 'overview';
+ const workbenchView = useUiStore(s => s.preferences.workbenchView);
+ const editing = useUiStore(s => s.sideTab === 'project');
+ const replay = useUiStore(s => s.stageReplayOpen) && !editing;
+ const selectView = (view: 'overview' | 'conversation') => {
+   const ui = useUiStore.getState();
+   if (editing) ui.setSideTab('agent');
+   ui.closeStageReplay();
+   ui.updatePreferences({ workbenchView: view });
+ };
  return <nav className="workbench-view-switch" aria-label="工作台视图">
-   <button aria-current={overview ? 'page' : undefined} aria-label="切换到总览" onClick={() => {
-     if (!workbench) setSideTab('agent');
-     updatePreferences({ workbenchView: 'overview' });
-   }}>总览</button>
-   <button aria-current={workbench && !overview && sideTab !== 'conversation' ? 'page' : undefined} aria-label="切换到画布" onClick={showCanvas}>画布</button>
-   <button aria-current={!overview && sideTab === 'conversation' ? 'page' : undefined} aria-label="切换到对话" onClick={() => {
-     setSideTab('conversation');
-     updatePreferences({ workbenchView: 'conversation' });
-   }}>对话</button>
+   <button type="button" aria-current={!editing && !replay && workbenchView === 'overview' ? 'page' : undefined} aria-label="切换到总览" onClick={() => selectView('overview')}>总览</button>
+   <button type="button" aria-current={!editing && !replay && workbenchView === 'conversation' ? 'page' : undefined} aria-label="切换到画布" onClick={() => selectView('conversation')}>画布</button>
+   <button type="button" aria-current={replay ? 'page' : undefined} onClick={() => useUiStore.getState().openStageReplay()}>3D 回放</button>
  </nav>;
 }

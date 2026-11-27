@@ -6,7 +6,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'codenode-goal-graph-ui-'));
 const uiFile=process.env.CODENODE_PACKAGED_ASAR?path.join(path.resolve(process.env.CODENODE_PACKAGED_ASAR),'dist/index.html'):path.join(__dirname,'../../dist/index.html');
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 app.whenReady().then(async()=>{
-  const win=new BrowserWindow({width:1260,height:850,show:false,webPreferences:{sandbox:true,backgroundThrottling:false,offscreen:!!process.env.CODENODE_GOAL_PRIORITY_PREVIEW_DIR}});
+  const win=new BrowserWindow({width:1260,height:850,show:false,webPreferences:{sandbox:true,backgroundThrottling:false,offscreen:!!(process.env.CODENODE_GOAL_PRIORITY_PREVIEW_DIR||process.env.CODENODE_OVERVIEW_PREVIEW_FILE)}});
   try{
     await win.loadFile(uiFile);
     await wait(400);
@@ -20,14 +20,14 @@ app.whenReady().then(async()=>{
       let agentChatCalls=0,executionStartCalls=0,planCalls=0,simulateExternalGoalEdit=false;
       window.codenode=new Proxy({
         goalList:async()=>({ok:true,value:structuredClone(data)}),
-        goalTaskCreate:async(_root,goalId,input)=>{const goal=data.goals.find(g=>g.id===goalId),task={...input,id:'manual-'+data.revision,status:'todo',updatedAt:new Date().toISOString(),dependsOn:input.dependsOn||[],writeScope:input.writeScope||[],runIds:[]};goal.tasks.push(task);data.revision++;return{ok:true,value:task};},
+        goalTaskCreate:async(_root,goalId,input)=>{const goal=data.goals.find(g=>g.id===goalId),task={...input,id:'manual-'+data.revision,status:'todo',updatedAt:new Date().toISOString(),dependsOn:input.dependsOn||[],readScope:input.readScope||[],writeScope:input.writeScope||[],decisionIds:[],runIds:[]};goal.tasks.push(task);data.revision++;return{ok:true,value:task};},
         // This fixture tests the view delegation; real main-process execution is covered by goal-scheduler-ui-test.cjs.
         goalExecutionStart:async(_root,goalId,expectedRevision)=>{if(expectedRevision!==data.revision)return{ok:false,error:'stale execution'};executionStartCalls++;const goal=data.goals.find(g=>g.id===goalId);goal.execution={id:'view-execution-'+executionStartCalls,status:'completed',reason:'全部必需验收条件已满足'};if(simulateExternalGoalEdit){goal.tasks[0].status='completed';goal.tasks[1].objective='另一会话修改了后续任务';goal.execution.status='blocked';goal.execution.reason='Goal 的任务或验收范围已由另一会话修改，请检查后重新开始';}else{goal.tasks.forEach(t=>t.status='completed');goal.status='completed';}data.revision++;return{ok:true,value:goal.execution};},
         goalExecutionStop:async(_root,goalId)=>{const goal=data.goals.find(g=>g.id===goalId);goal.execution.status='stopped';data.revision++;return{ok:true,value:goal.execution};},
         goalCreate:async(_root,input)=>{const created={...structuredClone(data.goals[0]),id:'g2',execution:undefined,title:input.title,objective:input.objective,status:'active',criteria:input.criteria.map((text,index)=>({id:'new-c'+index,text,required:true})),tasks:[],evidence:[],decisions:[],updatedAt:new Date().toISOString()};data.goals.unshift(created);data.revision++;return{ok:true,value:created};},
         goalTaskUpdate:async(_root,_goalId,taskId,patch)=>{if(patch.expectedRevision!==data.revision)return{ok:false,error:'revision mismatch'};const task=data.goals[0].tasks.find(t=>t.id===taskId);Object.assign(task,patch,{updatedAt:new Date().toISOString()});data.revision++;return{ok:true,value:task};},
         goalTaskBatchCreate:async(_root,_goalId,steps,expectedRevision)=>{if(expectedRevision!==data.revision)return{ok:false,error:'stale goal'};const ids=new Map(steps.map(step=>[step.key,'generated-'+step.key]));const added=steps.map(step=>({id:ids.get(step.key),title:step.title,objective:step.objective,owner:step.owner||'main',priority:step.priority||'normal',status:'todo',updatedAt:new Date().toISOString(),dependsOn:step.dependsOn.map(id=>ids.get(id)),readScope:[],writeScope:step.writeScope,criteriaIds:['c1'],decisionIds:[],runIds:[]}));data.goals[0].tasks.push(...added);data.revision++;return{ok:true,value:added};},
-        goalCanRun:async(_root,goalId)=>{const goal=data.goals.find(item=>item.id===goalId),next=goal.tasks.find(task=>task.status==='todo'&&task.dependsOn.every(id=>goal.tasks.find(dep=>dep.id===id)?.status==='completed'));return{ok:true,value:next?{decision:'run',task:structuredClone(next)}:{decision:'complete',reason:'all tasks complete'}};},
+        goalCanRun:async(_root,goalId,taskId)=>{const goal=data.goals.find(item=>item.id===goalId),next=goal.tasks.find(task=>(!taskId||task.id===taskId)&&task.status==='todo'&&task.dependsOn.every(id=>goal.tasks.find(dep=>dep.id===id)?.status==='completed'));return{ok:true,value:next?{decision:'run',task:structuredClone(next)}:{decision:'complete',reason:'all tasks complete'}};},
         goalAudit:async(_root,goalId)=>({ok:true,value:{qualified:data.goals.find(item=>item.id===goalId).tasks.every(task=>task.status==='completed')}}),
         goalUpdate:async(_root,goalId,patch)=>{const goal=data.goals.find(item=>item.id===goalId);Object.assign(goal,patch);data.revision++;return{ok:true,value:structuredClone(goal)};},
         goalPlanPropose:async()=>{planCalls++;return{ok:true,value:{steps:[{key:'s1',title:'检查现状',objective:'读取现有实现',acceptance:'找到入口',owner:'investigator',priority:'high',dependsOn:[],writeScope:[]},{key:'s2',title:'完成修改',objective:'实施修复',acceptance:'检查通过',owner:'main',dependsOn:['s1'],writeScope:['src']}]}};},
@@ -36,13 +36,25 @@ app.whenReady().then(async()=>{
       project.setState({root:${JSON.stringify(root)}});
       ui.getState().updatePreferences({workbenchView:'overview'});
       await until(()=>document.querySelector('[data-goal-id="g1"]'));
+      const card=document.querySelector('[data-goal-id="g1"]');
+      const resize=card.parentElement.querySelector('.overview-goal-resize');
+      const initialWidth=card.getBoundingClientRect().width;
+      resize.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+      await until(()=>card.getBoundingClientRect().width>initialWidth);
       document.querySelector('[data-goal-id="g1"]').click();
       await until(()=>document.querySelectorAll('.goal-task-graph-canvas .react-flow__node').length===2);
       await until(()=>document.querySelectorAll('.goal-task-graph-canvas .react-flow__edge').length===1);
       const out={nodes:document.querySelectorAll('.goal-task-graph-canvas .react-flow__node').length,edges:document.querySelectorAll('.goal-task-graph-canvas .react-flow__edge').length};
+      out.projectBrief=!!document.querySelector('.overview-brief h1');
       document.querySelector('.goal-task-graph-canvas .react-flow__node[data-id="t1"]').click();
       await until(()=>document.querySelector('.goal-graph-editor'));
       out.selectedTask=document.querySelector('.goal-graph-editor strong')?.textContent;
+      out.blockerOnNode=document.querySelector('.react-flow__node[data-id="t2"]').innerText.includes('等待上游：定位问题');
+      document.querySelector('.react-flow__node[data-id="t2"]').click();
+      await until(()=>document.querySelector('.goal-outcome-upstream'));
+      out.upstreamVisible=document.querySelector('.goal-outcome-upstream').innerText.includes('定位问题');
+      document.querySelector('.goal-outcome-upstream button').click();
+      await until(()=>document.querySelector('.goal-graph-editor strong')?.textContent.includes('定位问题'));
       const oldTheme=ui.getState().theme;ui.getState().toggleTheme();
       await sleep(80);out.themeChanged=ui.getState().theme!==oldTheme;out.nodesAfterTheme=document.querySelectorAll('.goal-task-graph-canvas .react-flow__node').length;out.selectedAfterTheme=!!document.querySelector('.goal-graph-editor');
       [...document.querySelectorAll('.goal-task-graph-toolbar button')].find(button=>button.textContent.includes('规划任务')).click();
@@ -68,20 +80,24 @@ app.whenReady().then(async()=>{
       out.stageSummaryVisible=true;
       [...document.querySelectorAll('.goal-task-graph-toolbar button')].find(button=>button.textContent.includes('开始执行 Goal')).click();
       await until(()=>data.goals.find(item=>item.id==='g1').status==='completed');
+      await until(()=>document.querySelector('.goal-graph-outcome')?.innerText.includes('确认了登录入口'));
+      out.completedSelectionRetained=true;
       out.goalStartCalls=executionStartCalls;out.goalRunCalls=agentChatCalls;out.goalRunOrder=data.goals.find(item=>item.id==='g1').tasks.map(item=>item.status);
       document.querySelector('[aria-label="关闭目标编辑"]').click();
       ui.getState().updatePreferences({workbenchView:'conversation'});
       session.getState().startOnCurrent('test plan');
       session.getState().streamDelta({kind:'plan',runId:'ui-plan',items:[{id:'a',step:'读取现状',acceptanceCriteria:'已读取',status:'pending'},{id:'b',step:'修改文件',acceptanceCriteria:'测试通过',status:'pending',dependsOn:['a']}]});
-      await until(()=>document.querySelector('.ap-plan-canvas-action'));
-      document.querySelector('.ap-plan-canvas-action').click();
-      await until(()=>graph.getState().nodes.length===2);
-      out.planNodes=graph.getState().nodes.length;out.planEdges=graph.getState().edges.length;out.planPending=graph.getState().nodes.every(n=>n.data.status==='pending');
+      await until(()=>document.querySelectorAll('.workspace-canvas .wf-agent-plan').length===2);
+      await until(()=>document.querySelectorAll('.workspace-canvas .react-flow__edge').length===1);
+      out.planNodes=document.querySelectorAll('.workspace-canvas .wf-agent-plan').length;
+      out.planEdges=document.querySelectorAll('.workspace-canvas .react-flow__edge').length;
+      out.planPending=document.querySelectorAll('.workspace-canvas .wf-plan-status[data-status="pending"]').length===2;
       await chat.getState().send('/plan 修复登录');
       out.slashPlanNodes=graph.getState().nodes.length;out.planCalls=planCalls;out.agentChatCalls=agentChatCalls;
       await chat.getState().send('/goal 改善登录稳定性');
-      await until(()=>document.querySelector('.goal-create-form input[aria-label="Goal 标题"]')?.value==='改善登录稳定性');
-      out.goalDraft=document.querySelector('.goal-create-form input[aria-label="Goal 标题"]')?.value;
+      const draftTitle='.overview-create-panel input[aria-label="Goal 标题"]';
+      await until(()=>document.querySelector(draftTitle)?.value==='改善登录稳定性');
+      out.goalDraft=document.querySelector(draftTitle)?.value;
       const criterion=document.querySelector('.goal-create-form textarea[aria-label="验收条件"]');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(criterion,'登录测试通过');
       criterion.dispatchEvent(new Event('input',{bubbles:true}));
@@ -114,19 +130,40 @@ app.whenReady().then(async()=>{
       await sleep(80);[...document.querySelectorAll('.goal-task-add button')].find(b=>b.textContent==='新增 Task').click();
       await until(()=>data.goals[0].tasks.some(t=>t.title==='表单紧急任务'));
       out.panelPriority=data.goals[0].tasks.find(t=>t.title==='表单紧急任务').priority;
+      const manualTask=data.goals[0].tasks.find(t=>t.title==='手动低优先级任务');
+      manualTask.executionStatus='unknown';manualTask.pendingReviewRunId='unknown-test-run';manualTask.status='blocked';data.revision++;
+      document.querySelector('.goal-toolbar button').click();await sleep(100);
+      document.querySelector('.react-flow__node[data-id="'+manualTask.id+'"]').click();
+      await until(()=>document.querySelector('.goal-graph-outcome')?.innerText.includes('结果未知'));
+      out.unknownExecuteDisabled=[...document.querySelectorAll('.goal-outcome-actions button')].find(b=>b.textContent==='执行当前阶段').disabled;
+      out.unknownRequeueDisabled=[...document.querySelectorAll('.goal-outcome-actions button')].find(b=>b.textContent==='重新排队此阶段').disabled;
+      delete manualTask.executionStatus;manualTask.status='failed';data.revision++;
+      document.querySelector('.goal-toolbar button').click();await sleep(100);
+      [...document.querySelectorAll('.goal-outcome-actions button')].find(b=>b.textContent==='重新排队此阶段').click();
+      await until(()=>manualTask.status==='todo');await sleep(100);
+      const callsBefore=agentChatCalls;
+      [...document.querySelectorAll('.goal-outcome-actions button')].find(b=>b.textContent==='执行当前阶段').click();
+      await until(()=>agentChatCalls===callsBefore+1&&manualTask.status==='completed');
+      out.singleStageRun=true;
       return out;
     })()`);
-    assert.equal(result.nodes,2);assert.equal(result.edges,1);assert.match(result.selectedTask,/定位问题/);
+    assert.equal(result.unknownExecuteDisabled,true);assert.equal(result.unknownRequeueDisabled,true);assert.equal(result.singleStageRun,true);
+    assert.equal(result.blockerOnNode,true);assert.equal(result.upstreamVisible,true);assert.equal(result.completedSelectionRetained,true);
+    assert.equal(result.nodes,2);assert.equal(result.edges,1);assert.match(result.selectedTask,/定位问题/);assert.equal(result.projectBrief,true);
     assert.equal(result.themeChanged,true);assert.equal(result.nodesAfterTheme,2);assert.equal(result.selectedAfterTheme,true);
     assert.equal(result.previewBeforeSave,2);assert.equal(result.generatedGoalNodes,4);assert.equal(result.editedGoalNode,'确认登录入口');assert.equal(result.stageSummaryVisible,true);assert.equal(result.initialCriterionBinding,true);assert.equal(result.editedCriterionBinding,0);
     assert.equal(result.priorityPreview,true);assert.deepEqual(result.generatedPriorities,['high','normal']);
     assert.equal(result.ownerPreview,true,'the user reviews the suggested owner before confirming a Goal plan');assert.deepEqual(result.generatedOwners,['investigator','main'],'owner suggestions survive plan confirmation');
     assert.equal(result.goalStartCalls,1);assert.equal(result.goalRunCalls,0);assert.deepEqual(result.goalRunOrder,['completed','completed','completed','completed']);
     assert.equal(result.planNodes,2);assert.equal(result.planEdges,1);assert.equal(result.planPending,true);
-    assert.equal(result.slashPlanNodes,4);assert.equal(result.planCalls,2);assert.equal(result.agentChatCalls,0);
+    assert.equal(result.slashPlanNodes,2);assert.equal(result.planCalls,2);assert.equal(result.agentChatCalls,0);
     assert.equal(result.goalDraft,'改善登录稳定性');assert.equal(result.autoGoalPreview,2);assert.equal(result.autoGoalTasksBeforeConfirm,0);assert.equal(result.planCallsAfterGoal,3);
     assert.deepEqual(result.stoppedAfterExternalEdit,['completed','todo']);assert.equal(result.externalEditStartCalls,1);
     assert.equal(result.manualPriority,'low');assert.equal(result.panelPriority,'urgent','both Task creation surfaces persist the selected priority');
+    if(process.env.CODENODE_GOAL_OUTCOME_PREVIEW_DIR){
+      const dir=path.resolve(process.env.CODENODE_GOAL_OUTCOME_PREVIEW_DIR);fs.mkdirSync(dir,{recursive:true});
+      for(const theme of ['light','dark']){await win.webContents.executeJavaScript(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}});document.querySelector('.goal-graph-outcome').scrollIntoView({block:'center'})`);await wait(200);fs.writeFileSync(path.join(dir,theme+'.png'),(await win.webContents.capturePage()).toPNG());}
+    }
     if(process.env.CODENODE_GOAL_PRIORITY_PREVIEW_DIR){
       const previewDir=path.resolve(process.env.CODENODE_GOAL_PRIORITY_PREVIEW_DIR);fs.mkdirSync(previewDir,{recursive:true});
       for(const theme of ['light','dark']){
@@ -134,7 +171,12 @@ app.whenReady().then(async()=>{
         await wait(300);fs.writeFileSync(path.join(previewDir,theme+'.png'),(await win.webContents.capturePage()).toPNG());
       }
     }
-    console.log('GOAL TASK GRAPH UI: PASS (Goal graph, selection, theme state, plan import, /plan, /goal)');
+    if(process.env.CODENODE_OVERVIEW_PREVIEW_FILE){
+      await win.webContents.executeJavaScript(`document.querySelector('.overview-goal-editor:not([hidden]) [aria-label="关闭目标编辑"]')?.click();document.querySelector('.goal-overview')?.scrollIntoView({block:'start'});`);
+      await wait(300);
+      fs.writeFileSync(process.env.CODENODE_OVERVIEW_PREVIEW_FILE,(await win.webContents.capturePage()).toPNG());
+    }
+    console.log('GOAL TASK GRAPH UI: PASS (Goal graph, selection, theme state, canvas plan, /plan, /goal)');
     app.exit(0);
   }catch(error){console.error(error);try{console.error(await win.webContents.executeJavaScript(`({body:document.body.innerText.slice(0,1200),overview:!!document.querySelector('.goal-overview'),editor:!!document.querySelector('.overview-goal-editor'),goalRow:!!document.querySelector('[data-goal-id="g1"]'),graphNodes:document.querySelectorAll('.goal-task-graph-canvas .react-flow__node').length,planAction:!!document.querySelector('.ap-plan-canvas-action'),goalDraft:!!document.querySelector('.goal-create-form')})`));}catch{}app.exit(1);}
   finally{const resolved=path.resolve(root);assert.equal(path.dirname(resolved),path.resolve(os.tmpdir()));assert.ok(path.basename(resolved).startsWith('codenode-goal-graph-ui-'));fs.rmSync(root,{recursive:true,force:true});}

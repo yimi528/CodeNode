@@ -12,7 +12,7 @@ const toolkit = require("../../electron/tools/toolkit.cjs");
   const command = 'node -e "process.stdout.write(\'x\'.repeat(25000))"';
   // 冷启动的 CI Windows 上，PowerShell 首次启动 + 2 万字符经隔离层回传会超过默认 30s 超时，
   // 超时后输出被截断导致 hasMore 断言失败——这里显式给足超时，断言强度不变。
-  const first = await registry.execute('execute_shell', { command, maxOutputChars: 1000, timeoutSeconds: 120 }, context);
+  const first = await registry.execute('terminal', { kind: 'run', command, maxOutputChars: 1000, timeoutSeconds: 120 }, context);
   assert.strictEqual(first.ok, true);
   assert.strictEqual(
     first.data.hasMore,
@@ -30,6 +30,9 @@ const toolkit = require("../../electron/tools/toolkit.cjs");
   assert.strictEqual(second.ok, true);
   assert.strictEqual(second.data.offset, first.data.nextOffset);
   assert.strictEqual(second.data.totalChars, first.data.totalOutputChars);
+  const third = await registry.execute('terminal', { kind: 'poll', jobId: first.data.jobId, offset: second.data.nextOffset, maxChars: 1000 }, context);
+  assert.strictEqual(third.ok, true);
+  assert.strictEqual(third.data.offset, second.data.nextOffset);
   console.log('shell output pagination ok');
 })().catch((error) => {
   console.error(error);

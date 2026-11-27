@@ -35,7 +35,7 @@ app.whenReady().then(async()=>{
   const graphBefore=await js('JSON.stringify(window.__codenodeStore.getState().nodes)');
   const oldSession=await js('window.__codenodeSession.getState().activeId');
   const model=await js('window.__codenodeUi.getState().sideTab');
-  const modelChoice=await js("document.querySelector('.pp-model')?.textContent");
+  const modelChoice=await js("document.querySelector('.model-connection-trigger')?.title");
   const sideOpen=await js('window.__codenodeUi.getState().sideOpen');
   await js("document.querySelector('[aria-label=\"选择 Agent\"]').click()");
   assert.equal(settings.read(project,process.env.CODENODE_USER_DATA_DIR).settings.backend,'builtin','opening alone cannot change settings');
@@ -59,7 +59,7 @@ app.whenReady().then(async()=>{
     win.webContents.sendInputEvent({type:'mouseWheel',x:geometry.x,y:geometry.y,deltaY:650,deltaX:0,canScroll:true});
     await wait(async()=>await js("document.querySelector('.agent-switch-list').scrollTop")<scrolled,'wheel scroll back up within Agent dropdown');
     await sleep(350);await js("document.querySelector('.agent-switch-list').scrollTop=0");await sleep(150);
-    assert.equal(await js("document.querySelector('.pp-model')?.textContent"),modelChoice);
+    assert.equal(await js("document.querySelector('.model-connection-trigger')?.title"),modelChoice);
     assert.equal(await js('window.__codenodeUi.getState().sideOpen'),sideOpen);
     assert.equal(await js('JSON.stringify(window.__codenodeSession.getState().messages)'),beforeMessages);
     const region=await js("(()=>{const r=document.querySelector('#conversation-panel').getBoundingClientRect();return{x:Math.floor(r.x),y:Math.floor(r.y),width:Math.ceil(r.width),height:Math.min(Math.ceil(r.height),Math.ceil(document.querySelector('.agent-switch-menu').getBoundingClientRect().bottom-r.y+24))};})()");

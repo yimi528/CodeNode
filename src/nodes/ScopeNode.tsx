@@ -1,3 +1,4 @@
+import { NodeIcon } from './NodeIcon';
 import { memo, type CSSProperties } from 'react';
 import { NodeResizer, type NodeProps } from '@xyflow/react';
 import { useGraphStore } from '../store/graphStore';
@@ -64,9 +65,9 @@ function ScopeNode({ id, data, selected }: NodeProps) {
         >
           {collapsed ? '▸' : '▾'}
         </button>
-        <span>{d.label}</span>
+        <NodeIcon type="scope" /><span>{d.label}</span>
       </div>
-      <div className="wf-scope-sub">范围 · 成员 {children.length}{collapsed ? ' · 已折叠' : ''}</div>
+      <div className="wf-scope-sub">分组 · 成员 {children.length}{collapsed ? ' · 已折叠' : ''}</div>
     </div>
   );
 }

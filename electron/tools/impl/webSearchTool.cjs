@@ -116,29 +116,33 @@ async function performSearch(config, query, limit, options = {}) {
   return { provider: spec.provider, results };
 }
 
-/**
- * web_search —— **已并入 `web`（kind=search）**，见 docs/tool-consolidation.zh-CN.md L2。
- *
- * 本模块保留执行体 `execute`（供 webTool 的族分发复用）与全部内部工具函数
- * （parseWebSearchConfig / performSearch 等在用例里被直接引用，不能删）。
- */
-async function execute(context, args) {
-  const query = String(args?.query || '').trim();
-  if (!query) return AgentToolResult.error('kind=search 需要 query');
-  const config = typeof context.webSearchConfig === 'function' ? context.webSearchConfig() : null;
-  if (!config?.enabled || !config.endpoint) return AgentToolResult.error('web_search 未启用或未配置后端（在“设置 → 联网搜索”中开启）', { code: 'ARG_SCHEMA', tool: 'web' });
-  const policy = typeof context.sandbox === 'function' ? context.sandbox() : null;
-  const networkDenied = context.exec?.networkDenied === true || (!context.exec && policy?.network === 'deny' && config.networkAllowed !== true);
-  if (networkDenied) return AgentToolResult.error('联网搜索需要出网，但当前 sandbox.network=deny 且尚未获得 web_search 独立联网授权（请在“设置 → 联网搜索”中开启）', { code: 'NETWORK_DENIED', tool: 'web' });
-  const limit = Math.min(20, Math.max(1, Number(args?.maxResults || config.maxResults)));
-  try {
-    const searched = await performSearch(config, query, limit, { signal: context.signal && context.signal() });
-    if (!searched.results.length) return AgentToolResult.ok('搜索「' + query + '」没有返回结果（后端：' + searched.provider + '）。', { query, backend: searched.provider, count: 0, results: [] });
-    const lines = searched.results.map((item, index) => index + 1 + '. ' + item.title + (item.url ? '\n   ' + item.url : '') + (item.snippet ? '\n   ' + item.snippet.replace(/\s+/g, ' ').slice(0, 300) : ''));
-    return AgentToolResult.ok('搜索「' + query + '」（后端：' + searched.provider + '，' + searched.results.length + ' 条）\n' + lines.join('\n'), { query, backend: searched.provider, count: searched.results.length, results: searched.results });
-  } catch (error) {
-    return AgentToolResult.error('搜索失败：' + String(error?.message || error), { code: 'FATAL_FAILURE', tool: 'web', backend: config.provider || config.backend });
-  }
+function register(registry) {
+  registry.register('web_search', '联网搜索：返回标题、链接和摘要，用于查文档、错误与版本信息。', {
+    type: 'object',
+    properties: {
+      query: { type: 'string', minLength: 1, maxLength: 600, description: '搜索词' },
+      maxResults: { type: 'integer', minimum: 1, maximum: 20, description: '最多返回几条' },
+    },
+    required: ['query'],
+  }, async (context, args) => {
+    const query = String(args?.query || '').trim();
+    if (!query) return AgentToolResult.error('缺少 query');
+    const config = typeof context.webSearchConfig === 'function' ? context.webSearchConfig() : null;
+    if (!config?.enabled || !config.endpoint) return AgentToolResult.error('web_search 未启用或未配置后端', { code: 'ARG_SCHEMA', tool: 'web_search' });
+    const policy = typeof context.sandbox === 'function' ? context.sandbox() : null;
+    const networkDenied = context.exec?.networkDenied === true || (!context.exec && policy?.network === 'deny' && config.networkAllowed !== true);
+    if (networkDenied) return AgentToolResult.error('联网搜索需要出网，但当前 sandbox.network=deny 且尚未获得 web_search 独立联网授权（请在“设置 → 联网搜索”中开启）', { code: 'NETWORK_DENIED', tool: 'web_search' });
+    const limit = Math.min(20, Math.max(1, Number(args?.maxResults || config.maxResults)));
+    try {
+      const searched = await performSearch(config, query, limit, { signal: context.signal && context.signal() });
+      if (!searched.results.length) return AgentToolResult.ok('搜索「' + query + '」没有返回结果（后端：' + searched.provider + '）。', { query, backend: searched.provider, count: 0, results: [] });
+      const lines = searched.results.map((item, index) => index + 1 + '. ' + item.title + (item.url ? '\n   ' + item.url : '') + (item.snippet ? '\n   ' + item.snippet.replace(/\s+/g, ' ').slice(0, 300) : ''));
+      return AgentToolResult.ok('搜索「' + query + '」（后端：' + searched.provider + '，' + searched.results.length + ' 条）\n' + lines.join('\n'), { query, backend: searched.provider, count: searched.results.length, results: searched.results });
+    } catch (error) {
+      return AgentToolResult.error('搜索失败：' + String(error?.message || error), { code: 'FATAL_FAILURE', tool: 'web_search', backend: config.provider || config.backend });
+    }
+  });
+  require('../builtInOutputSchemas.cjs').declareOutputContracts(registry, ['web_search']);
 }
 
-module.exports = { execute, parseWebSearchConfig, normalizeResults, buildQueryUrl, buildRequest, performSearch, PROVIDERS, DEFAULT_ENDPOINTS, DEFAULTS };
+module.exports = { register, parseWebSearchConfig, normalizeResults, buildQueryUrl, buildRequest, performSearch, PROVIDERS, DEFAULT_ENDPOINTS, DEFAULTS };

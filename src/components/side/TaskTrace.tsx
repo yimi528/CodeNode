@@ -31,8 +31,7 @@ export default function TaskTrace({ tools, status }: { tools: ToolRecord[]; stat
   const retrievals = tools.filter((tool) => tool.name === 'retrieve_context');
   const writes = tools.filter((tool) => ['write_file', 'edit_file', 'workbench_edit'].includes(tool.name));
   const checks = tools.filter((tool) => ['execute_shell', 'run_tests'].includes(tool.name));
-  // 工具面收敛：dify_call 已并入 web(kind=dify)；旧名保留以兼容历史 run 的回放
-  const integrations = tools.filter((tool) => tool.name === 'dify_call' || (tool.name === 'web' && object(tool.data).kind === 'dify'));
+  const integrations = tools.filter((tool) => tool.name === 'dify_call');
   const failures = tools.filter((tool) => tool.ok === false);
   const firstSources = retrievals.flatMap((tool) => list(object(tool.data).sources).map((source) => ({ source, tool })));
   const show = retrievals.length || writes.length || checks.length || integrations.length || failures.length;

@@ -33,8 +33,9 @@ const ROLE_DEFINITIONS = Object.freeze({
     readOnly: true,
     capabilities: Object.freeze(['workspace.read']),
     tools: Object.freeze([
-      'get_workbench_model', 'scan_project', 'read_file',
-      'list_files', 'search_files', 'symbol_nav', 'retrieve_context',
+      'get_workbench_model', 'project_info', 'scan_project', 'read_file',
+      'find_files', 'search_files', 'list_directory', 'retrieve_context', 'query_scalars',
+      'find_definition', 'find_references', 'get_callers', 'get_callees',
     ]),
     work: Object.freeze([
       '回答「在哪里 / 怎么实现的 / 依赖谁」这类定位问题',
@@ -54,8 +55,9 @@ const ROLE_DEFINITIONS = Object.freeze({
     readOnly: false,
     capabilities: Object.freeze(['workspace.read', 'workspace.write']),
     tools: Object.freeze([
-      'get_workbench_model', 'read_file', 'list_files', 'search_files',
-      'symbol_nav', 'retrieve_context', 'write_file', 'edit_file', 'workbench_edit',
+      'get_workbench_model', 'project_info', 'read_file', 'find_files', 'search_files',
+      'find_definition', 'find_references', 'get_callers', 'get_callees',
+      'list_directory', 'retrieve_context', 'query_scalars', 'write_file', 'edit_file', 'workbench_edit',
     ]),
     work: Object.freeze([
       '按任务目标实施最小必要修改（源码文件或画布）',
@@ -75,9 +77,9 @@ const ROLE_DEFINITIONS = Object.freeze({
     readOnly: true,
     capabilities: Object.freeze(['workspace.read', 'shell.execute']),
     tools: Object.freeze([
-      'read_file', 'list_files', 'search_files',
-      'symbol_nav', 'retrieve_context', 'execute_shell', 'poll_job',
-      'project_overview',
+      'project_info', 'read_file', 'find_files', 'search_files', 'list_directory',
+      'find_definition', 'find_references', 'get_callers', 'get_callees',
+      'retrieve_context', 'query_scalars', 'execute_shell', 'poll_job', 'code_review',
     ]),
     work: Object.freeze([
       '跑测试 / 构建 / 静态检查并给出原始输出',
@@ -103,8 +105,9 @@ const ROLE_DEFINITIONS = Object.freeze({
     readOnly: true,
     capabilities: Object.freeze(['workspace.read']),
     tools: Object.freeze([
-      'get_workbench_model', 'read_file', 'list_files', 'search_files',
-      'symbol_nav', 'retrieve_context', 'project_overview',
+      'get_workbench_model', 'project_info', 'read_file', 'find_files', 'search_files',
+      'find_definition', 'find_references', 'get_callers', 'get_callees',
+      'retrieve_context', 'query_scalars', 'code_review',
     ]),
     work: Object.freeze([
       '独立审查实现质量、安全性与验收覆盖',
@@ -124,10 +127,10 @@ const ROLE_DEFINITIONS = Object.freeze({
     readOnly: false,
     capabilities: Object.freeze(['workspace.read', 'workspace.write', 'project.save', 'ui.interact']),
     tools: Object.freeze([
-      'get_workbench_model', 'workbench_edit',
+      'get_workbench_model', 'workbench_edit', 'write_analysis_md', 'save_project', 'ui_control',
     ]),
     work: Object.freeze([
-      '增删节点 / 连线、调整画布结构并保证 start→end 链路完整',
+      '增删节点 / 连线、调整画布结构并核对任务与资料的依赖',
       '把长方案写进节点 prompt（长文本下沉）',
       '保存工程与分析文档',
     ]),
@@ -136,8 +139,8 @@ const ROLE_DEFINITIONS = Object.freeze({
       '在回复里抄回完整 prompt 全文',
     ]),
     skills: Object.freeze(['canvas-grammar', 'chain-completeness', 'summarize-not-dump']),
-    guidance: '工作方式：先看画布现状（get_workbench_model）再改；一次提交批量 operations；改完确认链路完整并把关键节点 id 写进结论。保存工程用 workbench_edit(kind=save_project)，写分析文档用 workbench_edit(kind=write_analysis)，批量建删用 workbench_edit(kind=bulk_*)，视口动作用 get_workbench_model(view=focus/zoom/pan)。',
-    prompt: '你负责画布与工程结构操作（增删节点/连线、写入分析文档、保存工程、界面动作），全部通过 workbench_edit 的 operations 与 kind 完成；不碰项目源码文件；保存工程与界面动作会请求用户确认。',
+    guidance: '工作方式：先看画布现状（get_workbench_model）再改；一次提交批量 operations；改完确认链路完整并把关键节点 id 写进结论。',
+    prompt: '你负责画布与工程结构操作（增删节点/连线、写入分析文档、保存工程、界面动作），不碰项目源码文件；保存工程与界面动作会请求用户确认。',
   }),
 });
 

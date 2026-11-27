@@ -30,37 +30,40 @@ function countFiles(nodes: FileNode[]): number {
 function TreeRow({
   node,
   depth,
+  filtering,
   onOpen,
   selectedPath,
   dirty,
 }: {
   node: FileNode;
   depth: number;
+  filtering: boolean;
   onOpen: (p: string) => void;
   selectedPath: string | null;
   dirty: boolean;
 }) {
   const [expanded, setExpanded] = useState(node.type === 'dir' && depth < 2);
 
+  const open = filtering || expanded;
   if (node.type === 'dir') {
     return (
       <>
-        <div
+        <button type="button" aria-expanded={open} disabled={filtering}
           className="pm-row pm-dir"
           style={{ paddingLeft: 6 + depth * 13 }}
           onClick={() => setExpanded((v) => !v)}
           title={node.relPath}
         >
-          <span className={`pm-caret ${expanded ? 'open' : ''}`} />
+          <span className={`pm-caret ${open ? 'open' : ''}`} />
           <span className="pm-name">{node.name}</span>
           <span className="pm-count">{node.children?.length ?? 0}</span>
-        </div>
-        {expanded &&
+        </button>
+        {open &&
           node.children?.map((c) => (
             <TreeRow
               key={c.relPath}
               node={c}
-              depth={depth + 1}
+              depth={depth + 1} filtering={filtering}
               onOpen={onOpen}
               selectedPath={selectedPath}
               dirty={dirty}
@@ -72,7 +75,7 @@ function TreeRow({
 
   const isSelected = selectedPath === node.relPath;
   return (
-    <div
+    <button type="button" aria-current={isSelected || undefined}
       className={`pm-row pm-file ${node.relPath.endsWith('.cnode') ? 'pm-file-cnode' : ''} ${isSelected ? 'is-selected' : ''}`}
       style={{ paddingLeft: 19 + depth * 13 }}
       onClick={() => onOpen(node.relPath)}
@@ -86,7 +89,7 @@ function TreeRow({
         </span>
       )}
       <span className="pm-size">{fmtSize(node.size)}</span>
-    </div>
+    </button>
   );
 }
 
@@ -108,23 +111,23 @@ export function ProjectFileTree({
   actions: ReactNode;
 }) {
   const visible = useMemo(() => filterTree(tree, fileFilter), [tree, fileFilter]);
-  const fileCount = useMemo(() => countFiles(tree), [tree]);
+  const fileCount = useMemo(() => countFiles(visible), [visible]);
   return (
     <div className="sp-pane sp-pane-tree">
       <div className="sp-subhead">
         <div className="sp-path" title={root || ''}>
           {workspaceLabel}
-          {root && <span className="sp-path-meta">{fileCount} 文件</span>}
+          {root && !loading && !error && <span className="sp-path-meta">{fileFilter.trim() ? `匹配 ${fileCount} 个文件` : `${fileCount} 个文件`}</span>}
         </div>
-        <div className="pm-actions">{actions}</div>
+        {actions && <div className="pm-actions">{actions}</div>}
       </div>
 
-      <div className="pm-search">
+      {(tree.length > 0 || fileFilter) && <div className="pm-search">
         <span aria-hidden>⌕</span>
         <input
           value={fileFilter}
           onChange={(e) => setFileFilter(e.target.value)}
-          placeholder="过滤文件…"
+          aria-label="查找文件" placeholder="按文件名或路径查找…"
           spellCheck={false}
         />
         {fileFilter && (
@@ -132,15 +135,15 @@ export function ProjectFileTree({
             ×
           </button>
         )}
-      </div>
+      </div>}
 
       <div className="pm-tree">
-        {!root && <div className="pm-empty">点击「打开」选择项目目录</div>}
+        {!root && <div className="pm-empty">请选择项目目录</div>}
         {root && loading && <div className="pm-empty">加载中…</div>}
-        {root && !loading && tree.length === 0 && <div className="pm-empty">{error || '目录为空或无文件'}</div>}
+        {root && !loading && tree.length === 0 && <div className="pm-empty">{error || '暂无文件'}</div>}
         {root && !loading && tree.length > 0 && visible.length === 0 && <div className="pm-empty">没有匹配的文件</div>}
         {root && !loading && visible.map((node) => (
-          <TreeRowMemo key={node.relPath} node={node} depth={0} onOpen={onOpen} selectedPath={selectedPath} dirty={!!dirty} />
+          <TreeRowMemo key={node.relPath} node={node} depth={0} filtering={!!fileFilter.trim()} onOpen={onOpen} selectedPath={selectedPath} dirty={!!dirty} />
         ))}
       </div>
     </div>

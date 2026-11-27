@@ -1,0 +1,234 @@
+/* ---------- 检查器数据�?控件 ---------- */
+.flow-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.flow-list li {
+  display: flex;
+  gap: 8px;
+  padding: 3px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+
+.flow-list li:hover {
+  background: var(--bg-panel-2);
+}
+
+.flow-kind {
+  color: var(--accent-2);
+  flex-shrink: 0;
+}
+
+.flow-label {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-row {
+  display: flex;
+  gap: 6px;
+}
+
+.inspector-row input {
+  flex: 1;
+}
+
+.inspector-btn {
+  width: 100%;
+}
+
+.inspector-pre {
+  margin: 0;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #c9d1d9;
+  max-height: 160px;
+  overflow: auto;
+  user-select: text;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ---------- Agent 会话消息（原画布悬浮面板专用样式；面板已并入侧栏「Agent」标签） ---------- */
+.cs-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex: none;
+}
+
+.cs-dot-running {
+  background: #f59e0b;
+  animation: cs-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes cs-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
+.cs-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.cs-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(147, 197, 253, 0.25);
+  flex: none;
+}
+
+.cs-chat-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: #ffffff;
+}
+
+.cs-chat-body {
+  padding: 10px 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(147, 197, 253, 0.45) transparent;
+}
+
+.cs-chat-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cs-chat-body::-webkit-scrollbar-thumb {
+  background: rgba(147, 197, 253, 0.45);
+  border-radius: 4px;
+}
+
+.cs-chat-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cs-chat-empty {
+  color: #d7e6ff;
+  font-size: 12px;
+}
+
+.cs-msg {
+  margin-bottom: 12px;
+}
+
+.cs-msg-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #dbeafe;
+  margin-bottom: 3px;
+}
+
+.cs-msg-label.cs-running {
+  color: #fbbf24;
+}
+
+.cs-msg-user .cs-msg-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #dbeafe;
+  margin-bottom: 3px;
+}
+
+.cs-msg-text {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #ffffff;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.cs-msg-user .cs-msg-text {
+  color: #ffffff;
+}
+
+/* ---------- 上下文压缩卡（照 Codex CLI 的「Context compacted」标记）---------- */
+/* 视觉层级：比对话气泡低一档（左侧一道分隔线 + 更暗的文字），因为它是「分界标记」而不是内容；
+   摘要本身折叠收起，需要时才展开看。 */
+.code-verification { margin: 10px 0; padding: 10px; border: 1px solid var(--glass-border); border-radius: 6px; color: var(--glass-text); background: var(--glass-sheet); font-size: 12px; overflow-wrap: anywhere; }
+.code-verification details { margin-top: 6px; }
+.code-verification summary { cursor: pointer; }
+.code-verification-check { margin: 8px 0; }
+.editing-settings > .editing-toggle { flex-direction: row; align-items: center; justify-content: space-between; }
+.editing-settings .editing-toggle input { width: auto; min-height: auto; }
+.code-verification pre { white-space: pre-wrap; max-height: 200px; overflow: auto; }
+.cs-msg-compaction {
+  margin: 14px 0;
+  padding: 7px 10px;
+  border-left: 2px solid rgba(147, 197, 253, 0.35);
+  background: rgba(147, 197, 253, 0.06);
+  border-radius: 0 6px 6px 0;
+}
+
+.cs-msg-compaction .cs-msg-label {
+  margin-bottom: 2px;
+  color: rgba(219, 234, 254, 0.7);
+  letter-spacing: 0.02em;
+}
+
+.cs-msg-compaction-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(215, 230, 255, 0.62);
+}
+
+.cs-msg-compaction-detail {
+  margin-top: 5px;
+}
+
+.cs-msg-compaction-detail > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: rgba(147, 197, 253, 0.85);
+  list-style: none;
+  user-select: none;
+}
+
+.cs-msg-compaction-detail > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cs-msg-compaction-detail > summary::before {
+  content: '▸ ';
+  font-size: 9px;
+}
+
+.cs-msg-compaction-detail[open] > summary::before {
+  content: '▾ ';
+}
+
+.cs-msg-compaction-detail .cs-msg-text {
+  margin-top: 5px;
+  padding: 7px 9px;
+  background: rgba(8, 10, 14, 0.35);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.82);
+  max-height: 260px;
+  overflow: auto;
+}

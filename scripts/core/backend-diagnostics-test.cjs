@@ -1,0 +1,17 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {describe,validationEvidence}=require('../../electron/backends/diagnostics.cjs');
+const config=require('../../config/agent.backends.json');
+const settings={...config.defaults,backend:'hermes',executable:process.execPath,args:[]};
+assert.equal(describe({...settings,executable:'/missing/codenode-backend-test'}).state,'not-installed');
+assert.equal(describe(settings).state,'not-checked');
+const protocol=describe(settings,{available:true,version:'fixture-version'});assert.equal(protocol.state,'protocol-validated');assert.equal(protocol.evidence,null);
+assert.equal(describe(settings).state,'protocol-validated','last checked capabilities are scoped to exact settings');
+describe(settings,{available:true,version:'fixture-version'},'/project-a');
+assert.equal(describe(settings,null,'/project-b').state,'not-checked','a different project cannot reuse a prior handshake');
+assert.equal(describe({...settings,args:['different']}).state,'not-checked','changed launch arguments cannot reuse a prior check');
+const fail=describe(settings,{available:false,error:'filesystem isolation unavailable'});assert.equal(fail.state,'unavailable');assert.match(fail.fixes[0],/隔离/);
+assert.equal(validationEvidence('hermes','0.18.2','win32'),null);assert.equal(validationEvidence('hermes','new-version','darwin'),null);
+const record=validationEvidence('hermes','0.18.2','darwin');assert.equal(record.coverage.length,3);assert.ok(record.incomplete.includes('取消与恢复'));
+assert.equal(describe({...config.defaults,backend:'builtin'}).state,'builtin');
+console.log('BACKEND DIAGNOSTICS: PASS (missing command, exact-settings cache, handshake vs task evidence, platform/version scope and actionable failures)');

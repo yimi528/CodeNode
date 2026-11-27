@@ -19,7 +19,6 @@ const path = require('path');
 const agent = require("../../electron/agent.cjs");
 const sandbox = require("../../electron/sandbox.cjs");
 const toolkit = require("../../electron/tools/toolkit.cjs");
-const descriptorLib = require("../../electron/tools/descriptor.cjs");
 const approvalLib = require("../../electron/tools/approval.cjs");
 const { AgentToolResult } = require("../../electron/tools/result.cjs");
 const { AgentToolContext } = require("../../electron/tools/context.cjs");
@@ -130,34 +129,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   // ---- G. 声明层：确认类写工具都声明了确认且真的强制 ----
   const declRegistry = toolkit.buildDefaultRegistryWithConfig({ projectRoot: root, ragEnabled: false });
-  /**
-   * 工具面收敛：`save_project` / `ui_control` 已并入族工具，确认语义落在 `byKind` 上。
-   * 判据改成「按 kind 解出后**确实**声明了 requiresConfirmation」——合并前后强制力不变。
-   */
-  const declared = [];
-  /** @type {Array<[string, any]>} */
-  const confirmCases = [
-    ['workbench_edit', {}],
-    ['workbench_edit', { kind: 'save_project' }],
-    ['workbench_edit', { kind: 'bulk_delete_nodes', nodeIds: ['x'] }],
-    ['get_workbench_model', { view: 'focus' }],
-    ['memory', { action: 'save', content: 'x' }],
-  ];
-  for (const [name, args] of confirmCases) {
-    const descriptor = declRegistry.descriptorOf(name);
-    if (!descriptor) continue;
-    const effective = descriptorLib.effectiveDescriptor(descriptor, args);
-    if (effective.requiresConfirmation) declared.push(name + (args.kind ? ':' + args.kind : ''));
-  }
+  const declared = ['save_project', 'workbench_edit', 'ui_control'].filter((name) => declRegistry.descriptorOf(name));
   assert.ok(declared.length >= 3, '至少三个确认类写工具在注册表里（实际 ' + declared.join(',') + '）');
-  for (const label of declared) {
-    const [name, kind] = label.split(':');
-    const args = kind ? { kind } : (name === 'get_workbench_model' ? { view: 'focus' } : (name === 'memory' ? { action: 'save' } : {}));
-    const effective = descriptorLib.effectiveDescriptor(declRegistry.descriptorOf(name), args);
-    // bulk_* 等破坏性 kind 声明的是 HIGH（比 WRITE 更严）；这里只要求「确实声明了且真的强制」
-    assert.ok(effective.requiresConfirmation === 'WRITE' || effective.requiresConfirmation === 'HIGH',
-      name + ' 必须声明 requiresConfirmation（WRITE 或 HIGH）');
-    assert.strictEqual(effective.confirmationEnforced, true, name + ' 的确认必须真的强制（confirmationEnforced）');
+  for (const name of declared) {
+    const descriptor = declRegistry.descriptorOf(name);
+    assert.strictEqual(descriptor.requiresConfirmation, 'WRITE', name + ' 必须声明 requiresConfirmation=WRITE');
+    assert.strictEqual(descriptor.confirmationEnforced, true, name + ' 的确认必须真的强制（confirmationEnforced）');
   }
   ok('G 确认类写工具声明并强制了确认（' + declared.join(' / ') + '）');
 
@@ -297,6 +274,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       runId: 'run-j',
     });
     const { registry } = makeRegistry(confirmHandler);
+    if (extraToolsCfg) toolkit.filterByConfig(registry, extraToolsCfg);
     const stub = installScriptedModel(script, { loopLast: false });
     const deltas = [];
     try {
@@ -339,6 +317,20 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   assert.ok(nudge, '拒绝后必须有失败提示（接 S5 的分类化提示）');
   assert.ok(String(nudge.content).includes('权限'), '审批拒绝必须归到权限类（劝退原样重试）');
   ok('J 主循环：批准才执行、拒绝即不执行并归到权限类提示');
+
+  const routed = [
+    { toolCalls: [{ name: 'workbench_edit', args: { kind:'save_project' }, id:'routed_save' }], finishReason:'tool_calls' },
+    { content:'完成。', finishReason:'stop' },
+  ];
+  const routedPrompts = [];
+  const ask = async (_level, name) => { routedPrompts.push(name); return false; };
+  const routedTurn = await runTurn(routed, ask, {toolsAllowed:['save_project']});
+  assert.deepStrictEqual(routedPrompts, ['save_project']);
+  assert.equal(routedTurn.seen[1].messages.find(m => m.role === 'tool').name, 'workbench_edit');
+  const blocked = await runTurn(routed, ask, {toolsAllowed:['workbench_edit']});
+  assert.deepStrictEqual(routedPrompts, ['save_project']);
+  assert.match(blocked.seen[1].messages.find(m => m.role === 'tool').content, /无权/);
+  ok('K 新入口沿用原动作审批和协议调用名，未授权动作在审批前拒绝');
 
   fs.rmSync(root, { recursive: true, force: true });
   console.log('approval token ok');

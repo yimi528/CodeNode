@@ -49,7 +49,12 @@ class AcpClient {
       const original = fs.existsSync(full) ? fs.readFileSync(full) : null;
       if (typeof draft === 'string' && draft !== original?.toString('utf8')) throw denied('文件存在尚未保存的编辑内容');
       const sha = original ? crypto.createHash('sha256').update(original).digest('hex') : 'absent';
-      await this.approve('ACP 写入项目文件', rel + '\n' + p.content.slice(0, 1200));
+      if (o.stopping || o.input?.signal?.aborted || o.settings.sandbox === 'read-only') throw denied('当前会话只读或已取消');
+      if (require('../composerPolicy.cjs').canAssistWrite(o.input?.approvalMode, rel)) {
+        o.emit({ kind: 'backend_approval', phase: 'resolved', accepted: true, reason: 'ordinary_project_text_write', path: rel });
+      } else {
+        await this.approve('ACP 写入项目文件', rel + '\n' + p.content.slice(0, 1200));
+      }
       this.file(p.path);
       const latestDraft = await o.input?.readEditorText?.(full);
       if (typeof latestDraft === 'string' && latestDraft !== original?.toString('utf8')) throw denied('审批期间编辑器内容发生变化');

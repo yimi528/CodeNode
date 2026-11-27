@@ -4,8 +4,10 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
+[文档导航](docs/README.md)
+
 [![CI](https://github.com/yimi528/CodeNode/actions/workflows/ci.yml/badge.svg)](https://github.com/yimi528/CodeNode/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
@@ -69,6 +71,20 @@ npm run dev
 
 内部机制：[运行安全与恢复](docs/run-recovery.zh-CN.md) · [多 Agent 协作](docs/multi-agent.zh-CN.md) · [画布、工作流与目标](docs/canvas-and-goals.zh-CN.md)。
 
+## Agent 评测
+
+2026-11-01 使用 `agent-eval-v2` 完成离线回归：**14 个场景 × 3 轮，42 次试验全部通过**，观测到的 pass@1、pass@3、pass^3 均为 100%。场景覆盖编辑与测试执行、检索引用、工具边界、取消、恢复、预算及工作流变更。
+
+模型回复和工具选择由脚本预设，工具、文件、命令与 Run 事件真实执行。这些结果验证了已测场景下的框架行为，不能据此推断模型自主解题能力或与其他 Agent 的排名。本轮未进行真实模型评测。
+
+```bash
+npm run eval:agent:repeat -- --trials=3
+```
+
+每次运行保存逐轮轨迹、工作区终态与断言。详见[评测方法、结果与局限](docs/agent-evals-anthropic.zh-CN.md)，方法参考 [Anthropic Agent 评测教程](https://www.anthropic.com/research/demystifying-evals-for-ai-agents)。
+
+**2026-11-02 真实模型评测：**使用冻结源码副本与 `deepseek-chat`，11 个任务三轮共 **32/33 次通过现有断言（96.97%）**，其中 10/11 个任务三轮全过，整体门禁未通过。轨迹复核发现长文本题有统计答案错误却被判通过的情况，因此这些数字表示断言通过率，不代表通用答案正确率。详见[真实模型报告与评分局限](docs/eval-reports/deepseek-live-2026-11-02.md)。
+
 ## 开发与验证
 
 ```powershell
@@ -92,4 +108,4 @@ npm run dist:win    # Windows 打包；另有 dist:mac / dist:linux
 
 ## 许可证
 
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE)

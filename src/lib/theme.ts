@@ -31,6 +31,14 @@ export function normalizeTheme(value: unknown): Theme {
   return isTheme(value) ? value : DEFAULT_THEME;
 }
 
+/**
+ * 页面 color-scheme：玻璃主题是亮色玻璃，原生控件（滚动条、下拉、输入光标）
+ * 必须按亮色渲染，否则在亮玻璃上会出现黑底控件。
+ */
+export function themeColorScheme(theme: Theme): 'light' | 'dark' {
+  return theme === 'dark' ? 'dark' : 'light';
+}
+
 /** 主题色值集中在 config/ui.themes.json；几何与交互不随主题变化。 */
 export function themeTokens(theme: Theme): Record<string, string> {
   return (themes as Record<Theme, Record<string, string>>)[theme];

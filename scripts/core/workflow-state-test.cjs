@@ -6,6 +6,8 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const workflow = require("../../electron/workflowState.cjs");
+const runStore = require('../../electron/runStore.cjs');
+const { SideEffectLedger } = require('../../electron/sideEffects.cjs');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codenode-workflow-state-'));
 const graph = { nodes: [
   { id: 'source', type: 'task', data: { label: 'source', prompt: 'run: node produce.cjs', completionCondition: 'verified' } },
@@ -143,6 +145,43 @@ try {
   fs.mkdirSync(linkedRoot); fs.mkdirSync(outside);
   fs.symlinkSync(outside, path.join(linkedRoot, '.codenode'), process.platform === 'win32' ? 'junction' : 'dir');
   check(!workflow.dispatch(linkedRoot, 'escape', { action: 'prepare', graph, nodeId: 'source', expectedRevision: 0 }).ok, 'journal cannot follow project junctions');
+  const legacy = prepare('stage-evidence', 'source');
+  const legacyRun = 'workflow-' + Date.now().toString(36) + '-legacy';
+  runStore.startRun(root, legacyRun, { backend: 'builtin', nodeId: 'source', planSessionId: 'stage-evidence' });
+  const ledger = new SideEffectLedger({ projectRoot: root, scopeRunId: legacyRun });
+  fs.mkdirSync(path.join(root, 'migrations'));
+  const write = ledger.begin('write_file', { path: 'migrations/new.sql', content: 'SELECT 1' });
+  fs.writeFileSync(path.join(root, 'migrations/new.sql'), 'SELECT 1');
+  ledger.commit(write);
+  runStore.finishRun(root, legacyRun, 'completed', { codeVerification: { checks: [{ status: 'passed' }] } });
+  check(settle('stage-evidence', legacy, 'verified database migration').ok, 'legacy stage settles without an explicit Run link');
+  const history = id => call('stage-evidence', 'read', { inspectNodeId: id }).stageEvidence;
+  assert.equal(history('source').runId, legacyRun);
+  assert.deepEqual(history('source').files, [{ path: 'migrations/new.sql', kind: 'added', reverted: false }]);
+  check(history('source').verification.passed === 1, 'legacy inspection reuses committed file and verification evidence');
+
+  const dependent = prepare('stage-evidence', 'consumer');
+  const linkedRun = 'workflow-' + dependent.attemptId;
+  runStore.startRun(root, linkedRun, { backend: 'codex', nodeId: 'consumer', planSessionId: 'stage-evidence' });
+  runStore.appendEvent(root, linkedRun, 'backend_changes', { changes: { complete: true, files: [
+    { path: 'src/api/save.ts', kind: 'modified' }, { path: '../outside', kind: 'added' },
+  ] } });
+  runStore.finishRun(root, linkedRun, 'error', { codeVerification: { checks: [{ status: 'failed' }] } });
+  check(settle('stage-evidence', dependent, 'save test failed', graph, false).ok, 'failed stage settles with partial results');
+  runStore.appendEvent(root, linkedRun, 'rollback_applied', { applied: [{ path: 'src/api/save.ts' }] });
+  const evidence = history('consumer');
+  assert.equal(evidence.runId, linkedRun);
+  assert.equal(evidence.output, 'save test failed');
+  assert.deepEqual(evidence.upstream, ['source']);
+  assert.deepEqual(evidence.files, [{ path: 'src/api/save.ts', kind: 'modified', reverted: true }]);
+  check(evidence.phase === 'failed' && evidence.verification.historical && !evidence.changesComplete, 'stage inspection attributes failed and rolled-back evidence to the exact attempt');
+  const playback = call('stage-evidence', 'read', { inspectTimeline: true }).stageTimeline;
+  assert.deepEqual(playback.map(item => [item.nodeId, item.evidence.runId]), [['source', legacyRun], ['consumer', linkedRun]]);
+  check(playback[1].evidence.files[0].reverted, 'timeline keeps settled stages in execution order and retains rollback evidence');
+  const changedGraph = clone(graph);
+  changedGraph.nodes[1].data.prompt = 'different task contract';
+  check(call('stage-evidence', 'read', { inspectNodeId: 'consumer' }, changedGraph).stageEvidence === null, 'stale attempts are not shown as changes in a different workflow contract');
+  check(call('stage-evidence', 'read', { inspectTimeline: true }, changedGraph).stageTimeline.length === 0, 'timeline excludes records from obsolete workflow contracts');
   console.log('WORKFLOW STATE TEST: PASS ' + checks);
 } finally {
   const absolute = path.resolve(root);

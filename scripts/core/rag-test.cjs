@@ -181,26 +181,11 @@ async function main() {
     toolsAllowed: ['retrieve_context'],
     ragEnabled: true,
   });
-  const disabledNames = toolkit
-    .buildDefaultRegistryWithConfig({ toolsEnabled: true, ragEnabled: false })
-    .listTools()
-    .map((item) => item.name);
+  const disabledRegistry = toolkit.buildDefaultRegistryWithConfig({ toolsEnabled: true, ragEnabled: false });
   assert.ok(enabledRegistry.listTools().some((item) => item.name === 'retrieve_context'), '启用 RAG 时应注册检索工具');
-  /**
-   * 工具面收敛（L1）：`query_scalars` 并入 `retrieve_context`，后者成了标量库的**唯一入口**。
-   * 所以「关闭 RAG」不再等于「移除检索工具」—— 那样画布节点的精确属性就没人能读了。
-   * 现在的口径：工具仍注册，但**文件检索模式**不可用（mode=file/vector 明确报错）。
-   */
-  assert.ok(disabledNames.includes('retrieve_context'),
-    '关闭 RAG 后 retrieve_context 仍应注册（它是标量库唯一入口）');
-  const { AgentToolContext } = require('../../electron/tools/context.cjs');
-  const disabledInvocation = await toolkit
-    .buildDefaultRegistryWithConfig({ toolsEnabled: true, ragEnabled: false })
-    .execute('retrieve_context', { query: 'x', mode: 'file' }, new AgentToolContext({
-      projectRoot: root, audit: () => {}, ragConfig: { enabled: false },
-    }));
-  assert.equal(disabledInvocation.ok, false, '关闭 RAG 时文件检索模式必须失败');
-  assert.ok(/关闭/.test(String(disabledInvocation.text)), '并且说明是「已在配置中关闭」：' + disabledInvocation.text);
+  const scalarOnly = disabledRegistry.listTools().find(item => item.name === 'retrieve_context');
+  assert.deepStrictEqual(scalarOnly.inputSchema.properties.mode.enum, ['exact'], '关闭 RAG 时只公布标量精确查询');
+  assert.equal(disabledRegistry.resolveCall('retrieve_context', { mode: 'vector', query: 'session recovery' }).error.data.code, 'PERMISSION_DENIED');
 
   const toolContext = new AgentToolContext({ projectRoot: root, ragConfig: config });
   const toolResult = await enabledRegistry.execute(

@@ -5,9 +5,8 @@
  * 现在主循环的进度检查层也要用同一口径 —— 两处各写一份迟早会漂移（一处算 bulk_edit 另一处不算）。
  *
  * 口径：
- *   - 只看**写文件**的工具（`WRITE_TOOLS`）：workbench_edit 的画布编辑 / save_project / memory 等
- *     虽然也是 mutation，但不产生文件路径，不属于「已改动文件」；它的写文件 kind
- *     （write_analysis / bulk_create_files）单独识别；
+ *   - 只看**写文件**的工具（`WRITE_TOOLS`）：workbench_edit / save_project / remember 等虽然也是
+ *     mutation，但不产生文件路径，不属于「已改动文件」；
  *   - `ok === false` 的调用不算（没写成的不能算改动）；
  *   - 路径取 `path / filePath / file / target`，`bulk_edit` 的 edits[] 里的路径也逐个算上；
  *   - 保序去重，默认最多 20 个（够交代进度，不至于把提示撑爆）。
@@ -15,7 +14,7 @@
 'use strict';
 
 /** 会改动**文件**的工具（画布/标量类 mutation 不算「文件改动」） */
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'workbench_edit']);
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'bulk_edit', 'write_analysis_md']);
 
 function parseArgs(raw) {
   if (raw && typeof raw === 'object') return raw;
@@ -38,20 +37,6 @@ function changedFilesFromToolCalls(toolCalls, options = {}) {
     if (!call || call.ok === false || !WRITE_TOOLS.has(call.name)) continue;
     const parsed = parseArgs(call.args);
     if (!parsed) continue;
-    /** workbench_edit 是族工具：只有写文件的 kind 才产生文件改动，画布编辑不算 */
-    if (call.name === 'workbench_edit') {
-      const kind = String(parsed.kind || '').trim().toLowerCase();
-      if (kind === 'write_analysis' && parsed.relativePath) out.add(String(parsed.relativePath));
-      if (kind === 'bulk_create_files') {
-        for (const item of Array.isArray(parsed.list) ? parsed.list : []) {
-          if (item && item.path) out.add(String(item.path));
-          if (out.size >= limit) return [...out];
-        }
-      }
-      // 其余 kind（create/rename/connect/delete/…/save_project）不产生文件路径
-      if (out.size >= limit) return [...out];
-      continue;
-    }
     const candidates = [];
     for (const key of ['path', 'filePath', 'file', 'target']) {
       if (parsed[key]) candidates.push(parsed[key]);

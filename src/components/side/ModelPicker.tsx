@@ -4,6 +4,8 @@ import { useUsageStore, type ReasoningEffort } from '../../store/usageStore';
 import { useUiStore } from '../../store/uiStore';
 
 
+const effortLabels: Record<string, string> = { low: '低', medium: '中', high: '高', xhigh: '极高' };
+
 export default function ModelPicker({ busy }: { busy: boolean }) {
   const { models, modelId, effort, setModel, setEffort, loadModels } = useUsageStore();
   const model = models.find(item => item.id === modelId) || models[0];
@@ -14,18 +16,27 @@ export default function ModelPicker({ busy }: { busy: boolean }) {
   const [switching, setSwitching] = useState(false);
   const [query, setQuery] = useState('');
   const [settings, setSettings] = useState<DOMRect | null>(null);
-  const [position, setPosition] = useState({ left: 0, bottom: 0 });
+  const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number }>({ left: 0, bottom: 0, maxHeight: 340 });
   const theme = useUiStore(s => s.theme);
   useLayoutEffect(() => {
     if (!open) return;
-    const place = () => { const rect = trigger.current?.getBoundingClientRect(); if (rect) setPosition({ left: Math.max(8, Math.min(rect.left, innerWidth - (innerWidth >= 600 ? 480 : 304))), bottom: innerHeight - rect.top + 8 }); };
+    const place = () => {
+      const rect = trigger.current?.getBoundingClientRect();
+      if (!rect) return;
+      const above = rect.top - 16;
+      const below = innerHeight - rect.bottom - 16;
+      const left = Math.max(8, Math.min(rect.right - 296, innerWidth - 304));
+      setPosition(above >= below
+        ? { left, bottom: innerHeight - rect.top + 8, maxHeight: above }
+        : { left, top: rect.bottom + 8, maxHeight: below });
+    };
     place(); window.addEventListener('resize', place);
     return () => window.removeEventListener('resize', place);
   }, [open]);
   useEffect(() => {
     if (!open) return;
     const dismiss = (event: Event) => {
-      if (event instanceof KeyboardEvent) { if (event.key === 'Escape') { setOpen(false); setSettings(null); trigger.current?.focus(); } return; }
+      if (event instanceof KeyboardEvent) { if (event.key === 'Escape') { event.preventDefault(); setOpen(false); setSettings(null); trigger.current?.focus(); } return; }
       const target = event.target as Node;
       if (!trigger.current?.contains(target) && !menu.current?.contains(target) && !flyout.current?.contains(target)) { setOpen(false); setSettings(null); }
     };
@@ -38,9 +49,14 @@ export default function ModelPicker({ busy }: { busy: boolean }) {
   const right = position.left + 296;
   const settingsLeft = right + 170 < viewportWidth ? right + 4 : Math.max(8, position.left - 174);
   return <div className="pp-model-picker">
-    <button ref={trigger} className="pp-model" aria-expanded={open} aria-haspopup="dialog" onClick={() => { setOpen(!open); setSettings(null); }} title={model?.label}><span className="model-picker-label">{model?.label || '选择模型'}{model?.supportsEffort && levels.length ? ` · ${effort}` : ''}</span><span>⌄</span></button>
+    <button ref={trigger} className="pp-model" aria-label="选择对话模型" aria-expanded={open}
+      aria-haspopup="dialog" onClick={() => { setOpen(!open); setSettings(null); }} title={model?.label}>
+      <span className="model-picker-label">{model?.label || '选择模型'}</span>
+      {model?.supportsEffort && levels.length > 0 && <span className="model-picker-effort">{effortLabels[effort] || effort}</span>}
+      <span className="composer-chevron" aria-hidden="true" />
+    </button>
     {open && createPortal(<div className={`glass-theme theme-${theme} hermes-picker-layer`}>
-      <div ref={menu} className="hermes-model-menu" role="dialog" aria-label="模型选择" style={{ left: position.left, bottom: position.bottom }}>
+      <div ref={menu} className="hermes-model-menu" role="dialog" aria-label="模型选择" style={position}>
         <input autoFocus aria-label="搜索对话模型" placeholder="搜索模型" value={query} onChange={event => { setQuery(event.target.value); setSettings(null); }} />
         <div className="hermes-model-list" onScroll={() => setSettings(null)}>
           {[...new Set(visible.map(item => item.providerLabel || item.provider || '已连接'))].map(group => <section key={group}><div className="hermes-provider">{group}</div>{visible.filter(item => (item.providerLabel || item.provider || '已连接') === group).map(item => <div className="hermes-model-row" key={item.id}>
@@ -51,7 +67,7 @@ export default function ModelPicker({ busy }: { busy: boolean }) {
         </div>
         <div className="hermes-model-footer"><button disabled={busy} onClick={() => { setSettings(null); void loadModels(); }}>↻ 刷新模型</button><button onClick={() => { setOpen(false); setSettings(null); useUiStore.getState().openModelManager(); }}>⚙ 管理模型…</button></div>
       </div>
-      {settings && model?.supportsEffort && <div ref={flyout} className="hermes-effort-menu" role="group" aria-label="推理强度" style={{ left: settingsLeft, top: Math.max(8, Math.min(settings.top, innerHeight - (levels.length * 34 + 45))) }}><div className="hermes-provider">Reasoning effort</div>{levels.map(level => <button key={level} aria-pressed={effort === level} disabled={busy} onClick={() => setEffort(level)}><span>{level}</span><span>{effort === level ? '✓' : ''}</span></button>)}</div>}
+      {settings && model?.supportsEffort && <div ref={flyout} className="hermes-effort-menu" role="group" aria-label="推理强度" style={{ left: settingsLeft, top: Math.max(8, Math.min(settings.top, innerHeight - (levels.length * 34 + 45))) }}><div className="hermes-provider">Reasoning effort</div>{levels.map(level => <button key={level} aria-pressed={effort === level} disabled={busy} onClick={() => setEffort(level)}><span>{effortLabels[level] || level}</span><span>{effort === level ? '✓' : ''}</span></button>)}</div>}
     </div>, document.body)}
   </div>;
 }

@@ -1,37 +1,42 @@
-import GoalOverview from './components/GoalOverview';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { themeTokens } from './lib/theme';
+import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
+import { themeTokens, themeColorScheme } from './lib/theme';
 import { useReactFlow } from '@xyflow/react';
-import Toolbar from './components/Toolbar';
 import { useProjectAutoSave } from './lib/useProjectAutoSave';
-import ActivityBar from './components/ActivityBar';
-import PluginWorkspace from './components/PluginWorkspace';
-import TaskWorkspace from './components/TaskWorkspace';
-import Canvas from './components/Canvas';
+import WorkspaceHome from './components/WorkspaceHome';
 import StartupSplash from './components/StartupSplash';
-import welcomeLogo from '../assets/branding/welcome-logo.png';
+import ActivityBar from './components/ActivityBar';
 import SidePanel from './components/side/SidePanel';
 import './components/side/nodeInspectorDock.css';
 import ProjectNavigation from './components/ProjectNavigation';
-import { isSending } from './store/chatStore';
 import ConversationPanel from './components/ConversationPanel';
-import FileWorkspace from './components/FileWorkspace';
 import AddMenu from './components/AddMenu';
 import StatusBar from './components/StatusBar';
 import { useGraphStore } from './store/graphStore';
 import { useUiStore } from './store/uiStore';
 import { useSessionStore } from './store/sessionStore';
 import { useProjectStore } from './store/projectStore';
-import { newProject, openProject, openProjectFile, saveProject, restoreLastWorkspace } from './lib/projectActions';
-import { useWorkspaceHistory } from './lib/workspaceHistory';
+import { useTrellisStore } from './store/trellisStore';
+import { newProject, openProject, saveProject, restoreLastProject } from './lib/projectActions';
 import { installToolListener } from './lib/toolUi';
 import ToolDialog from './components/ToolDialog';
-import ModelManager from './components/ModelManager';
-import WorkbenchDock from './components/WorkbenchDock';
-import GlobalSettings from './components/GlobalSettings';
 import GoalAutoAdvanceManager from './components/GoalAutoAdvanceManager';
-import { getActiveVectorNode } from './vector/vectorStore';
-import type { Graph } from './types';
+import { useVectorPlugin, useVectorPluginLifecycle } from './plugins/vectorEditor';
+
+const GlobalSettings = lazy(() => import('./components/GlobalSettings'));
+const ModelManager = lazy(() => import('./components/ModelManager'));
+const WorkbenchDock = lazy(() => import('./components/WorkbenchDock'));
+const PluginWorkspace = lazy(() => import('./components/PluginWorkspace'));
+const TaskWorkspace = lazy(() => import('./components/TaskWorkspace'));
+const FileWorkspace = lazy(() => import('./components/FileWorkspace'));
+const Canvas = lazy(() => import('./components/Canvas'));
+const StageReplayWorkspace = lazy(() => import('./components/StageReplayWorkspace'));
+const GoalOverview = lazy(() => import('./components/GoalOverview'));
+const Toolbar = lazy(() => import('./components/Toolbar'));
+const TutorialPage = lazy(() => import('./components/TutorialPage'));
+
+function DialogLoading() {
+  return <div className="settings-mask"><section className="global-settings settings-loading" role="status">正在加载设置…</section></div>;
+}
 
 function isTypingTarget(): boolean {
   const el = document.activeElement as HTMLElement | null;
@@ -67,63 +72,65 @@ function isTextEditingNow(): boolean {
 }
 
 export default function App() {
+  useVectorPluginLifecycle();
   const undo = useGraphStore((s) => s.undo);
   const redo = useGraphStore((s) => s.redo);
   const duplicateNode = useGraphStore((s) => s.duplicateNode);
   const selectedId = useGraphStore((s) => s.selectedId);
   const deleteNodes = useGraphStore((s) => s.deleteNodes);
-  const layoutNodes = useGraphStore((s) => s.layoutNodes);
   const arrangeNodes = useGraphStore((s) => s.arrangeNodes);
   const createScopeFromSelection = useGraphStore((s) => s.createScopeFromSelection);
   useProjectAutoSave();
+  const requestedPage = useUiStore(s => s.appPage);
   const projectRoot = useProjectStore(s => s.root);
-  const selectedPage = useUiStore(s => s.appPage);
-  const appPage = !projectRoot && selectedPage === 'tasks' ? 'workbench' : selectedPage;
+  const conversation = useSessionStore(s => s.memoryConversationId);
+  const streaming = useSessionStore(s => s.streaming);
+  const trellisReady = useTrellisStore(s => s.root === projectRoot && s.project?.detected === true);
+  const trellisUnavailable = useTrellisStore(s => s.root === projectRoot && !s.loading && (s.project?.detected === false || !s.project && !!s.error));
+  const refreshTrellis = useTrellisStore(s => s.refresh);
+  const appPage = requestedPage === 'tasks' && !trellisReady ? 'workbench' : requestedPage;
+  useEffect(() => {
+    if (projectRoot && window.codenode?.trellisProject) void refreshTrellis(projectRoot, conversation);
+  }, [projectRoot, conversation, streaming, refreshTrellis]);
+  useEffect(() => {
+    if (requestedPage === 'tasks' && (!projectRoot || trellisUnavailable)) useUiStore.getState().setAppPage('workbench');
+  }, [requestedPage, projectRoot, trellisUnavailable]);
+  const [loadedPages, setLoadedPages] = useState(() => ({ tasks: appPage === 'tasks', plugins: appPage === 'plugins' }));
+  useEffect(() => {
+    if (appPage === 'tasks' || appPage === 'plugins') setLoadedPages(current => current[appPage] ? current : { ...current, [appPage]: true });
+  }, [appPage]);
   const sideOpen = useUiStore((s) => s.sideOpen);
   const sideTab = useUiStore(s => s.sideTab);
-  const conversationMain = sideTab === 'conversation';
-  const filePreview = !!projectRoot && sideTab === 'preview';
+  const workflowId = useSessionStore(s => s.activeId) || 'canvas';
+  const replayOpen = useUiStore(s => s.stageReplayOpen);
+  const replayVisible = !!projectRoot && appPage === 'workbench' && replayOpen && sideTab !== 'project';
+  const [replayLoaded, setReplayLoaded] = useState(false);
+  useEffect(() => {
+    if (replayVisible) setReplayLoaded(true);
+  }, [replayVisible]);
   const workbenchView=useUiStore(s=>s.preferences.workbenchView);
-  const overview=workbenchView==='overview'&&!['project','preview'].includes(sideTab);
+  const overview=!replayVisible && workbenchView==='overview'&&sideTab !== 'project';
+  const canvasVisible = !!projectRoot && appPage === 'workbench' && !overview && !replayVisible && sideTab !== 'project';
+  useEffect(() => {
+    if (!canvasVisible) useUiStore.getState().closeAddMenu();
+  }, [canvasVisible]);
   const theme = useUiStore((s) => s.theme);
   useLayoutEffect(() => {
     const root = document.documentElement;
-    root.dataset.theme = theme;
+    root.dataset.theme = theme; root.style.colorScheme = themeColorScheme(theme);
     for (const [name,value] of Object.entries(themeTokens(theme))) root.style.setProperty(name,value);
   }, [theme]);
   const dockOpen = useUiStore((s) => s.dockOpen);
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const tutorialOpen = useUiStore(s => s.tutorialOpen);
+  const modelManagerOpen = useUiStore((s) => s.modelManagerOpen);
+  const conversationOpen = useUiStore((s) => s.conversationOpen);
+  const [toolRequestHost, setToolRequestHost] = useState<HTMLDivElement | null>(null);
+  const showRequestInConversation = conversationOpen && appPage === 'workbench' &&
+    !overview && !replayVisible && !tutorialOpen && !settingsOpen && !modelManagerOpen;
+  const booted = useUiStore((s) => s.booted);
   const [starting, setStarting] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const [switchingProject, setSwitchingProject] = useState(false);
-  const [projectActionError, setProjectActionError] = useState('');
-  const restoring = useRef(false);
-  const projectActionPending = useRef(false);
-  useWorkspaceHistory(switchingProject, projectActionPending);
-  const { fitView, screenToFlowPosition } = useReactFlow();
-  const nodeClipboard = useRef<Graph | null>(null);
-
-  const runProjectAction = useCallback(async (action: () => Promise<void>, browseConversations = false) => {
-    if (projectActionPending.current || (!browseConversations && (useSessionStore.getState().streaming || isSending()))) return false;
-    if (!window.codenode) {
-      setProjectActionError('请在 CodeNode 桌面应用中打开工程。');
-      return false;
-    }
-    projectActionPending.current = true;
-    setSwitchingProject(true);
-    setProjectActionError('');
-    useProjectStore.setState({ error: null });
-    try {
-      await action();
-      const error = useProjectStore.getState().error;
-      if (error) setProjectActionError(error);
-      return !error;
-    } catch (cause) {
-      setProjectActionError(cause instanceof Error ? cause.message : String(cause));
-      return false;
-    } finally {
-      projectActionPending.current = false;
-      setSwitchingProject(false);
-    }
-  }, []);
+  const { fitView } = useReactFlow();
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => useUiStore.getState().setLastMouse(e.clientX, e.clientY);
@@ -132,14 +139,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!restoring.current) {
-      restoring.current = true;
-      if (window.codenode) void runProjectAction(restoreLastWorkspace);
-      else void restoreLastWorkspace();
-    }
+    void restoreLastProject();
     const uninstall = installToolListener();
     return uninstall;
-  }, [runProjectAction]);
+  }, []);
 
   // 窄窗口优先保留画布与 Prompt：侧栏改为浮层，过窄时默认收起。
   useEffect(() => {
@@ -168,12 +171,10 @@ export default function App() {
     if (!workspace) return;
     let wasCompact: boolean | null = null;
     const adapt = () => {
-      const ui = useUiStore.getState();
-      if (ui.sideTab === 'preview') return;
-      if (ui.sideTab === 'conversation') return;
       const compact = workspace.getBoundingClientRect().width <= 660;
       if (compact === wasCompact) return;
       wasCompact = compact;
+      const ui = useUiStore.getState();
       if (compact && ui.conversationOpen && !useSessionStore.getState().streaming && !ui.modelManagerOpen && !document.activeElement?.closest('.conversation-right, .hermes-picker-layer')) {
         useUiStore.setState({ conversationOpen: false, conversationAutoHidden: true });
       } else if (!compact && ui.conversationAutoHidden) {
@@ -182,31 +183,42 @@ export default function App() {
     };
     const observer = new ResizeObserver(adapt); observer.observe(workspace); adapt();
     return () => observer.disconnect();
-  }, [projectRoot, sideTab, appPage]);
+  }, [projectRoot]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (starting) return;
+      if (document.activeElement?.closest('.tool-dialog')) return;
+      if (useUiStore.getState().tutorialOpen || useUiStore.getState().appPage !== 'workbench') return;
       if (useUiStore.getState().settingsOpen || useUiStore.getState().modelManagerOpen) return;
+      if (e.key === 'Escape' && useUiStore.getState().stageReplayOpen) {
+        e.preventDefault();
+        useUiStore.getState().closeStageReplay();
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 'p') {
+        e.preventDefault();
+        useUiStore.getState().setSideTab('project');
+        window.setTimeout(() => document.querySelector<HTMLInputElement>('.files-workspace .pm-search input')?.focus(), 0);
+        return;
+      }
+      const ui = useUiStore.getState();
+      const replay = ui.stageReplayOpen && ui.sideTab !== 'project';
 
-      // 主工作区在无工程时仍可使用项目操作和导航快捷键。
+      // 未打开工程时保留新建/打开快捷键，避免对空工作区执行工程操作。
       if (!useProjectStore.getState().root) {
         if (mod && e.key.toLowerCase() === 'n') {
           e.preventDefault();
-          void runProjectAction(newProject);
+          void newProject();
         } else if (mod && e.key.toLowerCase() === 'o') {
           e.preventDefault();
-          void runProjectAction(openProject);
-        } else if (mod && e.key.toLowerCase() === 'b' && !isTypingTarget()) {
-          e.preventDefault();
-          useUiStore.getState().toggleNavigation();
+          void openProject();
         }
         return;
       }
-      const tab = useUiStore.getState().sideTab;
-      if (tab === 'preview') return;
-      if (useUiStore.getState().preferences.workbenchView === 'overview') return;
+      if (!replay && ui.preferences.workbenchView === 'overview' && ui.sideTab !== 'project') return;
 
       // 删除选中节点。
       // 与画布节点的分工：焦点落在画布节点内部（.vs-scope）时让位——由画布节点自己的快捷键删图形，
@@ -214,7 +226,7 @@ export default function App() {
       // 这条规则的两端分别是「选中画布节点后删不掉」和「在画布节点里按 Delete 把节点整个删了」。
       // 画布节点会在指针按下时把焦点收回 .vs-scope（VectorNode.tsx 的 focusBodyOnPointerDown），
       // 所以这里判断焦点归属是可靠的。
-      if (tab !== 'conversation' && !mod && (e.key === 'Delete' || e.key === 'Backspace' || e.key.toLowerCase() === 'x')) {
+      if (!replay && !mod && (e.key === 'Delete' || e.key === 'Backspace' || e.key.toLowerCase() === 'x')) {
         const focused=document.activeElement as HTMLElement|null;
         if(focused&&focused!==document.body&&!focused.closest('.canvas-wrap'))return;
         if (!isTextEditingNow() && !isVectorNodeFocus()) {
@@ -232,7 +244,7 @@ export default function App() {
       }
 
       // 选中的是画布节点 / 焦点在矢量画布内时，快捷键交给画布节点处理
-      const activeVector = getActiveVectorNode();
+      const activeVector = useUiStore.getState().preferences.vectorEditorEnabled ? useVectorPlugin.getState().plugin?.getActiveVectorNode() : null;
       if (activeVector && activeVector === selectedId) return;
       if (isVectorNodeFocus()) return;
 
@@ -247,18 +259,12 @@ export default function App() {
       }
       if (mod && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        void runProjectAction(newProject);
+        void newProject();
         return;
       }
       if (mod && e.key.toLowerCase() === 'o') {
         e.preventDefault();
-        void runProjectAction(openProject);
-        return;
-      }
-
-      if (mod && e.key.toLowerCase() === 'p') {
-        e.preventDefault(); useUiStore.getState().setAppPage('workbench'); useUiStore.getState().setSideTab('project');
-        window.setTimeout(() => document.querySelector<HTMLInputElement>('.files-workspace .pm-search input')?.focus(),0);
+        void openProject();
         return;
       }
 
@@ -271,37 +277,8 @@ export default function App() {
         return;
       }
 
-      if (tab === 'conversation') return;
-
-      const key = e.key.toLowerCase();
-      if (mod && !e.altKey && !e.shiftKey && (key === 'c' || key === 'v')) {
-        const canvas = document.querySelector<HTMLElement>('.canvas-wrap');
-        const focused = document.activeElement;
-        if (!canvas || (focused !== document.body && !canvas.contains(focused)) || window.getSelection()?.isCollapsed === false) return;
-        const graph = useGraphStore.getState();
-        if (key === 'c') {
-          if (!graph.selectedIds.length) return;
-          nodeClipboard.current = graph.copyNodes(graph.selectedIds);
-        } else {
-          const copied = nodeClipboard.current;
-          if (!copied?.nodes.length) return;
-          const rect = canvas.getBoundingClientRect();
-          const mouse = useUiStore.getState().lastMouse;
-          const inside = mouse.x >= rect.left && mouse.x < rect.right && mouse.y >= rect.top && mouse.y < rect.bottom;
-          const point = screenToFlowPosition(inside ? mouse : {
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2,
-          });
-          graph.pasteNodes(copied, {
-            x: point.x - Math.min(...copied.nodes.map((node) => node.position.x)),
-            y: point.y - Math.min(...copied.nodes.map((node) => node.position.y)),
-          });
-        }
-        e.preventDefault();
-        return;
-      }
-
-      if (e.code === 'KeyA' && e.shiftKey && !mod) {
+      if (replay) return;
+      if (e.code === 'KeyA' && e.shiftKey && !mod && !e.altKey && useUiStore.getState().sideTab !== 'project') {
         e.preventDefault();
         const m = useUiStore.getState().lastMouse;
         useUiStore.getState().openAddMenu(m.x, m.y);
@@ -320,16 +297,13 @@ export default function App() {
         // Blender 风格：Ctrl+J 把选中的节点“加入”为一个新的范围节点
         e.preventDefault();
         createScopeFromSelection();
-      } else if (mod && e.key.toLowerCase() === 'l') {
-        // 自动排版属于画布操作，不入撤销历史（撤销只记录节点操作）
-        e.preventDefault();
-        layoutNodes();
-      } else if (mod && e.key.toLowerCase() === 'a' && e.shiftKey) {
+      } else if (mod && (key === 'l' || (e.shiftKey && key === 'a'))) {
         e.preventDefault();
         arrangeNodes();
       } else if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        undo();
+        if (e.shiftKey) redo();
+        else undo();
       } else if (mod && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         redo();
@@ -343,73 +317,64 @@ export default function App() {
     // 就会被吞掉 —— 表现就是「选中画布节点后 Delete 没反应」。
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [starting, runProjectAction, undo, redo, duplicateNode, selectedId, deleteNodes, fitView, screenToFlowPosition, layoutNodes, arrangeNodes, createScopeFromSelection]);
-
-  const workbenchActive = appPage === 'workbench';
-  const hideWorkbenchOverlays = !workbenchActive || filePreview || conversationMain;
+  }, [starting, undo, redo, duplicateNode, selectedId, deleteNodes, fitView, arrangeNodes, createScopeFromSelection]);
 
   return (
     <>
-      {starting && <StartupSplash onFinish={() => setStarting(false)} />}
-      <div className={`app ui-clean glass-theme theme-${theme}`} inert={starting}>
-        <div className="app-shell">
-          <ActivityBar />
-          <div className="app-shell-main">
-            {projectRoot && <div className="app-workbench-toolbar" hidden={!workbenchActive}><Toolbar /></div>}
-            <div className={`app-body side-left${projectRoot && dockOpen && !hideWorkbenchOverlays ? ' has-dock' : ''}`}>
-              {appPage === 'plugins' && <PluginWorkspace />}
-              {projectRoot && <TaskWorkspace hidden={appPage !== 'tasks'} />}
-              <div className="app-workbench-layer" data-inactive={!workbenchActive} aria-hidden={!workbenchActive} inert={!workbenchActive}>
-                <div className="app-project-navigation" hidden={filePreview} inert={filePreview}>
-                  <ProjectNavigation switching={switchingProject} runProjectAction={runProjectAction} />
+    {starting && <StartupSplash onFinish={() => setStarting(false)} />}
+    <div className={`app ui-clean glass-theme theme-${theme}`} inert={starting}>
+      <div className="app-shell">
+        <ActivityBar showTasks={trellisReady} />
+        <div className="app-shell-main">
+          <div inert={tutorialOpen} className={`app-body side-left${dockOpen && appPage === 'workbench' ? ' has-dock' : ''}`}>
+            <Suspense fallback={null}>
+              {loadedPages.plugins && <div hidden={appPage !== 'plugins'} inert={appPage !== 'plugins'} className="app-plugin-layer"><PluginWorkspace /></div>}
+              {loadedPages.tasks && <TaskWorkspace hidden={appPage !== 'tasks'} />}
+            </Suspense>
+            <div className="app-workbench-layer" data-inactive={appPage !== 'workbench'} aria-hidden={appPage !== 'workbench'} inert={appPage !== 'workbench'}>
+              <div className="app-project-navigation"><ProjectNavigation /></div>
+              <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
+                <div className="app-workbench-toolbar" hidden={appPage !== 'workbench'}>
+                  <Suspense fallback={null}><Toolbar /></Suspense>
                 </div>
-                <main className={`workspace-main workspace-${sideTab}`} aria-label="工作区">
-                  {projectRoot ? (
-                    <>
-                      <div className="workspace-overview-layer" hidden={!overview}><GoalOverview /></div>
-                      <div className="workspace-content" hidden={overview} inert={overview}>
-                        {(sideTab === 'project' || filePreview) && <FileWorkspace editing={sideTab === 'project'} />}
-                        {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
-                        <div className="workspace-canvas" aria-hidden={conversationMain || sideTab === 'project' || filePreview} inert={conversationMain}>
-                          <Canvas />
-                        </div>
-                        <ConversationPanel suspended={filePreview} centered={conversationMain} />
-                      </div>
-                    </>
-                  ) : (
-                    <section className="workspace-home" aria-labelledby="workspace-home-title">
-                      <div className="workspace-home-content">
-                        <img src={welcomeLogo} alt="" width="48" height="48" />
-                        <h1 id="workspace-home-title">CodeNode</h1>
-                        <p>打开最近的对话，或从一个工程开始。</p>
-                        <div className="workspace-home-actions" role="group" aria-label="工程操作">
-                          <button type="button" data-project-action="open" disabled={switchingProject} onClick={() => void runProjectAction(openProject)}>打开工程</button>
-                          <button type="button" data-project-action="new" disabled={switchingProject} onClick={() => void runProjectAction(newProject)}>新建工程</button>
-                          <button type="button" data-project-action="file" disabled={switchingProject} onClick={() => void runProjectAction(openProjectFile)}>打开工程文件</button>
-                        </div>
-                        <div className="workspace-home-feedback" role="status">{switchingProject ? '正在打开工程…' : ''}</div>
-                      </div>
-                    </section>
-                  )}
-                </main>
-                {projectRoot && <div className="app-workbench-overlays" hidden={hideWorkbenchOverlays}>
-                  <AddMenu />
-                  <WorkbenchDock />
-                </div>}
+                {projectRoot ? <div className="workspace-views">
+                  <div className="workspace-overview-layer" hidden={!overview}>
+                    <Suspense fallback={null}><GoalOverview /></Suspense>
+                  </div>
+                  <div className={`workspace-content${replayVisible ? ' is-replay-covered' : ''}`} hidden={overview}
+                    aria-hidden={overview || replayVisible} inert={overview || replayVisible}>
+                    {sideTab === 'project' && <Suspense fallback={null}><FileWorkspace /></Suspense>}
+                    {sideTab === 'node' && sideOpen && <div className="node-inspector-dock"><SidePanel /></div>}
+                    <div className="workspace-canvas" aria-hidden={sideTab === 'project'}><Suspense fallback={null}><Canvas /></Suspense></div>
+                    <ConversationPanel requestHostRef={setToolRequestHost} />
+                  </div>
+                  {(replayVisible || replayLoaded) && <section className="workspace-stage-replay" hidden={!replayVisible} inert={!replayVisible} aria-label="阶段 3D 回放"
+                    onDoubleClick={() => useUiStore.getState().closeStageReplay()}>
+                    <Suspense fallback={null}>
+                      <StageReplayWorkspace key={JSON.stringify([projectRoot, workflowId])} root={projectRoot} workflowId={workflowId} active={replayVisible} />
+                    </Suspense>
+                  </section>}
+                </div> : <WorkspaceHome ready={booted} />}
+              </main>
+              <div className="app-workbench-overlays" hidden={appPage !== 'workbench'}>
+                {canvasVisible && <AddMenu />}
+                <Suspense fallback={null}>{dockOpen && <WorkbenchDock />}</Suspense>
               </div>
             </div>
-            {projectRoot && <div className="app-workbench-status" hidden={!workbenchActive}><StatusBar /></div>}
+          </div>
+          <div hidden={appPage !== 'workbench'} className="app-workbench-status" data-canvas={canvasVisible}>
+            <StatusBar showCanvasStatus={canvasVisible} />
           </div>
         </div>
-        {projectActionError && <div className="workspace-project-error" role="alert">
-          <span>{projectActionError}</span>
-          <button type="button" aria-label="关闭工程提示" onClick={() => setProjectActionError('')}>×</button>
-        </div>}
-        <ToolDialog />
-        <GoalAutoAdvanceManager />
-        <GlobalSettings />
-        <ModelManager />
       </div>
+      {tutorialOpen && <Suspense fallback={null}><TutorialPage /></Suspense>}
+      <ToolDialog host={showRequestInConversation ? toolRequestHost : null} />
+      <GoalAutoAdvanceManager />
+      <Suspense fallback={(settingsOpen || modelManagerOpen) ? <DialogLoading /> : null}>
+        {settingsOpen && <GlobalSettings />}
+        {modelManagerOpen && <ModelManager />}
+      </Suspense>
+    </div>
     </>
   );
 }

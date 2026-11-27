@@ -49,7 +49,7 @@ const MAX_EVIDENCE_FILE_BYTES = 1024 * 1024;
 const MAX_EVIDENCE_SOURCES = 24;
 const MAX_EVIDENCE_SOURCE_BYTES = 20 * 1024 * 1024;
 const MAX_EVIDENCE_COMMANDS = 20;
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'workbench_edit']);
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'bulk_edit', 'write_analysis_md']);
 const SHELL_TOOLS = new Set(['execute_shell', 'poll_job']);
 
 /** 键排序的稳定序列化：同一份内容永远得到同一个哈希（比较哈希才有意义） */

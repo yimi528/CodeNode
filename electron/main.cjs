@@ -1,10 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const APP_ICON = path.join(__dirname, '..', 'build', 'icon.ico');
 const APP_ICON_SOURCE = path.join(__dirname, '..', 'assets', 'branding', 'codenode-icon.png');
-const WINDOW_FRAME_COLOR = '#222222';
 
 function resolveAppIcon() {
   if (fs.existsSync(APP_ICON)) return APP_ICON;
@@ -39,85 +38,8 @@ if (process.platform === 'win32') {
   } catch {}
 }
 
-/**
- * 启动自检：`ELECTRON_RUN_AS_NODE` 会让 Electron 二进制**以纯 Node 身份**运行。
- *
- * 症状（实测，2026-11-18）：从某个设置了该变量的父进程（Electron 系 IDE / harness 的
- * shell / 带该变量的终端）启动本应用时，进程**确实起来了**，但只是把 `main.cjs` 当普通
- * Node 脚本跑一遍：不创建窗口、不写日志、**退出码 0**。对外表现就是「双击图标毫无反应」，
- * 而直接从资源管理器双击同一个快捷方式却一切正常（explorer 的环境是干净的）。
- *
- * 这个问题在 `scripts/run-electron.cjs` 里已经踩过（那里会主动删掉该变量），但**打包后的
- * 用户入口**没有防护。所以这里把它变成**明确、可诊断的启动失败**，而不是静默成功：
- *   - stderr 打一段人能看懂的原因；
- *   - 在 exe 目录写 `logs/startup-error.log`（GUI 双击看不到 stderr，日志才是唯一线索）；
- *   - 以退出码 1 结束 —— 0 会被启动器当成「打开成功」。
- *
- * 只影响「以 main.cjs 为入口却被当成 Node 跑」这一种情况；`--codenode-selftest`、
- * ACP/stdio 中继、`scripts/run-electron.cjs` 等刻意用 Node 语义跑的入口都不经过这里。
- */
-(function rejectNodeModeStartup() {
-  const raw = process.env.ELECTRON_RUN_AS_NODE;
-  if (!raw) return;
-  const lines = [
-    'CodeNode 无法启动：检测到环境变量 ELECTRON_RUN_AS_NODE=' + String(raw) + '。',
-    '',
-    '这个变量会让 Electron 以「纯 Node」身份运行：应用不会创建窗口，进程会立刻以退出码 0 结束，',
-    '所以看起来像「双击没有反应」，而且不会有任何报错弹窗。',
-    '',
-    '常见来源：从一个设置了该变量的父进程启动（例如 Electron 系的 IDE / Agent harness 的终端、',
-    '或带该变量的批处理）。修复办法：',
-    '  1) 清除该变量后再启动：PowerShell 里先执行  Remove-Item Env:ELECTRON_RUN_AS_NODE',
-    '  2) 或者直接从「开始菜单 / 资源管理器 / 桌面快捷方式」启动（这些入口的环境是干净的）。',
-  ];
-  const text = lines.join('\n');
-  try { console.error(text); } catch {}
-  try {
-    const dir = path.join(path.dirname(process.execPath), 'logs');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, 'startup-error.log'),
-      '[' + new Date().toISOString() + '] ELECTRON_RUN_AS_NODE=' + String(raw) + '\n' + text + '\n\n', 'utf-8');
-  } catch {}
-  process.exit(1);
-})();
-
-/**
- * 控制台日志面板：把主进程的 console.log/info/warn/error 同时写入
- * <exe 目录>/logs/console.log。打包后的便携版 exe 没有附着控制台，配合
- * “CodeNode 控制台.cmd”启动器（桌面快捷方式指向它）即可在独立的 cmd 面板实时查看日志。
- */
-function setupConsoleLog() {
-  try {
-    const dir = path.join(path.dirname(process.execPath), 'logs');
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, 'console.log');
-    const stamp = () => '[' + new Date().toISOString() + '] ';
-    const toStr = (a) => {
-      if (typeof a === 'string') return a;
-      if (a instanceof Error) return String(a && a.stack ? a.stack : a);
-      try {
-        return JSON.stringify(a);
-      } catch {
-        return String(a);
-      }
-    };
-    const write = (args) => {
-      try {
-        fs.appendFileSync(file, stamp() + args.map(toStr).join(' ') + '\n', 'utf-8');
-      } catch {}
-    };
-    const hook = (original) =>
-      function (...args) {
-        write(args);
-        if (original) original.apply(console, args);
-      };
-    console.log = hook(console.log);
-    console.info = hook(console.info);
-    console.warn = hook(console.warn);
-    console.error = hook(console.error);
-  } catch {}
-}
-setupConsoleLog();
+// macOS 日志写入用户数据目录，避免运行后破坏 .app 签名；Windows 保留便携版日志位置。
+require('./consoleLog.cjs').setupConsoleLog({ userDataDir: app.getPath('userData') });
 
 const agent = require('./agent.cjs');
 const runStore = require('./runStore.cjs');
@@ -133,6 +55,9 @@ const ipcContext = { ipcMain, userDataDir: () => app.getPath('userData') };
 require('./ipc/models.cjs').register({ ...ipcContext, agent });
 require('./ipc/metrics.cjs').register({ ...ipcContext, agent, sandbox, runStore });
 const agentRuntime=agentIpc.register(ipcContext);
+require('./ipc/backend.cjs').register({ ...ipcContext, agent, sandbox, activeRequests:agentIpc.activeRequests });
+require('./ipc/branches.cjs').register({ ...ipcContext, agent, sandbox, activeRequests:agentIpc.activeRequests });
+require('./ipc/webSearch.cjs').register({ ...ipcContext, agent, activeRequests:agentIpc.activeRequests });
 app.on('before-quit',()=>agentRuntime.close());
 app.on('quit',()=>agentRuntime.close());
 require('./ipc/project.cjs').register({ ...ipcContext, dialog, getFocusedWindow: () => BrowserWindow.getFocusedWindow(), sandbox,
@@ -167,6 +92,20 @@ function isInternalUrl(url) {
 // 因此默认全量拒绝；将来确有需要，必须在这里显式放行并说明用途。
 /** @type {Set<string>} 渲染层不使用的权限一律不在集合里（默认全量拒绝） */
 const ALLOWED_PERMISSIONS = new Set([]);
+
+ipcMain.handle('app:start-dictation', event => {
+  const focusedWindow = BrowserWindow.getFocusedWindow();
+  if (focusedWindow?.webContents !== event.sender || event.senderFrame !== event.sender.mainFrame || !isInternalUrl(event.senderFrame?.url)) {
+    return { ok: false, error: '请先聚焦对话输入框' };
+  }
+  if (process.platform === 'darwin') {
+    Menu.sendActionToFirstResponder('startDictation:');
+    return { ok: true };
+  }
+  return { ok: false, error: process.platform === 'win32' ? '按 Win + H 开始系统语音输入' : '请使用系统语音输入工具' };
+});
+
+const WINDOW_FRAME_COLOR = '#222222';
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -237,7 +176,7 @@ function createWindow() {
                 { id:'n2', type:'task', position:{x:200,y:0}, data:{label:'任务',status:'pending'} },
                 { id:'n3', type:'end', position:{x:400,y:0}, data:{label:'结束',status:'pending'} }
               ], [ { id:'e1', source:'n1', target:'n2' }, { id:'e2', source:'n2', target:'n3' } ]);
-              g.layoutNodes();
+              g.arrangeNodes();
               await new Promise((r)=>setTimeout(r,200));
               const s = st.getState();
               const xs = s.nodes.map(n=>Math.round(n.position.x)).sort((a,b)=>a-b);
@@ -516,7 +455,7 @@ function createWindow() {
               for(let i=1;i<=15;i++){
                 graph.addNode({ id:'w'+i, type:'task', position:{x:40,y:40}, data:{label:'节点'+i,status:'pending'} });
               }
-              graph.layoutNodes();
+              graph.arrangeNodes();
               await new Promise((r)=>setTimeout(r,150));
               const nodes = window.__codenodeStore.getState().nodes;
               const xs = nodes.map(n=>Math.round(n.position.x)).sort((a,b)=>a-b);

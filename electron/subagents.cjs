@@ -20,7 +20,6 @@
 'use strict';
 
 const { AgentToolResult } = require('./tools/result.cjs');
-const { AgentToolRegistry } = require('./tools/registry.cjs');
 const { ConfirmationLevel } = require('./tools/context.cjs');
 const { parseWebSearchConfig } = require('./tools/impl/webSearchTool.cjs');
 const worktreeLib = require('./worktree.cjs');
@@ -987,36 +986,8 @@ class SubagentManager {
     };
   }
 
-  /**
-   * 装配子代理工具（工具面收敛 L3）。
-   *
-   * 原来是 8 个独立工具（全开装配 schema ≈ 2,300 tokens）。现在：
-   *   ① 把**未改动**的 8 个注册跑进一个舞台注册表（执行体、schema、契约都留在那里）；
-   *   ② 用 `subagentTools.registerSubagentFamilies` 在真实注册表上装 3 个族工具
-   *      （delegate / subagent_read / subagent_control），按 kind 分发到舞台里的执行体；
-   *   ③ 8 个旧名登记成别名 —— 模型历史消息、用例、审计里的旧名照旧可用，但不占上下文。
-   *
-   * 为什么这样做而不是重写 8 份执行体：执行体里混着确认、接收侧核验、Attempt 账本与审计，
-   * 抄一遍必然漂移。舞台注册表让「schema/语义收敛」与「执行逻辑不变」这两件事解耦。
-   */
   register(registry) {
     this.registry = registry;
-    const staging = new AgentToolRegistry();
-    this._registerLegacyTools(staging);
-    const { registerSubagentFamilies } = require('./tools/impl/subagentTools.cjs');
-    // 派活对照表（角色 → 负责哪类工作）拼进 delegate 的描述：主代理据此派活
-    const roleGuide = roles.ROLE_NAMES
-      .map((name) => {
-        const def = roles.roleDefinition(name);
-        return '  - ' + name + '（' + (def ? def.label : name) + '）：' + (def ? def.work.join('；') : '');
-      })
-      .join('\n');
-    registerSubagentFamilies(registry, staging, { roleGuide });
-    return registry;
-  }
-
-  /** 原 8 个工具的注册（**逐字保留**，只改由舞台注册表承载） */
-  _registerLegacyTools(registry) {
     const roleList = roles.ROLE_NAMES.join('/');
     // 派活对照表：主代理必须能看出「这类工作该交给哪个角色」，否则会拿 explorer 去改代码、拿 reviewer 去跑测试
     const roleGuide = roles.ROLE_NAMES

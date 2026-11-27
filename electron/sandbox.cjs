@@ -284,6 +284,7 @@ function resolvePolicy(rawConfig, options = {}) {
     network,
     requireFilesystem,
     writeRoots,
+    agentRuntimeDir: options.userDataDir ? path.resolve(options.userDataDir, 'agent-runtime') : undefined,
     maxProcesses: toInt(cfg.maxProcesses || cfg['sandbox.max_processes'], 0, 0, 4096),
     maxMemoryMB: toInt(cfg.maxMemoryMB || cfg['sandbox.max_memory_mb'], 0, 0, 1024 * 1024),
     cpuSeconds: toInt(cfg.cpuSeconds || cfg['sandbox.cpu_seconds'], 0, 0, 86400),
@@ -667,7 +668,7 @@ function guardedMcpSpawn(spec, options = {}) {
   // 同 guardedSpawn：cwd / env 两种调用写法都支持（MCP 与项目命令面板从 options 传）
   const cwd = options.cwd !== undefined ? options.cwd : spec.cwd;
   const env = options.env !== undefined ? options.env : spec.env;
-  const baseOptions = { cwd, env, shell: false, windowsHide: true };
+  const baseOptions = { cwd, env, shell: false, windowsHide: true, detached: options.detached === true };
   if (!policy || policy.mode === 'off') return plainSpawn(spec.file, spec.args, baseOptions);
   const caps = policy.capabilities || {};
   if (requiresFailClosed(policy) && policy.unsatisfied && policy.unsatisfied.length) {

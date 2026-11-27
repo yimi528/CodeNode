@@ -23,15 +23,24 @@ app.whenReady().then(async () => {
     require(path.join(moduleRoot, 'electron/modelStore.cjs')).writeModels(userData,
       [{ id: 'inspector-model', model: 'fixture-model', label: 'Inspector test', apiBase: 'http://127.0.0.1:12345', apiKey: 'synthetic-ui-key' }], 'inspector-model');
     await win.loadFile(path.join(moduleRoot, 'dist/index.html'));
+    win.setPosition(-1900, -1900); win.showInactive();
     await win.webContents.executeJavaScript(`(async () => {
       for (let i = 0; !window.__codenodeProject && i < 120; i++) await new Promise(r => setTimeout(r, 50));
+      window.__codenodeUi.getState().updatePreferences({advancedMode:true,vectorEditorEnabled:true});
       await window.__codenodeProject.getState().loadRoot(${JSON.stringify(root)});
       if (!window.__codenodeSession.getState().current()) window.__codenodeSession.getState().newCanvas();
+      for (let i = 0; (!document.querySelector('.canvas-add-trigger') || document.querySelector('.startup-splash')) && i < 120; i++) await new Promise(r => setTimeout(r, 50));
+      if (!document.querySelector('.canvas-add-trigger') || document.querySelector('.startup-splash')) throw Error('Canvas did not finish starting');
     })()`);
     const reports = [];
     for (const theme of ['light', 'dark']) {
       const report = await win.webContents.executeJavaScript(`(async () => {
         const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const click = selector => {
+          const element = document.querySelector(selector);
+          if (!element) throw Error('Missing ' + selector + ', selected=' + window.__codenodeStore.getState().selectedId + ', tab=' + window.__codenodeUi.getState().sideTab);
+          element.click();
+        };
         const ui = window.__codenodeUi, graph = window.__codenodeStore, session = window.__codenodeSession;
         ui.setState({ sideTab: 'agent', sideOpen: false });
         if (ui.getState().theme !== ${JSON.stringify(theme)}) ui.getState().toggleTheme();
@@ -42,11 +51,13 @@ app.whenReady().then(async () => {
         const before = { session: session.getState().activeId, draft: input.value,
           model: (await window.codenode.modelsList()).activeId, navigation: ui.getState().navigationOpen };
         const oldCount = graph.getState().nodes.length;
-        document.querySelector('.toolbar-vector').click(); await sleep(350);
+        click('.canvas-add-trigger'); await sleep(60); click('.add-menu-item[data-node-type=vector]'); await sleep(350);
         const vector = { count: graph.getState().nodes.length, type: graph.getState().nodes.find(n => n.id === graph.getState().selectedId)?.type,
           tab: ui.getState().sideTab, open: ui.getState().sideOpen, panel: !!document.querySelector('.side-panel') };
         input.blur();
         graph.getState().setSelectedIds([]); await sleep(60);
+        const bounds = document.querySelector('.canvas-wrap').getBoundingClientRect();
+        window.dispatchEvent(new MouseEvent('mousemove', {clientX:bounds.left+bounds.width/2,clientY:bounds.top+bounds.height/2}));
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'A', code: 'KeyA', shiftKey: true, bubbles: true, cancelable: true }));
         await sleep(70);
         const menu = { exists: !!document.querySelector('.add-menu'), open: ui.getState().sideOpen, tab: ui.getState().sideTab };
@@ -54,18 +65,44 @@ app.whenReady().then(async () => {
         if (!item) throw Error('Task template not found: ' + JSON.stringify({ menu, focus: document.activeElement.tagName, selected: graph.getState().selectedId })); item.click(); await sleep(150);
         const task = { count: graph.getState().nodes.length, type: graph.getState().nodes.find(n => n.id === graph.getState().selectedId)?.type,
           open: ui.getState().sideOpen, panel: !!document.querySelector('.side-panel') };
-        document.querySelector('.toolbar-dropdown').open = true;
-        document.querySelector('[data-action="properties"]').click();
-        document.querySelector('.toolbar-dropdown').open = false; await sleep(150);
+
+        const inlineEditor = document.querySelector('.react-flow__node.selected .wf-node-prompt');
+        if (!inlineEditor || document.querySelector('.node-editor')) throw Error('任务节点应显示内联编辑器');
+        const previousHeight = inlineEditor.clientHeight;
+        const longPrompt = '逐项检查交互与验收条件，并记录验证结果。'.repeat(6);
+        inlineEditor.focus();
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(inlineEditor, longPrompt);
+        inlineEditor.dispatchEvent(new Event('input', { bubbles: true })); await sleep(70);
+        if (inlineEditor.clientHeight <= previousHeight || inlineEditor.scrollHeight > inlineEditor.clientHeight + 1 ||
+            graph.getState().nodes.find(n => n.id === graph.getState().selectedId).data.prompt !== longPrompt)
+          throw Error('内联指令编辑后应保存并随文案增高');
+        inlineEditor.blur();
+        click('.node-actions [aria-label="展开输入框"]'); await sleep(50);
+        const editor = document.querySelector('.node-editor textarea');
+        const editorBox = editor.closest('section').getBoundingClientRect();
+        const cardBox = document.querySelector('.react-flow__node.selected').getBoundingClientRect();
+        if (editorBox.top < cardBox.bottom - 1) throw Error('节点下方输入框位置错误');
+        editor.focus();
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(editor, '节点的独立指令');
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        await sleep(40);
+        if (graph.getState().nodes.find(n => n.id === graph.getState().selectedId).data.prompt !== editor.value || input.value !== before.draft)
+          throw Error('节点编辑未隔离对话草稿');
+        click('.node-actions [aria-label="引用到对话"]'); await sleep(50);
+        if (!input.value.startsWith(before.draft) || !input.value.includes(graph.getState().selectedId) || !input.value.endsWith(editor.value))
+          throw Error('对话引用缺少节点内容');
+        before.draft = input.value;
+        click('.node-actions [aria-label="编辑节点"]');
+        await sleep(150);
         const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width }; };
         const layout = { panel: rect('.side-panel'), canvas: rect('.workspace-canvas'), conversation: rect('.conversation-right'),
           position: getComputedStyle(document.querySelector('.side-panel')).position, open: ui.getState().sideOpen };
-        document.querySelector('.sp-close').click(); await sleep(60);
-        document.querySelector('.toolbar-vector').click(); await sleep(300);
+        click('.sp-close'); await sleep(60);
+        click('.canvas-add-trigger'); await sleep(60); click('.add-menu-item[data-node-type=vector]'); await sleep(300);
         const closed = { open: ui.getState().sideOpen, panel: !!document.querySelector('.side-panel'), tab: ui.getState().sideTab };
-        document.querySelector('[data-action="properties"]').click(); await sleep(100);
+        click('.node-actions [aria-label="编辑节点"]'); await sleep(100);
         const selected = graph.getState().selectedId;
-        document.querySelector('.toolbar-vector').click(); await sleep(300);
+        click('.canvas-add-trigger'); await sleep(60); click('.add-menu-item[data-node-type=vector]'); await sleep(300);
         const preservedOpen = { open: ui.getState().sideOpen, selectedChanged: selected !== graph.getState().selectedId };
         ui.getState().toggleTheme(); await sleep(80); ui.getState().toggleTheme(); await sleep(80);
         const after = { session: session.getState().activeId, draft: input.value,
@@ -94,7 +131,9 @@ app.whenReady().then(async () => {
     }
     const settings = await win.webContents.executeJavaScript(`(async () => {
       const ui = window.__codenodeUi;
-      ui.getState().openSettings('layout'); await new Promise(r => setTimeout(r, 100));
+      ui.getState().openSettings('layout');
+      for (let i = 0; !document.querySelector('.settings-menu-actions') && i < 120; i++) await new Promise(r => setTimeout(r, 50));
+      if (!document.querySelector('.settings-menu-actions')) throw Error('Layout settings did not finish loading');
       // 画布菜单的可见操作在「界面 → 画布菜单」折叠项里，必须先展开。
       const advanced = document.querySelector('.settings-advanced'); if (advanced) advanced.open = true;
       await new Promise(r => setTimeout(r, 60));

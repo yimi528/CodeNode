@@ -31,27 +31,6 @@ require(process.env.CODENODE_UI_TEST_PACKAGE
   : "../../electron/main.cjs");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function previewPdfFixture() {
-  const firstPage = '0 0 1 rg 0 0 100 100 re f BT /F1 12 Tf 10 120 Td (Page one) Tj ET';
-  const secondPage = '1 0 0 rg 0 0 100 100 re f BT /F1 12 Tf 10 120 Td (Page two) Tj ET';
-  const pages = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 200] /Resources << /Font << /F1 5 0 R >> >> >>',
-    '<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>',
-    '<< /Type /Page /Parent 2 0 R /Contents 7 0 R >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    ...[firstPage, secondPage].map(commands => `<< /Length ${commands.length} >>\nstream\n${commands}\nendstream`),
-  ];
-  let content = '%PDF-1.4\n';
-  const entries = pages.map((object, index) => {
-    const offset = String(content.length).padStart(10, '0');
-    content += `${index + 1} 0 obj\n${object}\nendobj\n`;
-    return `${offset} 00000 n \n`;
-  });
-  return `${content}xref\n0 ${pages.length + 1}\n0000000000 65535 f \n${entries.join('')}trailer\n<< /Size ${pages.length + 1} /Root 1 0 R >>\nstartxref\n${content.length}\n%%EOF\n`;
-}
-
 async function waitFor(check, label) {
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
@@ -67,26 +46,19 @@ app.whenReady().then(async () => {
     ipcMain.handle('agent:chat', async (_event, payload) => { firstSendCalls++; assert.equal(payload.prompt, '你好'); return await new Promise(resolve => { completeFirstSend = () => resolve({ok:true,reply:'你好，我能为你做什么？',reasoning:'',tools:[]}); }); });
   }
   try {
-    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && !document.querySelector(".startup-splash")').catch(() => false), '主工作区');
-    const reopenProject = async () => {
-      const beforeReload = await win.webContents.executeJavaScript('performance.timeOrigin');
-      win.webContents.reload();
-      await waitFor(async () => await win.webContents.executeJavaScript(`performance.timeOrigin !== ${beforeReload} && window.__codenodeUi?.getState().booted && window.__codenodeProject?.getState().projectFile === ${JSON.stringify(projectFile)}`).catch(() => false), '启动时恢复上次工程');
-    };
+    await waitFor(async () => win && await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && !!document.querySelector(".toolbar") && window.__codenodeUi.getState().booted').catch(() => false), '启动工作台首页');
     win.hide();
+    assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), null);
+    assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".project-navigation") && !!document.querySelector(".toolbar") && !document.querySelector(".canvas-wrap")'));
     const modelFixtures = require("../../electron/modelStore.cjs").seedModels({apiKey:'synthetic-ui-key'});
     fs.mkdirSync(app.getPath('userData'),{recursive:true});
     fs.writeFileSync(path.join(app.getPath('userData'),'models.json'),JSON.stringify({models:modelFixtures,activeId:modelFixtures[0].id}));
     const alternateRoot = path.join(root, 'alternate-project');
     fs.mkdirSync(alternateRoot, {recursive:true});
     const alternateFile = path.join(alternateRoot, 'alternate.cnode');
-    fs.writeFileSync(alternateFile, cnode.encodeCnode({graph:{nodes:[],edges:[]},canvases:{sessions:[
-      {id:'alternate-session',label:'另一项目聊天',status:'active',createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}},
-      {id:'alternate-second',label:'另一项目第二条对话',status:'completed',createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]},messages:[{role:'user',content:'独立的对话记录'}]},
-      {id:'alternate-archived',label:'已归档对话',archived:true,createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}},
-    ],messages:[]}}));
+    fs.writeFileSync(alternateFile, cnode.encodeCnode({graph:{nodes:[],edges:[]},canvases:{sessions:[{id:'alternate-session',label:'另一项目聊天',status:'active',createdAt:Date.now(),nodeCount:0,root:{nodes:[],edges:[]}}],messages:[]}}));
     await win.webContents.executeJavaScript('localStorage.setItem("codenode.recentProjects", '+JSON.stringify(JSON.stringify([{root:alternateRoot,file:alternateFile,name:'alternate-project',openedAt:Date.now()}]))+')');
-    await win.webContents.executeJavaScript('document.querySelector(\'[data-project-action="new"]\').click()');
+    await win.webContents.executeJavaScript('document.querySelectorAll(".workspace-home-actions button")[1].click()');
     await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".app") && !!window.__codenodeProject.getState().root'), '新建后进入工作台');
     assert.equal(fs.existsSync(projectFile), true);
     assert.equal(cnode.decodeCnode(fs.readFileSync(projectFile)).ok, true);
@@ -103,14 +75,100 @@ app.whenReady().then(async () => {
 
     assert.ok(!agentView.crash, agentView.crash);
     assert.ok(agentView.panel?.width >= 260 && agentView.input?.height > 0, 'Agent panel and composer must be visible');
+    if (process.env.CODENODE_PROJECT_SWITCH_UI_TEST === '1') {
+      const js = code => win.webContents.executeJavaScript(code);
+      const sibling = path.join(root, 'sibling.cnode');
+      const readme = path.join(root, 'preview-current.txt');
+      const session = (id, label, content) => ({
+        id, label, status: 'active', root: { nodes: [], edges: [] },
+        messages: [{ role: 'user', content, status: 'done' }],
+      });
+      const first = session('sibling-first', '同目录第一条对话', '第一条消息');
+      const second = session('sibling-second', '同目录第二条对话', '第二条独立消息');
+      const writeSibling = sessions => fs.writeFileSync(sibling, cnode.encodeCnode({
+        graph: { nodes: [], edges: [] }, canvases: { sessions, messages: first.messages },
+      }));
+      writeSibling([first, second]);
+      fs.writeFileSync(readme, '当前目录文件');
+      const currentPath = JSON.stringify(projectFile);
+      const siblingPath = JSON.stringify(sibling);
+      const group = target => `[...document.querySelectorAll('.project-group')].find(group => group.dataset.projectPath === ${JSON.stringify(target)})`;
+      const state = () => js(`(() => {
+        const p = window.__codenodeProject.getState();
+        const s = window.__codenodeSession.getState();
+        return { root:p.root, file:p.projectFile, selected:p.selected, draft:p.draft, dirty:p.dirty, id:s.activeId, messages:s.messages };
+      })()`);
+      await js(`(async () => {
+        const ui = window.__codenodeUi.getState();
+        ui.updatePreferences({autoSaveEnabled:false});
+        window.__codenodeUi.setState({navigationOpen:true, theme:'light'});
+        const entries = JSON.parse(localStorage.getItem('codenode.recentProjects'));
+        localStorage.setItem('codenode.recentProjects', JSON.stringify([...entries, {root:${JSON.stringify(root)}, file:${siblingPath}, name:'sibling', openedAt:Date.now()}]));
+        await window.__codenodeProject.getState().openFile('preview-current.txt');
+        window.__codenodeProject.getState().updateDraft('保留未保存草稿');
+      })()`);
+      const before = await state();
+      assert.equal(before.dirty, true);
+      assert.equal(before.file, projectFile);
+
+      assert.equal(await js(`document.querySelector('.activity-bar button[aria-label="文件"]') !== null`), false);
+      await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'p',metaKey:true,bubbles:true,cancelable:true}))`);
+      await waitFor(async () => await js(`document.querySelector('.files-document .dock-code-editor')?.value === '保留未保存草稿'`), '快捷键打开文件编辑器');
+      await js(`document.querySelector('[aria-label="切换到画布"]').click()`);
+      await waitFor(async () => await js(`document.querySelector('.workspace-agent') !== null`), '从编辑器返回对话');
+      assert.deepEqual(await state(), before);
+      await waitFor(async () => await js(`!!(${group(sibling)})`), '同目录两个工程分别显示');
+      assert.ok(await js(`!!(${group(projectFile)})`));
+      await js(`(${group(sibling)}).querySelector('.project-group-name').click()`);
+      const siblingSession = `(${group(sibling)})?.querySelector('.project-session-row button[title="同目录第二条对话"]')`;
+      await waitFor(async () => await js(`!!(${siblingSession})`), '展开其他工程按需读取会话');
+      assert.deepEqual(await state(), before);
+
+      writeSibling([first]);
+      await js(`(${siblingSession}).click()`);
+      await waitFor(async () => await js(`document.body.textContent.includes('找不到这条对话')`), '失效会话阻止切换');
+      assert.deepEqual(await state(), before);
+      writeSibling([first, second]);
+
+      await js(`window.testSwitchConfirmCalls = 0; window.confirm = () => { window.testSwitchConfirmCalls++; return false; }; (${siblingSession}).click()`);
+      await waitFor(async () => await js(`window.testSwitchConfirmCalls === 1 && !(${siblingSession}).disabled`), '取消切换');
+      assert.deepEqual(await state(), before);
+
+      let rejectSave = true;
+      ipcMain.removeHandler('project:save');
+      ipcMain.handle('project:save', (_event, target, payload) => {
+        if (rejectSave) return { ok:false, error:'模拟磁盘写入失败' };
+        fs.writeFileSync(target, cnode.encodeCnode(payload));
+        return { ok:true, filePath:target };
+      });
+      await js(`window.confirm = () => true; window.__codenodeSession.getState().pushUser('切换前保存的消息'); (${siblingSession}).click()`);
+      await waitFor(async () => await js(`document.body.textContent.includes('当前项目未能保存')`), '保存失败阻止切换');
+      assert.equal((await state()).file, projectFile);
+      assert.equal((await state()).draft, before.draft);
+      rejectSave = false;
+      await js(`(${siblingSession}).click()`);
+      await waitFor(async () => (await state()).id === 'sibling-second', '确认后进入同目录指定会话');
+      const after = await state();
+      assert.equal(after.root, root);
+      assert.equal(after.file, sibling);
+      assert.deepEqual(after.messages.map(message => message.content), ['第二条独立消息']);
+      assert.ok(cnode.decodeCnode(fs.readFileSync(projectFile)).canvases.messages.some(message => message.content === '切换前保存的消息'));
+      assert.equal(fs.readFileSync(readme, 'utf8'), '当前目录文件');
+      assert.ok(await js(`!!(${group(projectFile)}) && !!(${group(sibling)})`));
+      assert.equal(await js(`window.__codenodeProject.getState().projectFile === ${currentPath}`), false);
+      console.log('PROJECT SWITCH AND FILE EDITOR UI: PASS');
+      app.quit();
+      return;
+    }
     if(process.env.CODENODE_BATCH_ARCHIVE_TEST==='1'){
-      const js=code=>win.webContents.executeJavaScript(code);win.showInactive();win.setSize(1300,850);
+      const js=async code=>{try{return await win.webContents.executeJavaScript(code)}catch(error){throw new Error(code,{cause:error})}};win.showInactive();win.setSize(1300,850);
       await js(`window.__codenodeUi.getState().updatePreferences({autoSaveEnabled:false})`);
       const archivedIds=await js(`(()=>{const ids=[];for(let i=0;i<3;i++){const ss=window.__codenodeSession.getState();ss.newCanvas();const id=window.__codenodeSession.getState().activeId;window.__codenodeSession.setState(s=>({sessions:{...s.sessions,[id]:{...s.sessions[id],label:'已归档聊天 '+(i+1)}}}));window.__codenodeSession.getState().pushUser('旧消息 '+i);window.__codenodeSession.getState().setArchived(id,true);ids.push(id)}return ids})()`);
       const activeId=await js(`window.__codenodeSession.getState().activeId`);
       assert.equal(await js(`window.__codenodeSession.getState().deleteArchivedSessions([${JSON.stringify(archivedIds[0])},${JSON.stringify(activeId)}])`),false);
       assert.equal(await js(`Object.values(window.__codenodeSession.getState().sessions).filter(session=>session.archived).length`),3);
-      await js(`window.__codenodeUi.getState().openSettings('archived')`);await sleep(100);
+      await js(`document.querySelector('.project-nav-archive').click()`);
+      await waitFor(async()=>await js(`!!document.querySelector('[aria-label="全选归档聊天"]')`),'已归档聊天列表');
       await js(`document.querySelector('[aria-label="全选归档聊天"]').click()`);await sleep(80);
       assert.equal(await js(`document.querySelectorAll('.archived-chat-choice input:checked').length`),3);
       await js(`document.querySelector('[aria-label="删除选中的归档聊天"]').click()`);await sleep(60);
@@ -131,8 +189,8 @@ app.whenReady().then(async () => {
       const remaining=await js(`window.__codenodeSession.getState().order`);
       assert.ok(!remaining.includes(archivedIds[0])&&!remaining.includes(archivedIds[1]));assert.ok(remaining.includes(archivedIds[2])&&remaining.includes(activeId));
       for(const theme of ['light','dark']){await js(`window.__codenodeUi.setState({theme:${JSON.stringify(theme)}})`);await sleep(350);assert.ok(await js(`document.querySelector('.archive-bulk-toolbar')!==null`));}
-      await js(`window.__codenodeUi.getState().closeSettings()`);
-      await reopenProject();
+      await js(`window.__codenodeUi.getState().closeSettings()`);win.webContents.reload();await sleep(350);await js(`Array.from(document.querySelectorAll('.project-row-menu button')).find(button => button.closest('.project-group').dataset.projectPath === ${JSON.stringify(projectFile)} && button.textContent === '打开项目').click()`);
+      await waitFor(async()=>await js(`!!document.querySelector('.activity-bar')`),'批量删除后重开项目');
       const saved=cnode.decodeCnode(fs.readFileSync(projectFile));assert.ok(!saved.canvases.sessions.some(session=>archivedIds.slice(0,2).includes(session.id)));assert.ok(saved.canvases.sessions.some(session=>session.id===archivedIds[2]));
       console.log('BATCH ARCHIVE UI: PASS (select/all/partial, count confirmation, cancel, all-or-nothing guard, failure rollback, preserve unselected/active, reload persistence, both themes)');
     }
@@ -177,7 +235,9 @@ app.whenReady().then(async () => {
       assert.ok(saved.canvases.sessions.some(session=>session.id===activeId));
       assert.equal(await js(`window.__codenodeSession.getState().messages.some(message=>message.content==='必须保留的聊天')`),true);
       await js(`window.__codenodeUi.getState().closeSettings()`);
-      await reopenProject();
+      win.webContents.reload();await sleep(350);
+      await js(`Array.from(document.querySelectorAll('.project-row-menu button')).find(button => button.closest('.project-group').dataset.projectPath === ${JSON.stringify(projectFile)} && button.textContent === '打开项目').click()`);
+      await waitFor(async()=>await js(`!!document.querySelector('.activity-bar')`),'重新打开项目');
       assert.equal(await js(`!!window.__codenodeSession.getState().sessions[${JSON.stringify(archivedId)}]`),false);
       await js(`window.__codenodeUi.getState().openSettings('rag')`);await sleep(120);
       assert.equal(await js(`document.querySelector('[aria-label="向量存储"]').value`),'sqlite');
@@ -199,7 +259,7 @@ app.whenReady().then(async () => {
       await js(`window.__codenodeSession.setState({intentVerdict:{intent:'chat',risk:'low',authorization:'high',confidence:.95,reason:'普通问候',source:'model',tighten:false}})`);
       assert.equal(await js(`!!document.querySelector('.conversation-right .ap-intent')`),false);
       await js(`document.querySelector('.toolbar-dropdown summary').click()`);await sleep(60);
-      assert.equal(await js(`document.querySelector('[data-action="workflow"]').disabled`),true);
+      assert.equal(await js(`!!document.querySelector('[data-action="workflow"]')`),false);
       await js(`document.querySelector('.toolbar-dropdown summary').click();window.__codenodeStore.getState().addNode({id:'auto-task',type:'task',position:{x:40,y:50},data:{label:'自动保存测试',prompt:'整理当前项目结构'}});window.__codenodeStore.getState().setSelectedIds([])`);
       await waitFor(async()=>cnode.decodeCnode(fs.readFileSync(projectFile)).graph.nodes.some(node=>node.id==='auto-task'),'画布自动保存');
       await waitFor(async()=>await js(`document.querySelector('.toolbar-save-state').textContent==='已保存'`),'已保存状态');
@@ -210,7 +270,7 @@ app.whenReady().then(async () => {
         fs.mkdirSync(path.join(__dirname,"../../out"),{recursive:true});fs.writeFileSync(path.join(__dirname,"../../out",'simplified-workbench-'+theme+'.png'),(await win.webContents.capturePage()).toPNG());
       }
       let executions=0;ipcMain.removeHandler('project:workflow-execute');ipcMain.handle('project:workflow-execute',()=>{executions++;return {ok:false,error:'不应自动执行'}});
-      await js(`document.querySelector('.toolbar-dropdown summary').click();document.querySelector('[data-action="workflow"]').click()`);
+      await js(`document.querySelector('[data-action="workflow"]').click()`);
       await waitFor(async()=>await js(`!!document.querySelector('.workflow-scope')`),'执行范围预览');
       assert.equal(executions,0);assert.ok(await js(`document.querySelector('.workflow-scope').textContent.includes('自动保存测试')`));
       assert.equal(await js(`document.querySelector('.run-diagnostics').open`),false);
@@ -220,7 +280,7 @@ app.whenReady().then(async () => {
       await js(`window.__codenodeStore.getState().updateNodeData('auto-task',{label:'关闭自动保存后修改'})`);await sleep(750);
       assert.equal(fs.readFileSync(projectFile,'utf8'),prior);
       assert.equal(await js(`document.querySelector('.toolbar-save-state').textContent`),'未保存');
-      await js(`document.querySelector('.toolbar-dropdown summary').click();[...document.querySelectorAll('.toolbar-menu button')].find(button=>button.textContent.includes('保存项目')).click()`);
+      await js(`document.querySelector('.project-row-menu:has([data-action=save]) summary').click();document.querySelector('.project-row-menu[open] [data-action=save]').click()`);
       await waitFor(async()=>cnode.decodeCnode(fs.readFileSync(projectFile)).graph.nodes.some(node=>node.data.label==='关闭自动保存后修改'),'手动保存仍可用');
       await js(`window.__codenodeUi.getState().updatePreferences({autoSaveEnabled:true})`);await sleep(80);
       ipcMain.removeHandler('project:save');let saveFails=true;const writeScopes=[];
@@ -232,7 +292,7 @@ app.whenReady().then(async () => {
       await waitFor(async()=>await js(`document.querySelector('.toolbar-save-state').textContent==='保存失败'`),'写入失败状态');
       assert.ok(await js(`document.querySelector('.toolbar-save-state').title.includes('模拟磁盘写入失败')`));
       saveFails=false;
-      await js(`document.querySelector('.toolbar-dropdown summary').click();[...document.querySelectorAll('.toolbar-menu button')].find(button=>button.textContent.includes('保存项目')).click()`);
+      await js(`document.querySelector('.project-row-menu:has([data-action=save]) summary').click();document.querySelector('.project-row-menu[open] [data-action=save]').click()`);
       await waitFor(async()=>await js(`document.querySelector('.toolbar-save-state').textContent==='已保存'`),'失败后重试');
       await js(`window.__codenodeStore.getState().updateNodeData('auto-task',{label:'旧项目最后一份修改'})`);await sleep(50);
       await js(`window.__codenodeProject.getState().loadRoot(${JSON.stringify(alternateRoot)})`);
@@ -248,7 +308,9 @@ app.whenReady().then(async () => {
       const js=code=>win.webContents.executeJavaScript(code);
       win.setSize(1300,850);win.showInactive();await sleep(100);
       await js(`window.__codenodeUi.setState({navigationOpen:true});const input=document.querySelector('.pp-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'离开工作台也要保留这份草稿');input.dispatchEvent(new Event('input',{bubbles:true}));window.__codenodeStore.getState().addNode({id:'rail-test-node',type:'task',position:{x:60,y:70},data:{label:'保留节点'}});window.__codenodeStore.getState().setSelectedIds([])`);await sleep(80);
-      const before=await js(`({messages:window.__codenodeSession.getState().messages,model:document.querySelector('.pp-model').textContent,nodes:window.__codenodeStore.getState().nodes})`);
+      // React Flow measures nodes asynchronously; compare durable node state across page changes.
+      const workbenchSnapshot = () => js(`({messages:window.__codenodeSession.getState().messages,model:document.querySelector('.model-connection-trigger').title,nodes:window.__codenodeStore.getState().nodes.map(({measured, ...node}) => node)})`);
+      const before = await workbenchSnapshot();
       const rail=await js(`(() => {const r=document.querySelector('.activity-bar').getBoundingClientRect();return {x:r.x,width:r.width,height:r.height,h:innerHeight}})()`);
       assert.equal(rail.x,0);assert.equal(rail.width,48);assert.ok(Math.abs(rail.height-rail.h)<1);
       for(const theme of ['light','dark']) {
@@ -260,7 +322,22 @@ app.whenReady().then(async () => {
         const layout=await js(`(() => {const rail=document.querySelector('.activity-bar').getBoundingClientRect(),nav=document.querySelector('.plugin-navigation').getBoundingClientRect(),page=document.querySelector('.plugin-page').getBoundingClientRect();return {railRight:rail.right,navX:nav.x,navRight:nav.right,pageX:page.x,pageW:page.width,viewport:innerWidth,pageR:page.right}})()`);
         assert.equal(layout.navX,layout.railRight);assert.equal(layout.pageX,layout.navRight);assert.ok(Math.abs(layout.pageR-layout.viewport)<1);
         fs.mkdirSync(path.join(__dirname,"../../out"),{recursive:true});fs.writeFileSync(path.join(__dirname,"../../out",'plugin-rail-'+theme+'.png'),(await win.webContents.capturePage()).toPNG());
-        await js(`document.querySelector('.plugin-navigation button[aria-pressed="false"]').click()`);await sleep(80);
+        assert.equal(await js("document.querySelector('.market-header h2').textContent"), '插件市场');
+        if (theme === 'light') {
+          await js("document.querySelector('.market-controls nav button:last-child').click()");
+          assert.equal(await js("!!document.querySelector('.market-vector')"), false);
+          await js(`const search=document.querySelector('.market-header input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(search,'提交');search.dispatchEvent(new Event('input',{bubbles:true}))`);
+          await waitFor(() => js("document.querySelectorAll('.market-grid article').length === 1"), '市场搜索');
+          await js("document.querySelector('.market-grid summary').click()");
+          assert.ok(await js("document.querySelector('.market-grid details[open] code')?.getBoundingClientRect().width > 160"), '命令预览可读');
+          await js("document.querySelector('.market-grid article button').click()");
+          await waitFor(() => js("document.querySelector('.market-grid article button')?.textContent === '已安装'"), '市场安装');
+          const manifest = JSON.parse(fs.readFileSync(path.join(root,'.codenode','extensions.json'),'utf8'));
+          assert.equal(manifest.extensions.find(item => item.name === 'git_recent_commits')?.readOnly, true);
+          await js("[...document.querySelectorAll('.plugin-navigation nav button')].find(button => button.textContent.includes('项目工具')).click()");
+          await waitFor(() => js("document.querySelector('.extensions-installed')?.innerText.includes('git_recent_commits')"), '项目工具显示市场安装结果');
+        }
+        await js(`[...document.querySelectorAll('.plugin-navigation nav button')].find(b=>b.textContent.includes('技能')).click()`);await sleep(80);
         assert.equal(await js(`document.querySelector('.extensions-heading h2').textContent`),'技能');
         await js(`document.querySelector('.extensions-add').click()`);await sleep(80);
         assert.equal(await js(`document.querySelector('[aria-label="扩展类型"]').value`),'skills');
@@ -268,7 +345,7 @@ app.whenReady().then(async () => {
         assert.equal(await js(`!!document.querySelector('.plugin-navigation')`),false);
         await js(`document.querySelector('.toolbar-navigation-toggle').click();document.querySelector('.activity-bar button[aria-label="工作台"]').click()`);await sleep(80);
         assert.equal(await js(`document.querySelector('.pp-input').value`),'离开工作台也要保留这份草稿');
-        assert.deepEqual(await js(`({messages:window.__codenodeSession.getState().messages,model:document.querySelector('.pp-model').textContent,nodes:window.__codenodeStore.getState().nodes})`),before);
+        assert.deepEqual(await workbenchSnapshot(), before);
         await js(`document.querySelector('.activity-bar button[aria-label="全局设置"]').click()`);await sleep(60);
         assert.equal(await js(`!![...document.querySelectorAll('.settings-layout nav button')].find(button=>button.textContent==='插件'||button.textContent==='扩展')`),false);
         await js(`window.__codenodeUi.getState().closeSettings();window.__codenodeUi.getState().setPluginView('plugins')`);await sleep(60);
@@ -300,7 +377,7 @@ app.whenReady().then(async () => {
       await js(`document.querySelector('.extension-connect button[type="submit"]').click()`);
       await waitFor(async()=>await js(`!!document.querySelector('.extensions-notice') && !document.querySelector('.extension-connect')`),'Skill 保存成功');
       assert.equal(JSON.parse(fs.readFileSync(manifest,'utf8')).extensions.length,2);
-      await js(`[...document.querySelectorAll('.plugin-navigation nav button')].find(button=>button.textContent.includes('插件')).click()`);await sleep(80);
+      await js(`[...document.querySelectorAll('.plugin-navigation nav button')].find(button=>button.textContent.includes('项目工具')).click()`);await sleep(80);
       await js(`document.querySelector('.extensions-add').click()`);await sleep(80);
       await fill('扩展名称','ui-command');await fill('扩展启动命令','node x');
       await js(`document.querySelector('.extension-connect button[type="submit"]').click()`);
@@ -341,7 +418,8 @@ app.whenReady().then(async () => {
       assert.equal(await js(`document.querySelectorAll('.extension-entry').length`),1);
       await js(`document.querySelector('.extension-entry summary').click()`);await sleep(80);
       assert.equal(await js(`document.querySelector('.extension-entry').open`),true);
-      assert.ok(await js(`document.querySelector('.extension-detail p').textContent.length`)>200);
+      assert.equal(await js(`document.querySelector('.extension-detail p').textContent`),
+        original.extensions.find(item => item.name === 'workbench_edit').description);
       await js(`document.querySelector('[data-category="mcp"]').click()`);await sleep(80);
       assert.equal(await js(`!!document.querySelector('.extensions-empty')`),true);
       await js(`document.querySelector('.extensions-empty button').click()`);await sleep(80);
@@ -398,7 +476,7 @@ app.whenReady().then(async () => {
       assert.equal(await js(`window.__codenodeUi.getState().preferences.showShortcuts`),false);
       await js(`window.__codenodeUi.getState().updatePreferences({menuRowHeight:40,showGroupLabels:false,visibleActions:['terminal','duplicate'],hideDisabledActions:true,autoCollapseSidebars:false});window.__codenodeUi.getState().closeSettings();document.querySelector('.toolbar-dropdown').open=true`); await sleep(100);
       const configured=await js(`(() => {const menu=document.querySelector('.toolbar-menu');return {width:menu.getBoundingClientRect().width,labels:menu.querySelectorAll('.toolbar-menu-label').length,shortcuts:menu.querySelectorAll('kbd').length,ids:[...menu.querySelectorAll('[data-action]')].map(el=>el.dataset.action),height:menu.querySelector('[data-action]').getBoundingClientRect().height};})()`);
-      assert.deepEqual(configured,{width:280,labels:0,shortcuts:0,ids:['terminal'],height:40});
+      assert.deepEqual(configured,{width:280,labels:0,shortcuts:0,ids:['links','snap','minimap'],height:40});
       const saved=await js(`JSON.stringify(window.__codenodeUi.getState().preferences)`);
       await js(`window.__codenodeUi.getState().toggleTheme()`); await sleep(80);
       assert.equal(await js(`JSON.stringify(window.__codenodeUi.getState().preferences)`),saved);
@@ -421,7 +499,7 @@ app.whenReady().then(async () => {
     }
     if (process.env.CODENODE_THEME_PARITY_UI_TEST === '1') {
       assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll(".workspace-tabs").length`),0);
-      assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll(".activity-bar button[aria-label=文件]").length`),1);
+      assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll(".activity-bar button[aria-label=文件]").length`),0);
       assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll(".conversation-toggle").length`),1);
       assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll(".conversation-head button").length`),0);
       const js = code => win.webContents.executeJavaScript(code);
@@ -436,7 +514,7 @@ app.whenReady().then(async () => {
             const ui=window.__codenodeUi.getState(), ss=window.__codenodeSession.getState();
             const selectors=['.toolbar','.toolbar-navigation-toggle','.project-navigation','.workspace-tabs','.conversation-right','.pp-composer','.toolbar-menu'];
             return {state:{navigationOpen:ui.navigationOpen,conversationOpen:ui.conversationOpen,navigationWidth:ui.navigationWidth,conversationWidth:ui.conversationWidth,sideTab:ui.sideTab,activeId:ss.activeId,messages:ss.messages},
-              draft:document.querySelector('.pp-input').value,model:document.querySelector('.pp-model').textContent,
+              draft:document.querySelector('.pp-input').value,model:document.querySelector('.model-connection-trigger').title,
               controls:[...document.querySelectorAll('.toolbar button,.toolbar summary,.toolbar-menu-label')].map(el=>({text:el.textContent,label:el.getAttribute('aria-label'),disabled:!!el.disabled,expanded:el.getAttribute('aria-expanded')})),
               layout:selectors.map(selector=>{const el=document.querySelector(selector);if(!el)return null;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {selector,x:r.x,y:r.y,width:r.width,height:r.height,display:s.display,position:s.position,visibility:s.visibility,pointerEvents:s.pointerEvents}})};
           })()`;
@@ -488,16 +566,16 @@ app.whenReady().then(async () => {
             const buttons=[...el.querySelectorAll('button')].filter(b=>b.getBoundingClientRect().height);
             return {left:r.left,right:r.right,bottom:r.bottom,width:r.width,background:s.backgroundColor,
               rows:buttons.map(b=>b.getBoundingClientRect().height),labels:[...el.querySelectorAll('.toolbar-menu-label')].map(b=>b.textContent),
-              copyDisabled:buttons.find(b=>b.textContent.includes('复制节点')).disabled,
+              arrangeDisabled:buttons.find(b=>b.textContent.includes('自动整理')).disabled,
               manualSaveVisible:[...el.querySelectorAll('button')].some(button=>button.textContent.includes('保存项目')&&button.getBoundingClientRect().height>0)};
           })()`);
           assert.equal(menu.width, 220);
           assert.ok(menu.left>=0 && menu.right<=width && menu.bottom<=800, JSON.stringify(menu));
           assert.ok(!menu.background.startsWith('rgba'), 'menu surface must be opaque');
           assert.ok(menu.rows.every(height=>height===34), JSON.stringify(menu.rows));
-          assert.deepEqual(menu.labels, ['工作流','节点','布局','视图','工具与历史']);
-          assert.equal(menu.copyDisabled,true);
-          assert.equal(menu.manualSaveVisible,true, JSON.stringify({width,menu}));
+          assert.deepEqual(menu.labels, ['布局','显示与对齐']);
+          assert.equal(menu.arrangeDisabled,true);
+          assert.equal(menu.manualSaveVisible,false, JSON.stringify({width,menu}));
           if (width===1300) {
             win.showInactive(); await sleep(150);
             const bounds=await js(`(() => { const r=document.querySelector('.toolbar-menu').getBoundingClientRect();return {x:Math.floor(r.x)-8,y:Math.floor(r.y)-8,width:Math.ceil(r.width)+16,height:Math.ceil(r.height)+16};})()`);
@@ -513,10 +591,9 @@ app.whenReady().then(async () => {
       win.setSize(1300,850);
       await js(`window.__codenodeStore.getState().addNode({id:'menu-node',type:'task',position:{x:50,y:50},data:{label:'菜单验证'}});window.__codenodeStore.getState().setSelectedIds(['menu-node'])`);
       await sleep(100);
-      await js(`document.querySelector('.toolbar-dropdown summary').click()`);
-      await sleep(100);
-      assert.equal(await js(`document.querySelector('.toolbar-menu button[data-action="duplicate"]').disabled`),false);
-      await js(`document.querySelector('.toolbar-menu button[data-action="duplicate"]').click()`);
+      await js(`document.querySelector('.node-actions button[aria-expanded]').click()`);
+      await sleep(80);
+      await js(`document.querySelector('.node-action-list [data-action="duplicate"]').click()`);
       assert.equal(await js(`window.__codenodeStore.getState().nodes.length`),2);
       assert.equal(await js(`document.querySelector('.toolbar-dropdown').open`),false);
       await js(`document.querySelector('.toolbar-dropdown summary').click();document.querySelector('.toolbar-save-state').dispatchEvent(new Event('pointerdown',{bubbles:true}))`);
@@ -549,7 +626,7 @@ app.whenReady().then(async () => {
       await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".project-nav-new")'), '窄窗口展开项目栏');
       await win.webContents.executeJavaScript('document.querySelector(".project-nav-new").click()');
       await sleep(100);
-      assert.equal(await win.webContents.executeJavaScript('getComputedStyle(document.querySelector(".workspace-canvas")).visibility'), 'visible', 'new chat starts in the canvas even in a narrow window');
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".conversation-right").hidden'),false,'new chat must reveal the composer even in a narrow window');
       await win.webContents.executeJavaScript('window.__codenodeUi.setState({navigationOpen:true,conversationOpen:true,conversationAutoHidden:false})');
       win.setSize(1300,850); await sleep(100);
       console.log('RESPONSIVE WORKBENCH: PASS (five window sizes, both themes, maximum widths, new chat)');
@@ -582,22 +659,27 @@ app.whenReady().then(async () => {
       console.log('FIRST SEND UI: PASS (Chinese IME, immediate status, running layout, reply)');
     }
     if (process.env.CODENODE_WORKBENCH_UI_TEST === '1') {
-      assert.equal(await win.webContents.executeJavaScript('!!document.querySelector(".canvas-welcome")'), true);
-      const otherModel = await win.webContents.executeJavaScript('window.__codenodeUi && document.querySelector(".pp-model").textContent');
+      await win.webContents.executeJavaScript('window.__codenodeUi.getState().updatePreferences({advancedMode:true,vectorEditorEnabled:true})');
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".canvas-wrap")'), '空画布');
+      assert.equal(await win.webContents.executeJavaScript('!!document.querySelector(".canvas-tutorial-hint")'), false);
+      await win.webContents.executeJavaScript("document.querySelector('.model-connection-trigger').click()");
+      await waitFor(() => win.webContents.executeJavaScript("!!document.querySelector('.model-box-picker .pp-model')"), '盒子内的模型选择');
+      const otherModel = await win.webContents.executeJavaScript('window.__codenodeUi && document.querySelector(".model-connection-trigger").title');
       await win.webContents.executeJavaScript('document.querySelector(".pp-model").click()');
       await sleep(80);
       await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.hermes-model-row > button:first-child')).find(button=>button.textContent.includes('Pro')).click()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".pp-model").textContent.includes("Pro")'), '切换到 Pro');
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".model-connection-trigger").title.includes("Pro")'), '切换到 Pro');
       assert.equal(JSON.parse(fs.readFileSync(path.join(app.getPath('userData'),'models.json'),'utf8')).activeId, 'deepseek-v4-pro');
       await win.webContents.executeJavaScript('document.querySelector(".pp-model").click()');
       await sleep(80);
       await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.hermes-model-row > button:first-child')).find(button=>button.textContent.includes('Flash')).click()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".pp-model").textContent.includes("Flash")'), '切回 Flash');
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".model-connection-trigger").title.includes("Flash")'), '切回 Flash');
       const frame = await win.webContents.executeJavaScript(`(() => {const input=getComputedStyle(document.querySelector('.pp-input')),composer=getComputedStyle(document.querySelector('.pp-composer'));return {input:input.borderWidth,outer:composer.borderWidth,radius:composer.borderRadius};})()`);
       assert.equal(frame.input, '0px'); assert.equal(frame.outer, '0px'); assert.equal(frame.radius,'26px');
       const modelWidth = await win.webContents.executeJavaScript(`document.querySelector('.pp-model').getBoundingClientRect().width`);
-      assert.ok(modelWidth >= 120, 'model selector must remain readable in the composer');
-      assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".canvas-welcome button").length'), 0);
+      assert.ok(modelWidth >= 120, '配置盒中的模型名应可读');
+      await win.webContents.executeJavaScript("document.querySelector('.composer-model-box .mm-close').click()");
+      assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".canvas-tutorial-hint button").length'), 0);
       assert.equal(await win.webContents.executeJavaScript('!!document.querySelector(".project-navigation")'), true);
       assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".project-nav-foot button").length'), 0);
       await win.webContents.executeJavaScript('document.querySelector(".project-actions summary").click()');
@@ -605,7 +687,7 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript('document.querySelector(".project-actions summary").click()');
       await win.webContents.executeJavaScript(`(() => { const input=document.querySelector('.pp-input'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'draft retained'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
       await sleep(80);
-      for (const view of ['node','project','preview','agent']) {
+      for (const view of ['node','project','agent']) {
         console.log('VIEW SWITCH', view);
         await win.webContents.executeJavaScript(`window.__codenodeUi.getState().setSideTab('${view}')`);
         await sleep(80);
@@ -640,73 +722,16 @@ app.whenReady().then(async () => {
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().navigationWidth'), 216);
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".workspace-tabs button")).some(button=>button.textContent==="预览")'), false);
       fs.writeFileSync(path.join(root,'readme.txt'),'文件内容直接打开');
-      fs.writeFileSync(path.join(root, 'sample.ts'), 'const n = 12; // sample\n<img src=x>');
-      fs.writeFileSync(path.join(root, 'gbk.txt'), Buffer.from('c4e3bac3', 'hex'));
-      fs.writeFileSync(path.join(root, 'utf16.txt'), Buffer.from('\uFEFF文件预览', 'utf16le'));
-      fs.writeFileSync(path.join(root, 'image.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXK0AAAAASUVORK5CYII=', 'base64'));
-      fs.writeFileSync(path.join(root, 'document.pdf'), previewPdfFixture());
-      fs.writeFileSync(path.join(root, 'binary.bin'), Buffer.from([0x50, 0x4b, 0x03, 0x04]));
-      fs.writeFileSync(path.join(alternateRoot,'alternate-only.txt'),'另一工作区的文件');
-      const beforePreview = await win.webContents.executeJavaScript('({root:window.__codenodeProject.getState().root,file:window.__codenodeProject.getState().projectFile,id:window.__codenodeSession.getState().activeId})');
-      await win.webContents.executeJavaScript(`document.querySelector('.activity-bar button[aria-label="文件"]').click()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".files-explorer .pm-file")).some(row=>row.title==="readme.txt")'), '文件列表');
-      await win.webContents.executeJavaScript(`document.querySelector('.files-explorer .pm-file[title="readme.txt"]').click()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")?.textContent==="文件内容直接打开"'), '点击文件直接预览内容');
-      assert.equal(await win.webContents.executeJavaScript('window.__codenodeUi.getState().sideTab'), 'preview');
-      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".activity-bar button[aria-current=page]").getAttribute("aria-label")'), '文件');
-      assert.ok(await win.webContents.executeJavaScript('document.querySelector(".app-project-navigation").hidden && document.querySelector(".conversation-right").hidden && !document.querySelector(".files-document textarea")'));
-      const previewJs = code => win.webContents.executeJavaScript(code);
-      const openPreview = name => previewJs(`document.querySelector(${JSON.stringify(`.files-explorer .pm-file[title="${name}"]`)}).click()`);
-      await openPreview('sample.ts');
-      await waitFor(() => previewJs(`document.querySelector('.fp-content .tok-keyword')?.textContent === 'const'`), '文件预览语法高亮');
-      assert.equal(await previewJs(`getComputedStyle(document.querySelector('.fp-content')).backgroundColor`), 'rgb(24, 24, 24)');
-      assert.equal(await previewJs(`document.querySelector('.fp-content').textContent`), 'const n = 12; // sample\n<img src=x>');
-      assert.equal(await previewJs(`!!document.querySelector('.fp-content img')`), false);
-      for (const [name, content] of [['gbk.txt', '你好'], ['utf16.txt', '文件预览']]) {
-        await openPreview(name);
-        await waitFor(() => previewJs(`document.querySelector('.fp-content')?.textContent === ${JSON.stringify(content)}`), `文本解码 ${name}`);
-      }
-      await openPreview('image.png');
-      await waitFor(() => previewJs(`document.querySelector('.fp-media img')?.naturalWidth === 1`), 'PNG 实际解码');
-      win.showInactive();
-      await openPreview('document.pdf');
-      const pdfPixel = () => previewJs(`(()=>{ const canvas = document.querySelector('.fp-media canvas:not([hidden])'); return canvas?.getContext('2d').getImageData(20, 300, 1, 1).data.join(','); })()`);
-      await waitFor(async () => {
-        const message = await previewJs(`document.querySelector('.files-document [role="alert"], .crash')?.textContent`);
-        assert.ok(!message, message);
-        return await pdfPixel() === '0,0,255,255';
-      }, 'PDF 首页实际渲染');
-      await previewJs(`document.querySelector('.fp-pdf-controls button:last-child').click()`);
-      await waitFor(async () => await pdfPixel() === '255,0,0,255', 'PDF 翻页实际渲染');
-      win.hide();
-      await openPreview('binary.bin');
-      await waitFor(() => previewJs(`document.querySelector('.files-document [role="alert"]')?.textContent.includes('无法识别')`), '二进制文件格式提示');
-      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".files-workspace-picker select").value'), '');
-      await win.webContents.executeJavaScript(`(() => {const select=document.querySelector(".files-workspace-picker select");select.value=[...select.options].find(option=>option.title===${JSON.stringify(alternateRoot)}).value;select.dispatchEvent(new Event("change",{bubbles:true}));})()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(\'.files-explorer .pm-file[title="alternate-only.txt"]\')'), '查看其他工作区的文件列表');
-      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")'), null);
-      await win.webContents.executeJavaScript(`document.querySelector('.files-explorer .pm-file[title="alternate-only.txt"]').click()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")?.textContent==="另一工作区的文件"'), '预览所选工作区的文件');
-      assert.deepEqual(await win.webContents.executeJavaScript('({root:window.__codenodeProject.getState().root,file:window.__codenodeProject.getState().projectFile,id:window.__codenodeSession.getState().activeId})'), beforePreview);
-      const customRoot = fs.mkdtempSync(path.join(root, 'browse-'));
-      fs.writeFileSync(path.join(customRoot, 'picked.txt'), '来自手动选择的目录');
-      const previewDialog = dialog.showOpenDialog;
-      try {
-        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [customRoot] });
-        await win.webContents.executeJavaScript('document.querySelector(".files-workspace-picker button").click()');
-        await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(\'.files-explorer .pm-file[title="picked.txt"]\')'), '打开手动选择的工作区目录');
-        await win.webContents.executeJavaScript('document.querySelector(\'.files-explorer .pm-file[title="picked.txt"]\').click()');
-        await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .fp-content")?.textContent==="来自手动选择的目录"'), '预览手动选择的目录');
-      } finally {
-        dialog.showOpenDialog = previewDialog;
-      }
+      await win.webContents.executeJavaScript('window.__codenodeProject.getState().refresh()');
+      await win.webContents.executeJavaScript(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'p',ctrlKey:true,bubbles:true,cancelable:true}))`);
+      await waitFor(async () => await win.webContents.executeJavaScript(`!!document.querySelector('.workspace-project .pm-file[title="readme.txt"]')`), '编辑器项目树');
+      await win.webContents.executeJavaScript(`document.querySelector('.workspace-project .pm-file[title="readme.txt"]').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .dock-code-editor")?.value==="文件内容直接打开"'), '显式编辑入口');
       win.showInactive(); await sleep(100);
       fs.mkdirSync(path.join(__dirname,"../../out"),{recursive:true});
       fs.writeFileSync(path.join(__dirname,"../../out/unified-file-view.png"),(await win.webContents.capturePage()).toPNG());
       win.hide();
 
-      await win.webContents.executeJavaScript(`(async () => {await window.__codenodeProject.getState().openFile("readme.txt");window.__codenodeUi.getState().openDock("editor")})()`);
-      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".files-document .dock-code-editor")?.value==="文件内容直接打开"'), '显式编辑入口');
       await win.webContents.executeJavaScript(`(() => {const editor=document.querySelector('.files-document .dock-code-editor');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(editor,'修改后的文件内容');editor.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await sleep(80);
       await win.webContents.executeJavaScript(`(() => {const editor=document.querySelector('.files-document .dock-code-editor');editor.focus();editor.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:true,bubbles:true}));})()`);
@@ -732,17 +757,15 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript(`document.querySelector('.activity-bar button[aria-label="工作台"]').click()`);
       await sleep(80);
       const beforeProjectOrder = await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)');
-      await win.webContents.executeJavaScript('(() => { const project = document.querySelectorAll(".project-group-name")[1]; if (project.getAttribute("aria-expanded") !== "true") project.click(); })()');
-      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelectorAll(".project-group")[1].querySelectorAll(".project-session-row").length===2'), '展开其他项目的已保存对话');
-      assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), root);
+      const projectGroup = file => `[...document.querySelectorAll('.project-group')].find(group => group.dataset.projectPath === ${JSON.stringify(file)})`;
+      await win.webContents.executeJavaScript(`(${projectGroup(alternateFile)}).querySelector('.project-group-name').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript(`!!(${projectGroup(alternateFile)})?.querySelector('.project-session-row button')`), '展开其他项目');
+      assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().projectFile'), projectFile);
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'expanding another project must not reorder projects');
-      await win.webContents.executeJavaScript('document.querySelector(\'.project-session-row button[title="另一项目第二条对话"]\').click()');
-      await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().projectFile === '+JSON.stringify(alternateFile)+' && window.__codenodeSession.getState().activeId==="alternate-second" && window.__codenodeSession.getState().messages.some(message=>message.content==="独立的对话记录")'), '直接进入其他项目的指定对话');
-      assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".conversation-main:not([hidden])")'));
-      await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name")[1].click()');
-      await sleep(100);
+      await win.webContents.executeJavaScript(`(${projectGroup(alternateFile)}).querySelector('.project-session-row button').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().projectFile === '+JSON.stringify(alternateFile)+' && window.__codenodeSession.getState().activeId==="alternate-session"'), '进入其他项目对话');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
-      await win.webContents.executeJavaScript('Array.from(document.querySelector(".project-group .project-row-menu").querySelectorAll("button")).find(button=>button.textContent==="打开项目").click()');
+      await win.webContents.executeJavaScript(`[...(${projectGroup(projectFile)}).querySelectorAll('.project-row-menu button')].find(button=>button.textContent==='打开项目').click()`);
       await waitFor(async () => await win.webContents.executeJavaScript('window.__codenodeProject.getState().root === '+JSON.stringify(root)+' && window.__codenodeProject.getState().projectFile === '+JSON.stringify(projectFile)), '返回原项目');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder);
       await win.webContents.executeJavaScript('(() => { const button=document.querySelector(".project-group-name"); if (button.getAttribute("aria-expanded") === "true") button.click(); })()');
@@ -750,12 +773,11 @@ app.whenReady().then(async () => {
       assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".project-session-row").length'), 0);
       await win.webContents.executeJavaScript('document.querySelector(".project-group-name").click()');
       await sleep(80);
-      await win.webContents.executeJavaScript(`document.querySelector('.project-row-menu summary').click(); Array.from(document.querySelectorAll('.project-row-menu button')).find(b=>b.textContent==='置顶').click()`);
+      await win.webContents.executeJavaScript(`(()=>{const menu=document.querySelector('.project-row-menu');menu.open=true;const button=Array.from(menu.querySelectorAll('button')).find(b=>b.textContent==='置顶');if(!button)throw new Error('项目菜单缺少置顶按钮');button.click();})()`);
       await sleep(80);
       assert.ok(await win.webContents.executeJavaScript('document.querySelector(".project-group-name").textContent.includes("置顶")'));
       const originalSession = await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId');
       await win.webContents.executeJavaScript('window.__codenodeSession.getState().pushUser("原对话记录")');
-      const originalTitle = await win.webContents.executeJavaScript('window.__codenodeSession.getState().current().label');
       const beforeDraftCount = await win.webContents.executeJavaScript('window.__codenodeSession.getState().order.length');
       await win.webContents.executeJavaScript('document.querySelector(".project-nav-new").click()');
       await sleep(100);
@@ -770,7 +792,7 @@ app.whenReady().then(async () => {
       await sleep(80);
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeSession.getState().order.length'), beforeDraftCount+1);
       assert.notEqual(await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId'), originalSession);
-      await win.webContents.executeJavaScript(`[...document.querySelectorAll('.project-session-row > button:first-child')].find(button=>button.title === ${JSON.stringify(originalTitle)}).click()`);
+      await win.webContents.executeJavaScript('document.querySelector(".project-nav-sessions button").click()');
       await sleep(100);
       assert.equal(await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId'), originalSession);
       assert.ok(await win.webContents.executeJavaScript('window.__codenodeSession.getState().messages.some(m=>m.content==="原对话记录")'));
@@ -794,27 +816,27 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript('(() => { const store=window.__codenodeSession; store.getState().order.forEach(id=>store.getState().setArchived(id,false)); })()');
       await sleep(80);
       await win.webContents.executeJavaScript('window.__codenodeSession.getState().switchSession('+JSON.stringify(originalSession)+')');
-      await win.webContents.executeJavaScript(`document.querySelector('[aria-label="切换到画布"]').click()`);
       const samePage = await win.webContents.executeJavaScript(`(() => { const canvas=document.querySelector('.canvas-wrap').getBoundingClientRect(), composer=document.querySelector('.pp-composer').getBoundingClientRect(), panel=document.querySelector('.conversation-right').getBoundingClientRect(); return {canvas:canvas.height,composer:composer.height,separated:canvas.right<=panel.left,mode:getComputedStyle(document.querySelector('.conversation-right')).position,visible:getComputedStyle(document.querySelector('.workspace-canvas')).visibility}; })()`);
       assert.ok(samePage.canvas > 150 && samePage.composer > 80 && (samePage.separated || samePage.mode === 'absolute') && samePage.visible === 'visible', 'canvas and composer must be usable together on the same page');
-      await win.webContents.executeJavaScript('document.querySelector(".project-session-row button.active + .session-archive").click()');
+      await win.webContents.executeJavaScript('document.querySelector(".session-archive").click()');
       await waitFor(async () => cnode.decodeCnode(fs.readFileSync(projectFile)).canvases?.sessions.some(s=>s.id===originalSession && s.archived), '归档写入工程');
       assert.notEqual(await win.webContents.executeJavaScript('window.__codenodeSession.getState().activeId'), originalSession);
-      await reopenProject();
+      win.webContents.reload();
+      await waitFor(async () => await win.webContents.executeJavaScript('document.querySelectorAll(".project-group-name").length > 1').catch(()=>false), '重启后的最近工程');
+      await win.webContents.executeJavaScript(`[...(${projectGroup(projectFile)}).querySelectorAll('.project-row-menu button')].find(button=>button.textContent==='打开项目').click()`);
       await waitFor(async () => await win.webContents.executeJavaScript(`!!document.querySelector('.pp-input') && window.__codenodeSession?.getState().sessions['${originalSession}']?.archived === true`).catch(()=>false), '重启后保留归档');
       assert.deepEqual(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".project-group-name")).map(button=>button.title)'), beforeProjectOrder, 'project order must survive reload and reopening');
-      await win.webContents.executeJavaScript('document.querySelector(".global-settings-trigger").click()');
+      await win.webContents.executeJavaScript('document.querySelector(".project-nav-archive").click()');
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".archived-chat-row")'), '从聊天侧栏打开归档');
       await sleep(100);
-      await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-layout nav button')).find(b=>b.textContent==='已归档聊天').click()`);
-      await sleep(100);
-      assert.ok(await win.webContents.executeJavaScript(`document.querySelector('.settings-content').textContent.includes(${JSON.stringify(originalTitle)})`));
+      assert.ok(await win.webContents.executeJavaScript('document.querySelector(".settings-content").textContent.includes("画布1")'));
       await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-content button')).find(b=>b.textContent==='恢复').click()`);
       await waitFor(async () => cnode.decodeCnode(fs.readFileSync(projectFile)).canvases?.sessions.some(s=>s.id===originalSession && !s.archived), '恢复写入工程');
-      for (const setting of ['检索']) {
-        await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.settings-layout nav button')).find(b=>b.textContent==='${setting}').click()`);
-        await sleep(100);
-        assert.ok(await win.webContents.executeJavaScript('document.querySelector(".settings-content h2").textContent === '+JSON.stringify(setting)));
-      }
+      await win.webContents.executeJavaScript('document.querySelector(".settings-close").click();document.querySelector(".global-settings-trigger").click()');
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".settings-layout nav")'), '打开设置');
+      await win.webContents.executeJavaScript(`[...document.querySelectorAll('.settings-layout nav button')].find(b=>b.textContent==='项目与工具').click()`);
+      await win.webContents.executeJavaScript(`[...document.querySelectorAll('.settings-content summary')].find(el=>el.textContent==='项目检索').click()`);
+      await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".dock-rag-settings")'), '展开项目检索');
       win.showInactive(); await sleep(150);
       fs.mkdirSync(path.join(__dirname,"../../out"),{recursive:true});
       const settingsShot = await Promise.race([win.webContents.capturePage(),sleep(5000).then(()=>{throw new Error('capture timeout');})]);
@@ -823,10 +845,12 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript('document.querySelector(".settings-close").click()');
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".toolbar button")).some(b=>b.textContent.trim()==="终端")'), false);
       await win.webContents.executeJavaScript('window.__codenodeUi.getState().openDock("terminal")');
-      await sleep(100);
+      await waitFor(async () => await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".dock-tabs button")).some(b=>b.textContent==="终端")'), '按需加载工作台 Dock');
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".dock-tabs button")).filter(b=>b.textContent==="终端").length'), 1);
       assert.equal(await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".dock-tabs button")).some(b=>["检索设置","扩展"].includes(b.textContent))'), false);
       await win.webContents.executeJavaScript('window.__codenodeUi.getState().closeDock()');
+      await win.webContents.executeJavaScript("document.querySelector('.model-connection-trigger').click()");
+      await waitFor(() => win.webContents.executeJavaScript("!!document.querySelector('.model-box-picker .pp-model')"), '盒子内的模型选择');
       await win.webContents.executeJavaScript(`document.querySelector('.pp-model').click()`);
       await sleep(100);
       await win.webContents.executeJavaScript(`document.querySelector('.hermes-settings-trigger').click()`);
@@ -861,12 +885,8 @@ app.whenReady().then(async () => {
       await waitFor(async () => await win.webContents.executeJavaScript('document.documentElement.dataset.theme==="light"'), '日间主题');
       await sleep(250);
       assert.equal(await win.webContents.executeJavaScript('localStorage.getItem("codenode.theme")'), 'light');
-      const material = await win.webContents.executeJavaScript(`(() => {
-        const style = selector => getComputedStyle(document.querySelector(selector));
-        const composer = style('.pp-composer');
-        return { navigation: style('.project-navigation').backgroundColor, conversation: style('.conversation-right').backgroundColor, composer: composer.backgroundColor, blur: composer.backdropFilter };
-      })()`);
-      assert.deepEqual(material, { navigation: 'rgb(30, 30, 30)', conversation: 'rgb(30, 30, 30)', composer: 'rgb(48, 48, 48)', blur: 'none' }, '左右面板应使用同一深灰色，输入区使用稍亮的纯灰');
+      const material = await win.webContents.executeJavaScript(`(() => { const panel=getComputedStyle(document.querySelector('.pp-composer')); return {background:panel.backgroundColor,blur:panel.backdropFilter}; })()`);
+      assert.ok(material.background.startsWith('rgba(') && material.blur.includes('blur'), '主题应使用透明玻璃材质');
       const dayCapture = await Promise.race([win.webContents.capturePage(),sleep(5000).then(()=>{throw new Error('capture timeout');})]);
       fs.writeFileSync(path.join(__dirname,"../../out/workbench-glass-light.png"),dayCapture.toPNG());
       win.setSize(500,740); await sleep(200);
@@ -878,24 +898,26 @@ app.whenReady().then(async () => {
       await sleep(100);
       await win.webContents.executeJavaScript(`(() => { const graph=window.__codenodeStore.getState(); graph.addNode({id:'phase-one',type:'task',position:{x:40,y:40},data:{label:'阶段一',prompt:'',status:'pending'}}); graph.addNode({id:'phase-two',type:'stage',position:{x:400,y:40},data:{label:'阶段二',prompt:'第二阶段原文',status:'pending'}}); graph.setSelectedIds(['phase-one']); })()`);
       await sleep(100);
-      assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".wf-prompt").length'), 0);
-      await win.webContents.executeJavaScript(`(() => { const input=document.querySelector('.pp-input'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'第一阶段任务'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".node-editor")'), null, '任务节点默认只有一个指令编辑区');
+      await win.webContents.executeJavaScript(`(() => { const input=document.querySelector('.react-flow__node[data-id="phase-one"] .wf-node-prompt'); input.focus(); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'第一阶段任务'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+      await win.webContents.executeJavaScript('document.querySelector(\'.node-actions [aria-label="展开输入框"]\').click()');
       await sleep(100);
-      await win.webContents.executeJavaScript('document.querySelector(".pp-send").click()');
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".node-editor textarea").value'), '第一阶段任务');
+      await win.webContents.executeJavaScript('document.querySelector(".node-editor button[aria-label=保存节点]").click()');
       await sleep(200);
       await waitFor(async () => cnode.decodeCnode(fs.readFileSync(projectFile)).canvases?.sessions.some(s=>s.root?.nodes.some(n=>n.id==='phase-one' && n.data.prompt==='第一阶段任务')), '节点 Prompt 写入工程');
       await win.webContents.executeJavaScript('window.__codenodeStore.getState().setSelectedIds(["phase-two"])');
       await sleep(100);
-      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".pp-input").value'), '第二阶段原文');
+      assert.equal(await win.webContents.executeJavaScript('document.querySelector(".react-flow__node.selected .wf-node-prompt").value'), '第二阶段原文');
       await win.webContents.executeJavaScript('window.__codenodeStore.getState().updateNodeData("phase-one",{status:"running"})');
       await sleep(100);
       assert.ok(await win.webContents.executeJavaScript('!!document.querySelector(".wf-node-task.wf-status-running")'));
       assert.equal(await win.webContents.executeJavaScript('document.querySelector(".conversation-workspace").textContent.includes("你好")'), false);
       await win.webContents.executeJavaScript('window.__codenodeStore.getState().clear()');
       await sleep(100);
-      await win.webContents.executeJavaScript('document.querySelector(".toolbar-vector").click()');
+      await win.webContents.executeJavaScript('document.querySelector(".canvas-add-trigger").click()'); await sleep(80); await win.webContents.executeJavaScript('document.querySelector(".add-menu-item[data-node-type=vector]").click()');
       await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".wf-vector-stage .vs-stage")'), '画布节点绘图区');
-      const nodeLayout = await win.webContents.executeJavaScript(`(() => { const node=document.querySelector('.wf-vector'); const rail=node.querySelector('.wf-vector-rail'); return {welcome:!!document.querySelector('.canvas-welcome'),railOverflow:rail.scrollWidth>rail.clientWidth,stage:node.querySelector('.wf-vector-stage').getBoundingClientRect().width}; })()`);
+      const nodeLayout = await win.webContents.executeJavaScript(`(() => { const node=document.querySelector('.wf-vector'); const rail=node.querySelector('.wf-vector-rail'); return {welcome:!!document.querySelector('.canvas-tutorial-hint'),railOverflow:rail.scrollWidth>rail.clientWidth,stage:node.querySelector('.wf-vector-stage').getBoundingClientRect().width}; })()`);
       assert.ok(!nodeLayout.welcome && !nodeLayout.railOverflow && nodeLayout.stage>100, '画布节点绘图区和工具仍可操作');
       win.webContents.reload();
       await waitFor(async () => await win.webContents.executeJavaScript('!!window.__codenodeUi && document.documentElement.dataset.theme==="light"').catch(()=>false), '重载后保留日间主题');
@@ -956,15 +978,43 @@ app.whenReady().then(async () => {
         win.hide();
       }
       await win.webContents.executeJavaScript('window.__codenodeUi.getState().closeModelManager()');
+      await win.webContents.executeJavaScript('window.__codenodeUi.setState({conversationOpen:true,conversationAutoHidden:false})');
+      await waitFor(() => win.webContents.executeJavaScript("document.querySelector('.model-connection-trigger')?.getBoundingClientRect().width > 0"), '显示模型按钮');
+      assert.deepEqual(await win.webContents.executeJavaScript(`(() => {
+        const button = document.querySelector('.model-connection-trigger');
+        const rect = button.getBoundingClientRect();
+        return {icon:!!button.querySelector('svg'),text:button.textContent.trim(),width:rect.width,height:rect.height,
+          secondButton:!!document.querySelector('.pp-controls .pp-model-picker')};
+      })()`), {icon:true, text:'', width:28, height:28, secondButton:false});
+      await win.webContents.executeJavaScript("document.querySelector('[aria-label=配置模型连接]').click()");
+      await waitFor(() => win.webContents.executeJavaScript(`!!document.querySelector('.composer-model-box [aria-label="Base URL"]')`), '对话模型配置盒');
+      assert.ok(await win.webContents.executeJavaScript(`(() => {
+        const dialog = document.querySelector('.composer-model-box [role=dialog]');
+        const box = dialog.getBoundingClientRect();
+        const rail = document.querySelector('.conversation-right').getBoundingClientRect();
+        return box.height > box.width && box.left >= rail.left && box.right <= rail.right &&
+          !!dialog.querySelector('.model-box-picker') && !dialog.querySelector('.model-advanced, .mm-connect-note, [aria-label="选择模型连接"], [aria-label="API 格式"]') &&
+          dialog.querySelector('[aria-label="API Key"]').type === 'password' &&
+          !dialog.querySelector('[aria-label="模型或部署 ID"]') && !document.querySelector('.mm-mask');
+      })()`), '模型配置必须局限在右侧栏');
+      await win.webContents.executeJavaScript("document.querySelector('.composer-model-box .mm-close').click()");
       console.log('MODEL CONNECTION UI: PASS (provider sidebar, encrypted provider key, sibling model reuse, custom provider fields, responsive layout)');
     }
 
+    const composerFile = path.join(root, 'composer-project.cnode');
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath: composerFile });
+    await win.webContents.executeJavaScript(`document.querySelector('.composer-project summary').click();
+      [...document.querySelectorAll('.composer-project[open] button')].find(button => button.textContent.includes('新增项目')).click()`);
+    await waitFor(() => win.webContents.executeJavaScript(`document.querySelector('.composer-project summary').textContent.includes('composer-project')`), '新增后选中项目');
+    assert.ok(cnode.decodeCnode(fs.readFileSync(composerFile)).ok);
+    assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.conversation-welcome, .pp-input[placeholder], .status-hint')`), false);
+
     fs.writeFileSync(invalidFile, 'invalid cnode file');
     await win.webContents.executeJavaScript('window.__codenodeProject.setState({root:null,projectFile:null})');
-    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home")'), '返回工作区首页');
-    await win.webContents.executeJavaScript('document.querySelector(\'[data-project-action="file"]\').click()');
-    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".workspace-project-error")'), '损坏文件错误提示');
-    const error = await win.webContents.executeJavaScript('document.querySelector(".workspace-project-error").textContent');
+    await waitFor(async () => await win.webContents.executeJavaScript('!!document.querySelector(".workspace-home") && window.__codenodeUi.getState().booted'), '返回启动工作台首页');
+    await win.webContents.executeJavaScript('document.querySelectorAll(".workspace-home-actions button")[2].click()');
+    await waitFor(async () => await win.webContents.executeJavaScript('document.querySelector(".status-toast")?.textContent.includes("打开工程文件失败")'), '损坏文件错误提示');
+    const error = await win.webContents.executeJavaScript('document.querySelector(".status-toast:not(:empty)").textContent');
     assert.match(error, /打开工程文件失败/);
     assert.equal(await win.webContents.executeJavaScript('window.__codenodeProject.getState().root'), null);
     console.log('PROJECT UI TEST: PASS');

@@ -27,7 +27,7 @@ app.whenReady().then(async()=>{
       await wait(()=>document.querySelector('.pp-composer textarea'));
       const input=document.querySelector('.pp-composer textarea');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'draft-preserved');input.dispatchEvent(new Event('input',{bubbles:true}));
-      session.setState({messages:[{role:'assistant',content:'校验状态',status:'done'}]});
+      session.setState({messages:[{role:'assistant',content:'校验状态',status:'done',editedFiles:['src/demo.ts']}]});
       session.getState().streamDelta({kind:'code_verification',codeVerification:{status:'partial',verified:false,files:['src/demo.ts'],checks:[{kind:'syntax',status:'passed'},{kind:'test',status:'not_run'}],checkedAt:new Date().toISOString()}});
       await wait(()=>document.querySelector('.code-verification'));
       window.__codenodeUi.getState().openSettings('editing');

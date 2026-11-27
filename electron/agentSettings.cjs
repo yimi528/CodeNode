@@ -9,21 +9,9 @@ function parseAutoExecution(properties = {}) {
 }
 function canAutoExecute(name, args = {}) {
   if (!ui.ordinaryWriteTools.includes(name)) return false;
-  /**
-   * workbench_edit 是**族工具**：只有「普通画布编辑」与 kind=write_analysis 属于免打扰范围；
-   * bulk_*（批量建删/批量写文件）与 save_project（整体覆盖工程文件）保持必问 ——
-   * 与合并前 bulk_edit 内部 HIGH 确认、save_project 声明 requiresConfirmation=WRITE 一致。
-   */
-  if (name === 'workbench_edit') {
-    const kind = String(args.kind || '').trim().toLowerCase();
-    if (kind === 'write_analysis') return true;
-    if (kind) return false;
-    const operations = Array.isArray(args.operations) && args.operations.length ? args.operations : [args];
-    return operations.every(operation => operation && ui.ordinaryCanvasActions.includes(String(operation.action || 'create').toLowerCase()));
-  }
-  // memory 是族工具：只有 action=save 是写（search 是纯读，本来也不需要审批）
-  if (name === 'memory') return String(args.action || '').trim().toLowerCase() === 'save';
-  return true;
+  if (name !== 'workbench_edit') return true;
+  const operations = Array.isArray(args.operations) && args.operations.length ? args.operations : [args];
+  return operations.every(operation => operation && ui.ordinaryCanvasActions.includes(String(operation.action || 'create').toLowerCase()));
 }
 function writeSettings(root, input) {
   if (!input || typeof input.autoExecuteTools !== 'boolean') throw new Error('普通工具自动执行选项必须是布尔值');

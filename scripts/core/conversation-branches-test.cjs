@@ -1,0 +1,36 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const branch=require('../../electron/conversationBranches.cjs'),worktree=require('../../electron/worktree.cjs'),sandbox=require('../../electron/sandbox.cjs');
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'codenode-branches-'));
+const opts={policy:sandbox.resolvePolicy({mode:'off',network:'deny'},{projectRoot:temp,userDataDir:temp})};
+sandbox.setDefaultPolicy(opts.policy);
+async function git(args){const result=await worktree.runGit(temp,args,opts);assert.equal(result.ok,true,result.stdout);return result.stdout.trim();}
+(async()=>{try{
+ await git(['init','-q','-b','main']);await git(['config','user.name','Test']);await git(['config','user.email','test@localhost']);
+ fs.writeFileSync(path.join(temp,'a.txt'),'committed\n');await git(['add','.']);await git(['commit','-qm','base']);
+ fs.writeFileSync(path.join(temp,'a.txt'),'user staged\n');await git(['add','a.txt']);fs.writeFileSync(path.join(temp,'a.txt'),'user unstaged\n');fs.writeFileSync(path.join(temp,'notes.txt'),'untracked user notes\n');
+ const status=await git(['status','--porcelain','--','.',':!.codenode']);const index=await git(['write-tree']);
+ const cp=await branch.checkpoint(temp,{label:'dirty baseline',context:{messages:[{role:'user',content:'try A'}],graph:{nodes:[],edges:[]}}},opts);
+ assert.equal(await git(['write-tree']),index,'temporary checkpoint index never changes user staging');assert.equal(await git(['status','--porcelain','--','.',':!.codenode']),status,'checkpoint preserves original dirty state');
+ const a=await branch.fork(temp,cp.id,'A',opts),b=await branch.fork(temp,cp.id,'B',opts);
+ assert.equal(fs.readFileSync(path.join(a.path,'a.txt'),'utf8'),'user unstaged\n');assert.equal(fs.readFileSync(path.join(b.path,'notes.txt'),'utf8'),'untracked user notes\n');
+ fs.writeFileSync(path.join(a.path,'a.txt'),'方案 A\n');fs.writeFileSync(path.join(b.path,'a.txt'),'方案 B\n');
+ assert.equal(fs.readFileSync(path.join(temp,'a.txt'),'utf8'),'user unstaged\n','isolated changes cannot overwrite main');
+ await branch.saveContext(a.path,{messages:[{role:'assistant',content:'A verified'}],graph:{nodes:[],edges:[]}},opts);
+ assert.equal((await branch.list(a.path,opts)).activeId,a.id);
+ const compared=await branch.compare(temp,a.id,opts);assert.match(compared.patch,/方案 A/);assert.doesNotMatch(compared.patch,/方案 B/);assert.equal(compared.context.messages[0].content,'A verified');
+ await assert.rejects(()=>branch.previewAdopt(temp,a.id,opts),/未提交/);
+ await git(['add','.','--',':!.codenode']);await git(['commit','-qm','user baseline']);
+ const preview=await branch.previewAdopt(temp,a.id,opts);
+ fs.writeFileSync(path.join(a.path,'a.txt'),'drift\n');await assert.rejects(()=>branch.adopt(temp,a.id,preview,opts),/预览后/);
+ assert.equal(fs.readFileSync(path.join(temp,'a.txt'),'utf8'),'user unstaged\n');
+ fs.writeFileSync(path.join(a.path,'a.txt'),'方案 A\n');fs.mkdirSync(path.join(a.path,'.codenode'),{recursive:true});fs.writeFileSync(path.join(a.path,'.codenode','runtime.json'),'runtime\n');
+ const fresh=await branch.previewAdopt(temp,a.id,opts);assert.equal(fresh.files.includes('.codenode/runtime.json'),false,'runtime logs are not source changes');
+ const result=await branch.adopt(temp,a.id,fresh,opts);assert.equal(result.validation,'required');assert.equal(fs.readFileSync(path.join(temp,'a.txt'),'utf8'),'方案 A\n');
+ assert.equal(fs.existsSync(path.join(temp,'.codenode','runtime.json')),false);
+ await assert.rejects(()=>branch.previewAdopt(temp,b.id,opts),/冲突/);assert.equal(fs.readFileSync(path.join(temp,'a.txt'),'utf8'),'方案 A\n','conflicting alternative cannot alter accepted main');
+ await assert.rejects(()=>branch.adopt(temp,b.id,{token:'forged'},opts),/预览无效/);
+ await branch.archive(temp,b.id,opts);assert.equal((await branch.list(temp,opts)).branches.find(row=>row.id===b.id).status,'archived');assert.equal(fs.readFileSync(path.join(b.path,'a.txt'),'utf8'),'方案 B\n','archive retains evidence and workspace');
+ const file=path.join(temp,'.codenode/branches/events.jsonl');const saved=fs.readFileSync(file,'utf8');fs.writeFileSync(file,saved.replace('dirty baseline','tampered'));assert.throws(()=>branch.events(temp),/校验失败/);
+ console.log('CONVERSATION BRANCHES: PASS (dirty/staged/untracked snapshots, isolated workspaces, per-branch context, diff, stale guards, adoption, runtime exclusion, archive and journal integrity)');
+}finally{fs.rmSync(temp,{recursive:true,force:true});}})().catch(error=>{console.error(error);process.exitCode=1});

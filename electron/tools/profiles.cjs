@@ -27,56 +27,59 @@
  * 纪律：
  *   1. core 是普通任务的基础面；自动 edit 面也保留文件读写、定位、验证和 `discover_tools`。
  *      `discover_tools` 必须在每个自动面里，否则「取回被裁掉的工具」这条退路本身也会被裁掉。
- *   2. **规则点名的工具必须留在暴露面里**：`agent.cjs` 的常驻运行规则（4/5/17/18）直接点名
- *      scan_project / analyze_project / retrieve_context / read_file 等；把规则点名的工具裁掉，
- *      模型会照着规则去调一个不存在的工具 —— 那是真实故障模式，不只是浪费。
- *      这条纪律的代价可量化：画布轮因此仍带 code 面（≈760 tokens），画布降幅 27% 而不是 48%。
- *      要更激进可以显式配 `agent.tool_profile=core,canvas`（并自行承担规则悬空）。
+ *   2. 运行规则直接要求的工具必须可见，或由提示词按暴露面门控。
+ *      逐文件项目分析由 discover_tools 按需取回。
  *   3. 一个工具只出现在**它最小充分**的 profile 里，重叠项（retrieve_context / view_image）
  *      显式列出，不靠隐式继承 —— 名单读起来就是一个工具为什么被暴露。
  *   4. 名单外的工具名一律忽略（注册表里没有的能力不该让判定变复杂），见 resolveToolProfiles。
  */
 const PROFILE_TOOLS = Object.freeze({
-  /** 常驻核心面：读、写、找、跑命令、看进程、取项目知识、技能正文、写计划、求助、记忆写入 */
+  /** 常驻核心面：文件读写与定位、命令和进程、技能、记忆及工具发现。 */
   core: Object.freeze([
     'read_file', 'write_file', 'edit_file',
-    'list_files', 'search_files',
+    'list_files', 'find_files', 'search_files', 'list_directory',
     'execute_shell', 'poll_job',
     'read_skill',
-    'update_plan', 'ask_user', 'memory',
+    'remember',
     'discover_tools',
   ]),
-  /**
-   * 代码面：项目级只读分析 + 看图（规则 17/18 点名的 project_overview 在这里）。
-   * `scan_project` 仍是独立工具（它不是纯只读：applyToWorkbench 会写画布，见 §L2 的排除理由）。
-   */
+  /** 代码面：项目扫描、概况、审查与看图。 */
   code: Object.freeze([
-    'scan_project', 'project_overview', 'view_image',
+    'scan_project', 'project_info', 'code_review', 'view_image',
   ]),
-  /** 符号导航按需加载；日常代码任务不额外携带这份 schema。 */
+  /** 逐文件结构摘要。可显式选择该 profile，也可通过 discover_tools 取回。 */
+  'project-analysis': Object.freeze([
+    'analyze_project',
+  ]),
+  /** 符号导航按需加载；日常代码任务不额外携带四份工具 schema。 */
   symbols: Object.freeze([
-    'symbol_nav',
+    'find_definition', 'find_references', 'get_callers', 'get_callees',
   ]),
-  /** 画布面：工作台模型的读写与视口动作（含标量库大字段免回灌的那几个） */
+  /** 画布面：工作台模型的读写与界面动作（含标量库大字段免回灌的那几个） */
   canvas: Object.freeze([
-    'get_workbench_model', 'workbench_edit', 'retrieve_context',
+    'get_workbench_model', 'workbench_edit', 'bulk_edit', 'query_scalars',
+    'write_analysis_md', 'ui_control', 'save_project',
   ]),
-  /** 调研面：出网 + 记忆检索 + 标量/向量检索 */
+  /** 调研面：出网 + 记忆检索 */
   research: Object.freeze([
-    'web', 'memory', 'retrieve_context', 'view_image',
+    'fetch_url', 'web_search', 'dify_call', 'recall', 'retrieve_context', 'view_image',
   ]),
-  /** 编排面：子代理与工作树隔离（单价最贵的一组） */
+  /** 编排面：子代理与工作树隔离（单价最贵的一组，实测 delegate_task 557 tokens + worktree 201） */
   orchestration: Object.freeze([
-    'delegate', 'delegate_tasks', 'get_subagent_task', 'cancel_subagent_task',
+    'delegate_task', 'delegate_tasks', 'get_subagent_task', 'cancel_subagent_task',
     'inspect_subagent_retry', 'retry_subagent_task',
     'merge_subagent_results', 'review_subagent_result', 'worktree',
   ]),
   /** 单文件小改：目标文件读写、必要的定位/验证与按需取回；不常驻 RAG/编排/全项目分析。 */
   edit: Object.freeze([
     'read_file', 'write_file', 'edit_file',
-    'list_files', 'search_files',
+    'list_files', 'find_files', 'search_files', 'list_directory',
     'execute_shell', 'poll_job', 'read_skill', 'discover_tools',
   ]),
+  /** 复杂或明确要求制定计划的任务。 */
+  planning: Object.freeze(['update_plan']),
+  /** 暂停本轮并等待用户答复，按需取回或显式选择。 */
+  interaction: Object.freeze(['ask_user']),
 });
 
 const PROFILE_NAMES = Object.freeze(Object.keys(PROFILE_TOOLS));
@@ -96,6 +99,8 @@ function profilesForTool(name) {
 const RESEARCH_RE = /联网|搜索|搜一下|查一下|查资料|调研|最新的?资料|网上|浏览器|抓取|爬取|文档站|web|http|dify/i;
 const ORCHESTRATION_RE = /子代理|子任务|并行|分工|多个\s*(agent|代理)|delegate|工作树|worktree/i;
 const SYMBOL_RE = /符号|跳转.*定义|查找.*定义|谁调用|谁引用|调用链|引用链|\b(find_definition|find_references|get_callers|get_callees|callers?|callees?)\b/i;
+const MULTI_STEP_RE = /重构|迁移|跨(?:文件|模块|项目)|多个(?:文件|模块|子代理)|多(?:步|阶段)|分(?:步|阶段|(?:[三四五六七八九十]|[3-9]|[1-9]\d+)\s*(?:步|阶段))|(?:安排|派|调度).{0,8}(?:子代理|子任务)|\b(?:refactor|migrate|migration|multi[- ](?:step|phase|file|module))\b/i;
+const PLAN_REQUEST_RE = /(?:制定|拟定|列出|编写|生成|给出).{0,12}(?:计划|路线图)|(?:先|需要)做(?:个|一份)?计划|\b(?:make|create|draft|write) (?:an? )?(?:implementation )?plan\b/i;
 const SIMPLE_EDIT_ACTION_RE = /修改|改(?:一下|动|成)|替换|更新|修复|编辑|新增|添加|插入|删除|移除|去掉|\b(rename|change|edit|replace|update|fix|add|remove|delete)\b/i;
 const BROAD_EDIT_RE = /重构|批量|所有|每个|全局|整个项目|多个文件|跨文件|项目整体|架构|报错|错误|异常|堆栈|问题|故障|\b(bug|error|debug|issue|test|tests)\b|分析|审查|调研|联网|搜索|查找|部署|发布/i;
 const FILE_TARGET_RE = /[\w@.-]+(?:[\\/][\w@.-]+)*\.(?:js|cjs|mjs|ts|tsx|jsx|java|py|go|rs|json|md|css|scss|html|yml|yaml|toml|properties|txt|xml|sql|sh|ps1)\b/gi;
@@ -112,9 +117,10 @@ function isSimpleEditRequest(prompt) {
  * 按任务判定该暴露哪些 profile。
  *
  * @param {{canvas?: boolean, prompt?: string, intentHint?: string|null, mode?: string,
- *          resuming?: boolean, resumeProfiles?: string[]|null}} input
+ *          hasActivePlan?: boolean, resuming?: boolean, resumeProfiles?: string[]|null}} input
  *   canvas  —— `agent.resolvePromptLayers().canvas` 的结论（唯一来源，本模块不重判）
  *   mode    —— 'off' 关闭裁剪 / 'auto' 或未给按任务裁剪 / 其他值 = 逗号分隔的显式 profile 名
+ *   hasActivePlan —— 已有尚未完成的结构化计划，短提示也可以继续更新计划
  *   resuming —— 本次是**续跑**：读不到原面时退回全量面，绝不重新裁一次（同一 run 只增不减）
  *   resumeProfiles —— 原 run 记下的 profile 名单（续跑时优先于 mode；见下方的续跑分支）
  * @returns {{profiles: string[], reason: string, source: 'auto'|'explicit'|'off'|'resume'|'resume-full'}}
@@ -135,6 +141,7 @@ function resolveToolProfiles(input) {
    */
   if (Array.isArray(i.resumeProfiles) && i.resumeProfiles.length) {
     const set = new Set(i.resumeProfiles.filter((p) => PROFILE_NAMES.includes(p)));
+    if (i.hasActivePlan) set.add('planning');
     return { profiles: PROFILE_NAMES.filter((p) => set.has(p)), reason: 'resume-original-face', source: 'resume' };
   }
   if (i.resuming === true) return { profiles: [], reason: 'resume-keep-full-face', source: 'resume-full' };
@@ -154,7 +161,7 @@ function resolveToolProfiles(input) {
   }
 
   // auto：明确单文件编辑已在上面分流；其它任务以 core + code 为基线，额外面只在命中时叠加。
-  // 不做「画布替代代码面」这种省法：见 PROFILE_TOOLS 纪律 2（规则悬空 = 真实故障模式）。
+  // 画布能力叠加在代码面上。
   const profiles = ['core', 'code'];
   const reasons = [];
   if (i.canvas === true) {
@@ -162,9 +169,13 @@ function resolveToolProfiles(input) {
     reasons.push('canvas-task');
   }
   const prompt = String(i.prompt == null ? '' : i.prompt);
+  const planReason = i.hasActivePlan ? 'active-plan' :
+    (MULTI_STEP_RE.test(prompt) || PLAN_REQUEST_RE.test(prompt) ? 'prompt-mentions-planning' : null);
   if (i.canvas !== true && isSimpleEditRequest(prompt)
     && !RESEARCH_RE.test(prompt) && !ORCHESTRATION_RE.test(prompt)) {
-    return { profiles: ['edit'], reason: 'explicit-single-file-edit', source: 'auto' };
+    return planReason
+      ? { profiles: ['edit', 'planning'], reason: 'explicit-single-file-edit+' + planReason, source: 'auto' }
+      : { profiles: ['edit'], reason: 'explicit-single-file-edit', source: 'auto' };
   }
   if (RESEARCH_RE.test(prompt)) {
     profiles.push('research');
@@ -177,6 +188,10 @@ function resolveToolProfiles(input) {
   if (ORCHESTRATION_RE.test(prompt)) {
     profiles.push('orchestration');
     reasons.push('prompt-mentions-orchestration');
+  }
+  if (planReason) {
+    profiles.push('planning');
+    reasons.push(planReason);
   }
   if (!reasons.length) reasons.push('baseline-only');
   return { profiles: PROFILE_NAMES.filter((p) => profiles.includes(p)), reason: reasons.join('+'), source: 'auto' };

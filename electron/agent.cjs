@@ -62,8 +62,7 @@ const {
 } = agentCompression;
 const {
   DEFAULTS, DEFAULT_MAX_TOKENS, DEFAULT_TURN_TIMEOUT_MS, DEFAULT_STREAM_IDLE_TIMEOUT_MS,
-  DEFAULT_TRUNCATION_NUDGES, DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_MAX_TOTAL_TOOL_CALLS,
-  configInteger, configNumber, configList,
+  DEFAULT_TRUNCATION_NUDGES, configInteger, configNumber, configList,
   parseReasoningEffort, parseReliabilityConfig, parseSandboxConfig, parseLimitsConfig,
 } = require('./agentRuntimeConfig.cjs');
 agentCompression.configure({ chatCompletion, recordCost });
@@ -1007,6 +1006,8 @@ function redactSecrets(value) {
   return require('./redaction.cjs').redact(value);
 }
 
+const MAX_TOOL_ITERATIONS = 12;
+const MAX_TOTAL_TOOL_CALLS = 100;
 const DATA_TRUNCATE_CAP = 120000;
 
 /**
@@ -1035,7 +1036,7 @@ const REPEAT_NOTICE = '（相同参数已重复调用，直接复用上次结果
  *   2. 缺省（`modelContent == null`，既有 60+ 处调用）：`text` + `[data]` JSON —— 与旧行为**逐字节一致**。
  *      SCALAR_BACKED_TOOLS 的结果不追加 [data]（已本地化）；其余按 cap 截断。
  */
-function buildToolContent(result, toolName, malformed, repeated, cap, registry) {
+function buildToolContent(result, toolName, malformed, repeated, cap) {
   const rawText = result.modelContent != null ? String(result.modelContent) : (result.text || (result.ok ? '（空）' : '（失败）'));
   // 截断**正文本身**：cap（agent.data_truncate_cap）此前只作用于下面的 [data] 附加段，
   // result.text 没有任何上限 —— 一次大目录扫描 / 大文件读取就能把上下文撑爆（审查 §3 P1）。
@@ -1050,10 +1051,7 @@ function buildToolContent(result, toolName, malformed, repeated, cap, registry) 
       content;
   }
   // A1：投影了就不再附加 [data]（那份数据仍然照旧交给 UI / 审计 / 回放，只是不发第二遍给模型）
-  // 工具面收敛：旧名别名（bulk_edit / query_scalars…）也要按注册名查表，否则同一份标量数据
-  // 会因为「走的是旧名」又被附加一遍（等于白付一次 token）。
-  const scalarBackedName = canonicalToolName(registry, toolName);
-  if (result.modelContent == null && result.data && typeof result.data === 'object' && Object.keys(result.data).length && !SCALAR_BACKED_TOOLS.has(scalarBackedName)) {
+  if (result.modelContent == null && result.data && typeof result.data === 'object' && Object.keys(result.data).length && !SCALAR_BACKED_TOOLS.has(toolName)) {
     try {
       const modelData = { ...result.data };
       delete modelData.evidenceText; // Original deep-read text is already present in the tool body.
@@ -1077,30 +1075,12 @@ function buildToolContent(result, toolName, malformed, repeated, cap, registry) 
  * 列举「谁可能写」永远列不全，所以反向枚举「谁一定只读」。
  */
 const CACHEABLE_TOOLS = TOOL_SEMANTICS.CACHEABLE_TOOLS;
-/**
- * 工具面收敛（docs/tool-consolidation.zh-CN.md）：模型可能用**旧名**调用（别名），而
- * `CACHEABLE_TOOLS` / `SCALAR_BACKED_TOOLS` / `MUTATION_TOOLS` 是按**注册名**写的。
- * 只按旧名查表会把 `list_directory`（→ list_files）当成「不可缓存」，于是每轮只读也被清缓存
- * （实测：agent-cache-invalidation 的 list_directory 场景直接失效）。
- * 这里统一把名字沿别名解析成注册名再查表；不是别名的名字原样返回。
- * @param {any} registry
- * @param {string} name
- */
-function canonicalToolName(registry, name) {
-  if (!registry || typeof registry.resolveAlias !== 'function') return name;
-  try {
-    return registry.resolveAlias(name, null).name;
-  } catch {
-    return name;
-  }
-}
 
 /** 会改变画布模型 / 文件 / 工程状态的工具（语义清单，供阅读与文档引用；定义在 descriptor.cjs）。 */
 const MUTATION_TOOLS = TOOL_SEMANTICS.MUTATION_TOOLS;
 
-/** 参数归一化：JSON 解析后按键排序重序列化，使语义相同的调用共享缓存键（消除引号转义/键顺序差异） */
 const { canonicalArgs } = require('./toolArgs.cjs');
-
+const { prepareModelCall } = require('./tools/actionRoutes.cjs');
 function parseToolArgs(raw) {
   try {
     const obj = JSON.parse(raw);
@@ -1319,8 +1299,8 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
     concurrency: (cfg.tools && cfg.tools.toolsParallelConcurrency) || schedulerLib.DEFAULT_CONCURRENCY,
   });
   const limits = (cfg && cfg.limits) || {};
-  const maxToolIterations = limits.maxToolIterations > 0 ? limits.maxToolIterations : DEFAULT_MAX_TOOL_ITERATIONS;
-  const maxTotalToolCalls = limits.maxTotalToolCalls > 0 ? limits.maxTotalToolCalls : DEFAULT_MAX_TOTAL_TOOL_CALLS;
+  const maxToolIterations = limits.maxToolIterations > 0 ? limits.maxToolIterations : MAX_TOOL_ITERATIONS;
+  const maxTotalToolCalls = limits.maxTotalToolCalls > 0 ? limits.maxTotalToolCalls : MAX_TOTAL_TOOL_CALLS;
   // 进度检查层：0 = 关闭（parseConfig 传的是 agent.progress_every，出厂 3；手工构造的 cfg 需要显式给）
   const progressEvery = Number(cfg && cfg.limits && cfg.limits.progressEvery) > 0 ? Math.floor(Number(cfg.limits.progressEvery)) : 0;
   // 只用于进度清单里的「用量 X/Y」显示；与下面预算门用的是同一个来源
@@ -2255,7 +2235,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
       if (finishReason) lastFinishReason = finishReason;
       // 被 max_tokens 截断（finish_reason=length）且没有任何工具调用：不能把半截回答当最终答案，
       // 也不能无限补问 —— 最多补 maxTruncationNudges 次（agent.truncation_nudges，出厂 4），
-      // 其余交给本轮模型迭代上限兜底。
+      // 其余交给 MAX_TOOL_ITERATIONS 兜底。
       // 提示语必须是「从断点接着写」：早先写的是「把回复拆短：只给结论」——那等于让模型
       // 在被截断之后主动丢信息，用户拿到的是越缩越水的半份交付。
       /**
@@ -2292,7 +2272,6 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
         continue;
       }
       if (tools && tools.registry && toolCalls.length) {
-        codeVerifier?.beginRound(toolCalls, hooksCfg.enabled);
         /** @type {Array<{toolName: string, content: string, contentTokens: number, record: any, cacheKey: string|null, messageIndex: number, toolCallId: string, expectedReuseRounds?: number}>} */
         const pendingCompression = [];
         /** @type {Array<{record: any, messageIndex: number}>} */
@@ -2309,6 +2288,8 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
             function: { name: tc.name, arguments: tc.args || '{}' },
           })),
         });
+        const executionCalls = toolCalls.map(call => prepareModelCall(tools.registry, call));
+        codeVerifier?.beginRound(executionCalls, hooksCfg.enabled);
         let capped = false;
         let failedAny = false;
         transitionState(STATES.WAITING_TOOL, 'tool_calls:' + toolCalls.length);
@@ -2317,11 +2298,11 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
         // 检查点的顺序与串行执行时逐字节相同（写操作、需确认、参数不完整的调用一律不预启动）。
         const primed = toolScheduler.enabled
           ? toolScheduler.prime(
-              toolCalls.map((tc, index) => ({
+              executionCalls.map((tc, index) => ({
                 callId: tc.callId || tc.id || 'call_' + iter + '_' + (totalToolCalls + index + 1),
                 name: tc.name,
                 argsText: tc.args,
-                argsValid: tc.argsValid,
+                argsValid: tc.actionError ? false : tc.argsValid,
               })),
               {
                 signal,
@@ -2342,7 +2323,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
               },
             )
           : null;
-        for (const tc of toolCalls) {
+        for (const tc of executionCalls) {
           if (signal && signal.aborted) {
             const outcome = finalizeState({ aborted: true }, 'aborted');
             onDelta && onDelta({ kind: 'stopped' });
@@ -2365,7 +2346,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
           let sideEffectGuardError = null;
           let deduped = false;
           let dedupReason = '';
-          if (!malformed && !truncatedToolCall && tools.context && typeof tools.context.beginSideEffect === 'function') {
+          if (!tc.actionError && !malformed && !truncatedToolCall && tools.context && typeof tools.context.beginSideEffect === 'function') {
             try {
               // 把「工具自报重复执行安全」带下去：账本对那些**无法核对目标状态**的写
               // （参数里没有 path，例如 save_project：键恒同、但画布可能早就变了）
@@ -2414,9 +2395,8 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
             );
             repeated = true;
           }
-          const canonicalName = canonicalToolName(tools && tools.registry, tc.name);
-          const cacheKey = !deduped && CACHEABLE_TOOLS.has(canonicalName) ? canonicalName + '\u0000' + canonicalArgs(tc.args) : null;
-          const cacheVersion = cacheKey ? await cacheVersions.version(canonicalName, signal, args) : null;
+          const cacheKey = !tc.actionError && !deduped && CACHEABLE_TOOLS.has(tc.name) ? tc.name + '\u0000' + canonicalArgs(tc.args) : null;
+          const cacheVersion = cacheKey ? await cacheVersions.version(tc.name, signal, args) : null;
           if (sideEffectGuardError || deduped) {
             // 已在上方构造结果，跳过执行
           } else if (malformed) {
@@ -2432,6 +2412,8 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
               '模型输出触及长度上限，本轮工具调用未确认完成，未执行 ' + tc.name + '。请重新生成完整调用。',
               { code: 'TOOL_CALL_TRUNCATED', tool: tc.name, finishReason, argsLength: rawArgs.length }
             );
+          } else if (tc.actionError) {
+            result = tc.actionError;
           } else if (cacheKey) {
             let cached = toolResultCache.get(cacheKey);
             if (cached && !await cacheVersions.valid(tc.name, args, cached, cacheVersion, signal)) {
@@ -2462,7 +2444,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
           }
           // 缓存失效按「只读白名单」判定：只要本轮执行的不是纯只读工具（execute_shell / poll_job /
           // delegate_task / 扩展与 MCP 工具 / 任何变更类工具），就整表清空，保证随后读取拿到最新状态。
-          if (!CACHEABLE_TOOLS.has(canonicalName)) toolResultCache.clear();
+          if (!CACHEABLE_TOOLS.has(tc.name)) toolResultCache.clear();
           // 副作用结算：写操作提交/失败都落账本，中断后能判断哪些写已经发生
           if (sideEffectToken && tools.context) {
             try {
@@ -2499,6 +2481,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
             callId,
             actor: turnActor,
           };
+          if (tc.requestedName) record.requestedName = tc.requestedName;
           if (repeated) record.repeated = true;
           // S5：失败立即归类（工具显式声明的 failure > data.code 归一表 > timedOut/cancelled 这类结构化信号
           // > 认不出来就按最保守的 FATAL_FAILURE 并标 known:false —— 不做文本猜测）
@@ -2518,7 +2501,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
             // 命中时统一补上「请勿重复调用」提示，否则模型会把它当新结果继续空转。
             const body = cached && cached.content
               ? cached.content
-              : buildToolContent(result, tc.name, malformed, false, dataTruncateCap, tools && tools.registry);
+              : buildToolContent(result, tc.name, malformed, false, dataTruncateCap);
             const reference = require('./toolResultReferences.cjs').project(body, tc.name, messages,
               (cfg.costSettings || require('./costSettings.cjs').parseSettings()).repeatResultReferences);
             toolContent = reference.content;
@@ -2530,7 +2513,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
             toolProjection.set(tc.name, stat);
             if (cached && cached.compressed) record.compressed = true;
           } else {
-            toolContent = buildToolContent(result, tc.name, malformed, repeated, dataTruncateCap, tools && tools.registry);
+            toolContent = buildToolContent(result, tc.name, malformed, repeated, dataTruncateCap);
             /**
              * P2-2：记「原始结果 → 模型可见投影」的 token。
              * 「原始」= **投影之前**模型会看到的那份（即旧行为的 text + [data] 段），所以这里显式把
@@ -2544,7 +2527,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
               if (result.modelContent != null) {
                 try {
                   rawTokens = compactionLib.estimateTextTokens(
-                    buildToolContent({ ...result, modelContent: null }, tc.name, malformed, repeated, dataTruncateCap, tools && tools.registry),
+                    buildToolContent({ ...result, modelContent: null }, tc.name, malformed, repeated, dataTruncateCap),
                   );
                 } catch {
                   rawTokens = modelTokens;
@@ -2603,7 +2586,7 @@ async function runAgentChatInternal({ cfg, messages, onDelta, tools, signal, tim
             // 此前这里只有 role/tool_call_id/content，占位符只能渲染成「此处原本是 **工具** 的结果」，
             // 而「请用相同参数重新调用该工具」这句里最有用的恰恰就是工具名。
             // OpenAI 协议的 tool 消息本就允许 name 字段。
-            name: tc.name,
+            name: tc.requestedName || tc.name,
             tool_call_id: callId,
             content: toolContent,
           };

@@ -52,7 +52,7 @@ async function discover(provider, key, transport = request, options = {}) {
     let result;
     try { result = await transport(spec.base + spec.list + suffix, { headers, timeoutMs: 15000, maxBytes: 1024 * 1024, allowPrivateHosts: local }); }
     catch { throw new Error('无法连接供应商，请检查网络后重试'); }
-    if (result.status !== 200) throw new Error(result.status === 401 || result.status === 403 ? 'API Key 无效或没有模型列表权限' : result.status === 404 || result.status === 405 ? '供应商没有开放模型列表，请在下方填写模型或部署 ID' : '获取模型失败（HTTP ' + result.status + '）');
+    if (result.status !== 200) throw new Error(result.status === 401 || result.status === 403 ? 'API Key 无效或没有模型列表权限' : result.status === 404 || result.status === 405 ? '供应商没有开放模型列表，请在设置的「管理模型」中填写模型或部署 ID' : '获取模型失败（HTTP ' + result.status + '）');
     let body; try { body = JSON.parse(result.text); } catch { throw new Error('供应商返回的模型列表格式无效'); }
     const rows = Array.isArray(body) ? body : spec.protocol === 'gemini' ? body.models : body.data;
     if (!Array.isArray(rows)) throw new Error('供应商返回的模型列表格式无效');

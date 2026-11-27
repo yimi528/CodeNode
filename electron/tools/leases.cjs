@@ -63,29 +63,22 @@ function resourceKeysFor(name, args, options = {}) {
   const tool = String(name || '');
   if (tool === 'write_file' || tool === 'edit_file') {
     pushFile(a.path || a.filePath || a.file);
-  } else if (tool === 'workbench_edit') {
-    // 族工具：批量写文件 / 保存工程 / 分析文档 / 画布编辑的占用面完全不同
-    const kind = String(a.kind || '').trim().toLowerCase();
-    if (kind === 'save_project') {
-      keys.push(PROJECT_SAVE_KEY);
-    } else if (kind === 'bulk_create_files') {
-      for (const item of Array.isArray(a.list) ? a.list : []) pushFile(item && item.path);
-    } else if (kind === 'write_analysis') {
-      pushFile(a.relativePath || a.path || a.filePath);
-    } else {
-      // 画布是**单一资源**：两个 Agent 同时改画布一定互相覆盖，不存在「改不同节点就没事」
-      keys.push(CANVAS_KEY);
-    }
-  } else if (tool === 'memory') {
-    // 族工具：只有 action=save 会写记忆；search 是纯读，不占租约
-    if (String(a.action || '').trim().toLowerCase() !== 'save') return [];
+  } else if (tool === 'bulk_edit') {
+    for (const item of Array.isArray(a.edits) ? a.edits : []) pushFile(item && (item.path || item.filePath));
+    for (const item of Array.isArray(a.files) ? a.files : []) pushFile(item && (item.path || item.filePath));
+    if (!keys.length) pushFile(a.path || a.filePath);
+  } else if (tool === 'write_analysis_md') {
+    pushFile(a.path || a.filePath);
+  } else if (tool === 'save_project') {
+    keys.push(PROJECT_SAVE_KEY);
+  } else if (tool === 'remember') {
     // 同一 run 的主/子代理写同一份记忆时必须串行；用户级路径可被 CODENODE_HOME 覆盖。
     pushFile(a.scope === 'user'
       ? require('../userMemory.cjs').userMemoryPath()
       : path.join(projectRoot, '.codenode', 'memory.json'));
-  } else if (tool === 'get_workbench_model') {
-    // 族工具：读画布与视口动作都不改文档 → 不占租约（族级 mutatesWorkspace=false 已经保证不进这里）
-    return [];
+  } else if (tool === 'workbench_edit' || tool === 'ui_control') {
+    // 画布是**单一资源**：两个 Agent 同时改画布一定互相覆盖，不存在「改不同节点就没事」
+    keys.push(CANVAS_KEY);
   }
   return [...new Set(keys)];
 }

@@ -20,13 +20,12 @@
 const { AgentToolResult } = require('../result.cjs');
 const { nodeToScalarRecords } = require('../../scalars/index.cjs');
 const { accentForType } = require('./shared.cjs');
-const { ConfirmationLevel } = require('../context.cjs');
 
 const MAX_CREATE_COUNT = 50;
 
 const KIND_TO_TYPE = {
   regular: 'task', calculation: 'task', condition: 'task', capture: 'task',
-  asset: 'file', file: 'file', task: 'task',
+  material: 'file', image: 'image', group: 'scope', sketch: 'vector', asset: 'file', file: 'file', task: 'task',
   stage: 'stage', tool: 'tool', start: 'start', end: 'end', scope: 'scope',
   object: 'object', canvas: 'vector', vector: 'vector',
 };
@@ -76,6 +75,7 @@ function opCreate(model, args, ctx, errors, created) {
     const nodeName = n === 1 ? baseName : baseName + (i + 1);
     const data = { label: nodeName, status: 'pending', prompt, accent: accentForType(type) };
     if (type === 'file') data.filePath = relativePath || nodeName;
+    if (type === 'image') data.imagePath = relativePath;
     if (type === 'object') data.objectName = stringArg(args, 'objectName', '') || nodeName;
     if (type === 'vector') {
       // 画布节点：内嵌矢量画布，尺寸/模式与前端新节点保持一致
@@ -363,32 +363,22 @@ function buildSummary(args) {
 function register(registry) {
   registry.register(
     'workbench_edit',
-    '画布统一入口。两种用法：' +
-      '①画布编辑：把全部节点变更放进 operations=[{action,...}] 一次提交 —— action 支持 ' +
-      'create(新建，name/type/count/prompt/objectName/connect串联)、rename、set_prompt、set_status、set_category/' +
-      'set_goal/set_result_summary/set_color/set_members/move/delete/duplicate/connect(或 connections 批量)/disconnect。' +
-      '②批量与持久化（kind 参数）：kind=bulk_create_nodes(批量建节点，count/name/prompt/connect)、' +
-      'bulk_create_files(list=[{path,content}] 批量写文件)、bulk_create_assets(list=[{path}] 批量建文件节点)、' +
-      'bulk_delete_nodes(nodeIds 批量删除)、save_project(保存工程到磁盘)、write_analysis(写 Markdown 分析节点与文件，' +
-      'content 缺省时自动从画布生成)。' +
-      '【画布操作 = 你的操作】新建节点、连线、移动、删除、放进范围节点、改名/设属性全部用本工具完成，不能只停留在文字描述。' +
-      'create 支持自定义 id（如 {action:"create",id:"start-1",name:"开始",type:"start"}），同批内即可用该 id 连线或放进 scope。' +
-      '【节点建模规则】a) 一条完整链路必须有 start 与 end，且必须把 start 连线到链路第一个执行节点、最后一个执行节点连线到 end；' +
-      'b) 条件判断/分支/重复循环用 scope 节点包裹，且必须用 add_members/set_members 把子链路节点 id 放进 members；' +
-      'c) 需要子代理负责部分工作用 stage 节点；d) 对象用 object 节点并把名称填到 objectName，可自由绘制的矢量画布用 canvas；' +
-      'e) 节点类型按语义选择，禁止一律用 task：文件→file、工具→tool、子代理→stage、条件循环→scope、对象→object、矢量画布→canvas。' +
-      'f) 画布为空时无需读取，直接按需求创建完整链路；画布已有节点时先 get_workbench_model 读取现状，复用已有节点 id，不重复创建。',
+    '统一的工作台节点编辑工具：创建、编辑、连线全部用这一个工具完成。' +
+      '强烈建议用批量参数 operations=[{action, ...}, {action, ...}, ...] 一次提交全部节点变更：' +
+      'action 支持 create(新建，name/type/count/prompt/objectName/connect串联)、rename(nodeId,name)、set_prompt(nodeId,value)、' +
+      'set_status(nodeId,value)、set_category/set_goal/move/delete(nodeId)、duplicate、connect(sourceId,targetId 或 connections 批量)、' +
+      'disconnect。' +
+      '把需要新建/修改/连线的所有节点一次性放进 operations，避免多次调用占用上下文。' +
+      '【画布操作 = 你的操作】新建节点(create)、连线(connect)、移动(move)、删除(delete)、把节点放进范围节点(set_members/add_members/remove_members)、改名/设属性(rename/set_*) 全部用本工具完成，不能只停留在文字描述。' +
+      'create 支持自定义 id（如 {action:"create",id:"task-1",name:"整理需求",type:"task"}），同批内即可用该 id 连线或放进 scope。' +
+      '【节点建模规则】按实际依赖连接步骤和资料，新流程无需创建入口和出口。' +
+      'b) 条件判断/分支/重复循环用 scope（范围）节点包裹，且必须用 add_members/set_members 把子链路节点 id 放进 scope 的 members（否则节点不会显示在范围节点内）；c) 需要子代理负责部分工作（文件探查、项目审核、独立分析等）用 stage（阶段）节点；' +
+      'd) 需要使用某个对象（数据对象/配置对象/实体名）时用 object（对象）节点并把名称填到 objectName 字段；需要一块可自由绘制/标注的矢量画布（架构草图、集合关系示意、流程草图等）用 canvas（画布）节点，它内嵌在 Agent 画布上，图形内容由用户在节点内用预设配件绘制并在节点左上角切换 设计/逻辑 模式。' +
+      'e) 普通任务用 task，工具调用和子代理分别用 tool 和 stage。资料格式用 file、image 或 object，分组用 group，草图用 sketch。' +
+      'f) 画布为空（get_workbench_model 或当前画布节点清单为 0 个节点）时无需读取画布，直接按需求创建完整链路；画布已有节点时先 get_workbench_model 读取现状，复用已有节点 id，不重复创建；g) 需求拆分：对象→object、独立工作→stage、条件/循环→scope、具体步骤→task/tool，按实际依赖连线。',
     {
       type: 'object',
       properties: {
-        // ---- 族动作（从 bulk_edit / save_project / write_analysis_md 收编）----
-        kind: {
-          type: 'string',
-          enum: ['bulk_create_nodes', 'bulk_create_files', 'bulk_create_assets', 'bulk_delete_nodes', 'save_project', 'write_analysis'],
-          description: '批量/持久化动作；不给则按 operations 或 action 做画布编辑。bulk_*/save_project/write_analysis 会请求确认。',
-        },
-        list: { type: 'array', items: { type: 'object' }, description: 'kind=bulk_create_files 的 [{path,content}] 或 bulk_create_assets 的 [{path}]' },
-        // ---- 画布编辑 ----
         operations: {
           type: 'array',
           items: { type: 'object' },
@@ -401,9 +391,9 @@ function register(registry) {
         name: { type: 'string' },
         type: {
           type: 'string',
-          description: 'create 的节点类型：start(入口，只有输出端口)/task/stage(子代理工作)/tool/end(出口，只有输入端口)/file/scope(条件循环容器)/object(对象名称)，agent/user 已废弃传入回退为 task',
+          description: 'create 的节点类型：task/stage/tool 为任务；file/image/object 为资料；group 为分组；sketch 为草图，agent/user 已废弃传入回退为 task',
         },
-        count: { type: 'integer', description: 'create / bulk_create_nodes 的节点数量，默认 1' },
+        count: { type: 'integer', description: 'create 数量，默认 1，最多 50' },
         prompt: { type: 'string' },
         objectName: { type: 'string', description: 'object 类型节点的对象名称' },
         value: { type: 'string', description: 'set_* 的新值' },
@@ -423,25 +413,11 @@ function register(registry) {
         targetId: { type: 'string' },
         connections: { type: 'array', items: { type: 'object' }, description: '批量连线 [{sourceId,targetId}]' },
         connect: { type: 'boolean', description: 'create 时是否按顺序串联成链' },
-        // ---- write_analysis ----
-        content: { type: 'string', description: 'kind=write_analysis 的分析内容（markdown）；缺省自动从画布生成' },
-        relativePath: { type: 'string', description: 'kind=write_analysis 的文件路径，默认 analysis/<时间戳>.md' },
-        regenerate: { type: 'boolean', description: 'kind=write_analysis 且缺 content 时是否重新从画布生成，默认 true' },
+        relativePath: { type: 'string' },
       },
       required: [],
     },
     async (context, args) => {
-      /**
-       * 族动作先分流：它们用的是**另一套参数**（list / nodeIds / content），不走 operations。
-       * 走完 byKind 的安全门之后才到这里（kind 级审批在 registry 里已判定）。
-       */
-      const kind = resolveKind(args);
-      if (kind === 'save_project') return runSaveProject(context);
-      if (kind === 'write_analysis') return runWriteAnalysis(context, args);
-      if (kind === 'bulk_create_files') return runBulkFiles(context, args);
-      if (kind === 'bulk_create_assets') return runBulkAssets(context, args);
-      if (kind === 'bulk_delete_nodes') return runBulkDelete(context, args);
-      if (kind === 'bulk_create_nodes') return runBulkCreateNodes(context, args);
       const { created, affected, errors } = buildSummary(args);
       const ops = Array.isArray(args.operations) && args.operations.length ? args.operations : null;
       const reviewLib = require('../canvasChangeReview.cjs');
@@ -470,7 +446,7 @@ function register(registry) {
       // 链路完整性诊断：提示还有哪些节点没接成 start→end 完整链路（让 Agent 继续补全）
       const chain = chainReport(context.model());
       if (chain) summary += '；【链路提示】' + chain;
-      // 受影响节点的完整属性写入本地标量（不返回云端），Agent 需要时用 retrieve_context mode=scalar 读取
+      // 受影响节点的完整属性写入本地标量（不返回云端），Agent 需要时用 query_scalars key=node:<id> 读取
       const stored = storeAffectedScalars(context, created, affected);
       if (stored > 0) summary += '；节点属性已入本地标量库（' + stored + ' 条）';
       if (errors.length) {
@@ -482,30 +458,7 @@ function register(registry) {
 
   // S7：workbench_edit 是画布的主要写入口 —— 声明为需要用户批准（令牌由 ApprovalService 签发，
   // 模型在参数里自填 confirmed 之类字段会被注册表剥离，不可能自己批准自己）。
-  // 族化之后**族级保持 WRITE**（画布编辑），各 kind 在 byKind 里声明自己的语义：
-  //   - 只读 kind 不存在（本族全是写），所以族级 readOnly=false 是对的；
-  //   - bulk_* 与 save_project 是 HIGH（旧 bulk_edit 内部就是 HIGH 确认、save_project 是 WRITE）；
-  //   - write_analysis 是 WRITE。
-  registry.declareContract('workbench_edit', {
-    requiresConfirmation: 'WRITE',
-    /**
-     * 各 kind 的确认归属**必须与合并前一致**，否则会问两遍：
-     *   - `bulk_*` / `write_analysis`：原 `bulk_edit` / `write_analysis_md` 是**在工具体内**自己
-     *     `context.confirm(...)` 的（legacy register，没有注册表门）。族级再声明一次就等于
-     *     「先被门拦一次问一遍，进函数又问一遍」——实测就是双弹窗。
-     *     所以这里标 false，确认仍由 runBulk 系列与 runWriteAnalysis 内部的 confirm 负责。
-     *   - `save_project`：原 `save_project` 是**靠 descriptor 的 WRITE 门**确认的（函数体不自确认），
-     *     所以这里保留 WRITE。
-     */
-    byKind: {
-      bulk_create_nodes: { requiresConfirmation: false, effect: 'write' },
-      bulk_create_files: { requiresConfirmation: false, effect: 'write' },
-      bulk_create_assets: { requiresConfirmation: false, effect: 'write' },
-      bulk_delete_nodes: { requiresConfirmation: false, effect: 'write' },
-      save_project: { requiresConfirmation: 'WRITE', requiredCapability: 'project.save', idempotent: true, effect: 'write' },
-      write_analysis: { requiresConfirmation: false, effect: 'write' },
-    },
-  });
+  registry.declareContract('workbench_edit', { requiresConfirmation: 'WRITE' });
   require('../builtInOutputSchemas.cjs').declareOutputContracts(registry, ["workbench_edit"]);
 }
 
@@ -538,12 +491,8 @@ function chainReport(model) {
   const edges = model.edges().filter((e) => byId.has(e.source) && byId.has(e.target));
   const hasStart = nodes.some((n) => n.type === 'start');
   const hasEnd = nodes.some((n) => n.type === 'end');
-  if (!hasStart || !hasEnd) {
-    const missing = [];
-    if (!hasStart) missing.push('start(入口)');
-    if (!hasEnd) missing.push('end(出口)');
-    return '当前画布缺 ' + missing.join('、') + ' 节点，未形成 start→end 完整链路；请补建并连线。';
-  }
+  // Only explicitly bounded legacy workflows require boundary reachability checks.
+  if (!hasStart || !hasEnd) return '';
   // 从每个 start 可达的集合
   const startReach = new Set();
   {
@@ -577,95 +526,4 @@ function chainReport(model) {
   return bad.length + ' 个节点不在 start→end 完整路径上（' + bad.map((n) => n.id).slice(0, 12).join(',') + '），请补全连线使其成为完整链路';
 }
 
-/**
- * `kind` 分发（工具面收敛 L1）：`workbench_edit` 现在是**画布族**，除了原有的
- * operations/action 画布编辑，还承载从 `bulk_edit` / `save_project` / `write_analysis_md`
- * 收编过来的动作。安全语义按 kind 走 `byKind`（见 descriptor.cjs），所以这里只做分发。
- *
- * kind 与旧工具的对应关系（旧名保留为别名，见 toolkit.registerLegacyAliases）：
- *   bulk_create_nodes / bulk_create_files / bulk_create_assets / bulk_delete_nodes ← bulk_edit
- *   save_project                                                                  ← save_project
- *   write_analysis                                                                ← write_analysis_md
- */
-const KIND_ALIASES = Object.freeze({
-    bulk_create_nodes: 'bulk_create_nodes',
-    bulk_create_files: 'bulk_create_files',
-    bulk_create_assets: 'bulk_create_assets',
-    bulk_delete_nodes: 'bulk_delete_nodes',
-    bulk: 'bulk_create_nodes',
-    save: 'save_project',
-    save_project: 'save_project',
-    write_analysis: 'write_analysis',
-    analysis: 'write_analysis',
-});
-
-function resolveKind(args) {
-  const raw = String((args && args.kind) || '').trim().toLowerCase();
-  if (!raw) return '';
-  return KIND_ALIASES[raw] || raw;
-}
-
-/* -------------------------------------------------------------------------------------------- */
-/* 收编的动作：bulk_edit / save_project / write_analysis_md（实现直接复用旧模块，避免两套代码   */
-/* -------------------------------------------------------------------------------------------- */
-
-const bulkImpl = require('./bulkEditTool.cjs');
-const analysisImpl = require('./writeAnalysisMdTool.cjs');
-const saveImpl = require('./saveProjectTool.cjs');
-
-async function runSaveProject(context) {
-  const filePath = await context.saveProject();
-  if (!filePath) {
-    const reason = typeof context.saveError === 'function' ? context.saveError() : null;
-    return AgentToolResult.error(
-      '保存工程失败：' + (reason || '未写入任何文件（项目未打开、上下文只读或保存被拒绝）'),
-      { filePath: '', kind: 'save_project' },
-    );
-  }
-  return AgentToolResult.ok('已保存当前工程到 ' + filePath, { filePath, kind: 'save_project' });
-}
-
-async function runWriteAnalysis(context, args) {
-  const result = await analysisImpl.execute(context, args);
-  if (result && typeof result === 'object' && result.data && typeof result.data === 'object') {
-    result.data = { ...result.data, kind: 'write_analysis' };
-  }
-  return result;
-}
-
-async function runBulkCreateNodes(context, args) {
-  const ok = await context.confirm(ConfirmationLevel.HIGH, '批量创建 ' + intArg(args, 'count', 1) + ' 个工作台节点', 'Agent 请求批量创建节点；此操作会一次改动画布结构，请确认。');
-  if (!ok) return AgentToolResult.error('已取消批量操作');
-  const result = await bulkImpl.createNodes(context, args);
-  if (result && result.data) result.data = { ...result.data, kind: 'bulk_create_nodes' };
-  return result;
-}
-
-async function runBulkFiles(context, args) {
-  const list = Array.isArray(args.list) ? args.list : [];
-  const ok = await context.confirm(ConfirmationLevel.HIGH, '批量写入 ' + list.length + ' 个文件', bulkImpl.detailFor('create_files', args));
-  if (!ok) return AgentToolResult.error('已取消批量操作');
-  const result = await bulkImpl.createFiles(context, args);
-  if (result && result.data) result.data = { ...result.data, kind: 'bulk_create_files' };
-  return result;
-}
-
-async function runBulkAssets(context, args) {
-  const list = Array.isArray(args.list) ? args.list : [];
-  const ok = await context.confirm(ConfirmationLevel.HIGH, '批量创建 ' + list.length + ' 个文件节点', 'Agent 请求批量创建文件节点；此操作会一次改动画布结构，请确认。');
-  if (!ok) return AgentToolResult.error('已取消批量操作');
-  const result = await bulkImpl.createAssets(context, args);
-  if (result && result.data) result.data = { ...result.data, kind: 'bulk_create_assets' };
-  return result;
-}
-
-async function runBulkDelete(context, args) {
-  const ids = Array.isArray(args.nodeIds) ? args.nodeIds : (args.nodeId ? [args.nodeId] : []);
-  const ok = await context.confirm(ConfirmationLevel.HIGH, '批量删除 ' + ids.length + ' 个工作台节点', '此操作不可撤销，请确认。');
-  if (!ok) return AgentToolResult.error('已取消批量操作');
-  const result = await bulkImpl.deleteNodes(context, args);
-  if (result && result.data) result.data = { ...result.data, kind: 'bulk_delete_nodes' };
-  return result;
-}
-
-module.exports = { register, resolveKind, KIND_ALIASES };
+module.exports = { register };

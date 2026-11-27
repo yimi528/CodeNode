@@ -35,7 +35,7 @@ function centerInsideScope(scope: Node, node: Node): boolean {
  * - 新候选拖入时允许范围扩大以预览包裹
  * - 拖动中允许收缩，成员往内收时范围节点会跟着收小
  */
-export function useContainerAutoFit(id: string, nodes: Node[], minW: number, minH: number, pad: number): void {
+export function useContainerAutoFit(id: string, nodes: Node[], minW: number, minH: number, pad: number, enabled = true): void {
   const draggingIds = useGraphStore((s) => s.draggingIds);
   const resizingIds = useGraphStore((s) => s.resizingIds);
   const dragging = draggingIds.length > 0;
@@ -43,6 +43,7 @@ export function useContainerAutoFit(id: string, nodes: Node[], minW: number, min
   const resizing = resizingIds.includes(id);
 
   useEffect(() => {
+    if (!enabled) return;
     const timer = setTimeout(() => {
       const st = useGraphStore.getState();
       const node = st.nodes.find((n) => n.id === id);
@@ -116,5 +117,5 @@ export function useContainerAutoFit(id: string, nodes: Node[], minW: number, min
       }
     }, 16);
     return () => clearTimeout(timer);
-  }, [nodes, id, dragging, scopeDragging, resizing, minW, minH, pad]);
+  }, [enabled, nodes, id, dragging, scopeDragging, resizing, minW, minH, pad]);
 }

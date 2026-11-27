@@ -278,6 +278,43 @@ function readRun(projectRoot, runId) {
   }
 }
 
+/** Locate the Run owned by a settled canvas attempt, including pre-link journals. */
+function readWorkflowRun(projectRoot, workflowId, attempt) {
+  const dir = runsDir(projectRoot);
+  if (!fs.lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return [];
+  const { id, nodeId, preparedAt, settledAt } = attempt;
+  const from = Date.parse(preparedAt);
+  const to = Date.parse(settledAt);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return [];
+  const matches = (runId) => {
+    const file = runFile(projectRoot, runId);
+    const stat = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (!stat?.isFile() || stat.size > MAX_LOG_BYTES) return false;
+    const [start] = parseJsonLines(readFirstLine(file) || '');
+    const timestamp = Date.parse(start?.ts);
+    return start?.type === 'run_start' && start.runId === runId && start.nodeId === nodeId &&
+      (start.planSessionId === workflowId || (start.backend === 'builtin' && start.planSessionId === workflowId.slice(0, 120))) &&
+      timestamp >= from && timestamp <= to;
+  };
+  const linked = 'workflow-' + id;
+  let runId = matches(linked) ? linked : null;
+  if (!runId) {
+    const candidates = fs.readdirSync(dir).flatMap(name => {
+      const match = /^workflow-([a-z0-9]+)-[a-z0-9]{1,6}\.jsonl$/.exec(name);
+      if (!match) return [];
+      const created = parseInt(match[1], 36);
+      return created >= from && created <= to ? [name.slice(0, -6)] : [];
+    }).filter(matches);
+    if (candidates.length !== 1) return [];
+    [runId] = candidates;
+  }
+  const events = readRun(projectRoot, runId).filter(event => event?.runId === runId);
+  return events.some(event => {
+    const ended = Date.parse(event.ts);
+    return event.type === 'run_finish' && ended >= from && ended <= to;
+  }) ? events : [];
+}
+
 function summarizeRun(events) {
   const list = Array.isArray(events) ? events : [];
   const start = list.find((event) => event.type === 'run_start');
@@ -438,4 +475,4 @@ function resetRunStoreCaches() {
   recoveredOnce.clear();
 }
 
-module.exports = { normalizeRunId, appendJsonl, appendEvent, startRun, finishRun, readRun, summarizeRun, listRuns, recoverInterrupted, resumePlan, markRetry, resetRunStoreCaches };
+module.exports = { normalizeRunId, appendJsonl, appendEvent, startRun, finishRun, readRun, readWorkflowRun, summarizeRun, listRuns, recoverInterrupted, resumePlan, markRetry, resetRunStoreCaches };

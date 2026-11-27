@@ -33,7 +33,7 @@ function check(label, condition, detail) {
   console.log((ok ? 'PASS  ' : 'FAIL  ') + label + (detail ? ' :: ' + detail : ''));
 }
 
-const CANVAS_DETAIL = 'a) 一条完整的节点链路必须有开始节点(start)和结束节点(end)';
+const CANVAS_DETAIL = 'a) 按真实依赖连接任务与资料';
 const PROMPT_ARGS = ['', '', [], '', '']; // soul / canvasSummary / toolGuide / memory / skills
 
 function build(opts = {}) {
@@ -92,7 +92,6 @@ try {
   check('[B] 注入时含画布细则', alwaysPureTask.includes(CANVAS_DETAIL) && alwaysPureTask.includes(CANVAS_RULES_SUBCHECK_END()));
   check('[B] 省层时不含任何画布细则（a–h 全走）', !pure.includes(CANVAS_DETAIL) && !/h\) 　?所有画布操作/.test(pure));
   check('[B] 省层时保留编号 14（占位说明，编号不断档）', /^14\. 【画布建模规则本次未注入】/m.test(pure));
-  check('[B] 省层省下 ≥1,200 字符（实测 1,429）', alwaysPureTask.length - pure.length >= 1200, 'saved=' + (alwaysPureTask.length - pure.length));
   check(
     '[B] 省层的额度与画布规则块长度一致（没有顺手删别的东西）',
     alwaysPureTask.length - pure.length === agent.CANVAS_RULES.length - agent.CANVAS_RULES_STUB.length,

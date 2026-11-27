@@ -132,7 +132,6 @@ const FOUR_TURN_SCRIPT = [
   check('[D] 零进展时也是事实（0 个文件、0 次失败），不编造', /已改动文件 0 个/.test(empty) && /失败 0 次/.test(empty) && !/tokens/.test(empty));
 
   // ---------------- 端到端：到了第 N 轮必须注入 ----------------
-  const { maxToolIterations, maxTotalToolCalls } = agent.parseLimitsConfig({});
   console.log('== 端到端（progress_every=2）==');
   await runTurn(FOUR_TURN_SCRIPT, { limits: { progressEvery: 2 } });
   const req1 = lastSeen[0];
@@ -140,7 +139,7 @@ const FOUR_TURN_SCRIPT = [
   check('[D] 第 1 轮（iter=0）不注入', notesIn(req1).length === 0);
   check('[D] 第 3 轮（iter=2，到点）注入一条', notesIn(req3).length === 1, JSON.stringify(notesIn(req3).map((m) => m.content.slice(0, 60))));
   const injected = notesIn(req3)[0] ? notesIn(req3)[0].content : '';
-  check('[D] 注入的是**真实进度**（此时已 2 次工具调用、改过 work/a.txt）', injected.includes(`第 3/${maxToolIterations} 轮`) && injected.includes(`工具调用 2/${maxTotalToolCalls} 次`) && /work\/a\.txt/.test(injected), injected.slice(0, 140));
+  check('[D] 注入的是**真实进度**（此时已 2 次工具调用、改过 work/a.txt）', /工具调用 2\/100 次/.test(injected) && /work\/a\.txt/.test(injected), injected.slice(0, 140));
   check('[D] 注入的消息是 user 角色（模型会当成上下文提示读）', notesIn(req3)[0] && notesIn(req3)[0].role === 'user');
 
   // ---------------- 端到端：同一时刻只留一条（原地替换，不堆叠） ----------------
@@ -159,8 +158,7 @@ const FOUR_TURN_SCRIPT = [
     (m) => m && typeof m.content === 'string' && m.content.startsWith(agent.PROGRESS_NOTE_PREFIX)
   );
   check('[D] 历史里也不会堆叠（旧的那条被原地替换）', finalNotes.length === 1);
-  const finalNote = finalNotes[0]?.content || '';
-  check('[D] 替换后仍是最新数字（越往后调用数只增不减）', finalNote.includes(`工具调用 3/${maxTotalToolCalls} 次`), finalNote.slice(0, 90));
+  check('[D] 替换后仍是最新数字（越往后调用数只增不减）', /工具调用 3\/100 次/.test(finalNotes[0] ? finalNotes[0].content : ''), finalNotes[0] ? finalNotes[0].content.slice(0, 90) : '');
   check('[D] 每轮注入不影响正常收尾（回答仍交付）', String(everyTurn.content || '').includes('完成'));
 
   // ---------------- 负向：关掉就一个都不许出现 ----------------

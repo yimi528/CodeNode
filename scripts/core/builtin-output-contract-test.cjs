@@ -23,18 +23,10 @@ async function main() {
   const manager = new SubagentManager({ cfg: {}, registry, runId: 'output-inventory' });
   manager.register(registry);
   const actual = registry.listDescriptors();
-  /**
-   * 工具面收敛后：契约目录 `schemas` 是**超集** —— 它同时保留
-   *   - 现在注册的工具（20 个内置 + 3 个子代理族 + discover_tools）；
-   *   - 旧名的契约（舞台注册表里旧模块仍按旧名声明，别名调用也走同一份输出校验）。
-   * 所以不变量是「每个注册工具都有契约，且名字必须在目录里」，而不是「两者逐字相等」。
-   * 旧口径（两边 sort 后 deepEqual）在族化之后必然失败，且它表达的不是真正的约束。
-   */
-  const registeredNames = actual.map((d) => d.name).sort();
-  const catalog = Object.keys(schemas).sort();
-  assert.deepEqual(registeredNames.filter((name) => !catalog.includes(name)), [],
-    '注册了工具却没有输出契约：' + registeredNames.filter((name) => !catalog.includes(name)).join(','));
-  assert.equal(actual.length, 24, 'New built-ins require a named executable output contract');
+  const published = [...new Set(Object.keys(schemas).map(name => registry.modelToolName(name)))];
+  assert.deepEqual(actual.map(d => d.name).sort(), published.sort());
+  for (const legacy of ['find_files', 'list_directory']) assert.ok(registry.descriptorOf(legacy).outputSchema);
+  assert.equal(actual.length, 19, 'New built-ins require a named executable output contract');
   for (const descriptor of actual) {
     assert.notEqual(descriptor.outputSchema, null, descriptor.name);
     assert.notEqual(validateOutput([], descriptor.outputSchema), null, descriptor.name + ' must not accept arbitrary data');
@@ -51,7 +43,7 @@ async function main() {
     module.register(direct);
     for (const descriptor of direct.listDescriptors()) assert.notEqual(descriptor.outputSchema, null, descriptor.name);
   }
-  console.log('PASS 43 built-in output contracts are registered, executable, and reject missing/wrong payloads');
+  console.log('PASS 24 published built-in output contracts are registered, executable, and reject missing/wrong payloads');
 
   const policy = sandbox.resolvePolicy({ mode: 'off' }, { projectRoot: root, userDataDir: root });
   sandbox.setDefaultPolicy(policy);
@@ -65,7 +57,8 @@ async function main() {
   /** @type {Array<[string, any]>} */
   const samples = [
     ['read_file', { path: 'source.js' }], ['read_file', { path: 'source.js', analyze: true }],
-    ['find_files', { pattern: '**/*' }], ['search_files', { pattern: 'contract' }], ['list_directory', {}],
+    ['find_files', { pattern: '**/*' }], ['list_files', { kind:'glob', pattern:'**/*' }],
+    ['list_files', { kind:'dir' }], ['search_files', { pattern: 'contract' }], ['list_directory', {}],
     ['scan_project', {}], ['project_info', {}], ['analyze_project', {}],
     ['write_file', { path: 'written.txt', content: 'before', backup: false }],
     ['edit_file', { path: 'written.txt', oldText: 'before', newText: 'after' }],
@@ -80,11 +73,7 @@ async function main() {
   for (const [name, args] of samples) {
     const result = await registry.execute(name, args, context);
     assert.equal(result.ok, true, name + ': ' + result.text);
-    // 工具面收敛：样本里可以有旧名（别名）—— 输出契约按**解析后的族工具**取
-    const descriptor = registry.descriptorOf(registry.resolveAlias(name, args).name);
-    assert.notEqual(descriptor, null, name + ' 没有对应的注册工具');
-    assert.notEqual(descriptor.outputSchema, null, name + ' 没有输出契约');
-    assert.equal(validateOutput(result.data, descriptor.outputSchema), null, name);
+    assert.equal(validateOutput(result.data, registry.descriptorOf(name).outputSchema), null, name);
   }
   console.log('PASS real file, shell-independent, canvas, scalar, retrieval, memory and plan-compatible payloads');
 

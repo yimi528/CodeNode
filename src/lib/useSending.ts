@@ -7,9 +7,8 @@
  *   `sending === inflight.size() > 0`
  * 唯一能改变它的操作是「登记/注销某一个 requestId」。
  */
-import { useSyncExternalStore } from 'react';
-import { isSending, useChatStore } from '../store/chatStore';
+import { useChatStore } from '../store/chatStore';
 
 export function useSending(): boolean {
-  return useSyncExternalStore(useChatStore.getState().inflight.subscribe, isSending, () => false);
+  return useChatStore((s) => s.inflight.size() > 0);
 }

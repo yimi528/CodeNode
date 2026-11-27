@@ -156,8 +156,9 @@ app.whenReady().then(async () => {
 
     // ---- 第三套主题「无色玻璃」：不透明皮肤，打包产物里不得再引入透明窗口 ----
     const asarThemes = JSON.parse(fs.readFileSync(path.join(ASAR, 'config', 'ui.themes.json'), 'utf8'));
-    ok('asar 三套主题色值齐全且 token 键一致', ['light', 'dark', 'bright'].every((id) => asarThemes[id]) && JSON.stringify(Object.keys(asarThemes.light).sort()) === JSON.stringify(Object.keys(asarThemes.bright).sort()));
+    ok('asar 四套主题色值齐全且 token 键一致', ['light', 'dark', 'bright', 'xiaohuang'].every((id) => asarThemes[id] && JSON.stringify(Object.keys(asarThemes.light).sort()) === JSON.stringify(Object.keys(asarThemes[id]).sort())));
     ok('无色玻璃主题的底色是不透明色', /^#[0-9a-f]{6}$/i.test(asarThemes.bright['--bg']) && /^#[0-9a-f]{6}$/i.test(asarThemes.bright['--glass-base']));
+    ok('小黄形象与皮肤已打包', rendererBundles.some((bundle) => bundle.includes('xiaohuang-companion')) && rendererBundles.some((bundle) => bundle.includes('小黄')));
     const packagedMain = fs.readFileSync(path.join(ASAR, 'electron', 'main.cjs'), 'utf8');
     ok('打包主进程不使用透明窗口（主界面必须不透明）', packagedMain.includes('backgroundColor: ') && !/transparent:\s*true/.test(packagedMain) && !packagedMain.includes('theme.cjs'));
     ok('打包产物不含主题→窗口材质模块', !fs.existsSync(path.join(ASAR, 'electron', 'theme.cjs')));
@@ -170,7 +171,7 @@ app.whenReady().then(async () => {
     const appWindow = BrowserWindow.getAllWindows().find((w) => w !== win && w.getTitle() === 'CodeNode');
     ok('应用主窗口按不透明底色创建', Boolean(appWindow) && String(appWindow.getBackgroundColor()).slice(0, 7).toUpperCase() === '#14161A', appWindow ? String(appWindow.getBackgroundColor()) : '未找到应用窗口');
 
-    for (const theme of ['light', 'dark', 'bright']) {
+    for (const theme of ['light', 'dark', 'bright', 'xiaohuang']) {
       await js(`window.__codenodeUi.getState().setTheme(${JSON.stringify(theme)})`);
       await sleep(300);
       ok('切换到 ' + theme + ' 后应用主窗口底色不变', String(appWindow.getBackgroundColor()).slice(0, 7).toUpperCase() === '#14161A', String(appWindow.getBackgroundColor()));

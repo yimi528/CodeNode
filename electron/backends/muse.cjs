@@ -51,10 +51,11 @@ class MuseCodeBackend {
       permissionEnforcement: config.permissionEnforcement?.[this.settings.backend] || 'msp-requests',
       proxySource: this.rpc?.proxySource, cost: 'unknown', version: this.serverInfo?.version || 'unknown' };
   }
-  async connect(cwd) {
+  async connect(cwd, context = {}) {
     if (this.rpc) return this.capabilityInfo;
     const { command, args } = this.command();
-    this.rpc = new (this.deps.StdioRpc || StdioRpc)(command, args, cwd, { ...this.deps, env: { ...this.deps.env } });
+    this.rpc = new (this.deps.StdioRpc || StdioRpc)(command, args, cwd, { ...this.deps,
+      policy: context.sandboxPolicy, context: context.sandboxContext, env: { ...this.deps.env } });
     this.rpc.on('notification', message => { this.notification(message); });
     this.rpc.on('request', message => { void this.dispatch(message); });
     this.rpc.on('disconnect', error => this.fail(error));
@@ -108,7 +109,7 @@ class MuseCodeBackend {
     input.signal?.addEventListener('abort', abort, { once: true });
     try {
       if (input.signal?.aborted) return { content: '', state: 'CANCELLED', aborted: true, stopReason: 'cancelled' };
-      await this.connect(input.projectRoot);
+      await this.connect(input.projectRoot, input);
       if (input.backendSession?.sessionId) await this.resumeSession(input.backendSession.sessionId);
       else await this.startSession(input.projectRoot);
       input.onSession?.({ backend: this.settings.backend, protocol: 'msp', protocolVersion: 1, sessionId: this.sessionId,

@@ -71,9 +71,9 @@ CodeNode 不下载 Agent、不使用 npx 自动安装。启动命令从 PATH/Win
 
 所有外部后端共用同一套 **权限请求策略**：只读拒绝扩权请求，写入逐次询问；ACP 走 `session/request_permission`，Muse Code 走 MSP 的 `approval/request`，语义一致。客户端文件读写在项目边界内运行，提交前检查文件指纹、编辑器草稿和 Task 写入范围；终端复用本地沙箱策略。
 
-Agent 原生工具不由 CodeNode 全面拦截，ACP 权限不等于操作系统隔离，外部用量/费用可能未知。CodeNode 自身提供的本地隔离见[运行安全与恢复](run-recovery.zh-CN.md)。
+外部 Agent 主进程及其子进程现在也通过 CodeNode 的系统隔离层启动。Linux bubblewrap 与可用的 macOS `sandbox-exec` 会限制整个进程树的写入范围：只读模式移除项目写权限，工作区写入模式只开放声明的可写根；模型网络保持可用。Windows Job Object 只能强制进程树生命周期和资源上限，不能提供文件系统边界；`strict` 模式会因此拒绝外部 Agent，`best-effort` 会明确报告 `filesystem` 降级。每轮的 `backend_info.externalAgentIsolation` 与 Run 权限记录是实际生效能力的权威来源。外部用量/费用仍可能未知，详见[运行安全与恢复](run-recovery.zh-CN.md)。
 
-**例外：Pi 不实现权限请求。** `pi-acp` 没有实现 ACP `session/request_permission`，Pi 官方也明确没有内置沙箱，它的 read/write/bash 直接以当前用户权限执行。所以只读和逐次审批都无法约束 Pi。CodeNode 不假装这两条生效：设置界面会在选择 Pi 时显示警告，能力快照返回 `permissionEnforcement: "unavailable"`，本轮开始前也会发一条 `backend_info` 说明。只在可信项目与可信提示词下使用 Pi。
+**例外：Pi 不实现权限请求。** `pi-acp` 没有实现 ACP `session/request_permission`，Pi 官方也没有内置沙箱，因此协议级只读和逐次审批不可用。CodeNode 会如实返回 `permissionEnforcement: "unavailable"`；只有当 `externalAgentIsolation.filesystemIsolation=true` 时，外层系统沙箱才能限制其写盘范围。隔离降级的平台只应在可信项目与可信提示词下使用 Pi。
 
 ## ACP 会话配置
 

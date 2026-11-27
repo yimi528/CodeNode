@@ -19,6 +19,8 @@ const path = require('path');
 
 const agent = require("../../electron/agent.cjs");
 const compaction = require("../../electron/compaction.cjs");
+const { RequestBudget, estimateInputTokens } = require('../../electron/requestBudget.cjs');
+const { planBudgetCompaction } = require('../../electron/budgetCompaction.cjs');
 const sandbox = require("../../electron/sandbox.cjs");
 const toolkit = require("../../electron/tools/toolkit.cjs");
 const { AgentToolContext } = require("../../electron/tools/context.cjs");
@@ -43,7 +45,7 @@ const zh = (chars) => '测'.repeat(chars);
 
 /**
  * 跑一轮真实工具循环。
- * @param {{script: Array<any>, compaction?: any, forceCompaction?: boolean, messages?: Array<any>, prompt?: string, contextWindow?: number}} options
+ * @param {{script: Array<any>, compaction?: any, forceCompaction?: boolean, messages?: Array<any>, prompt?: string, contextWindow?: number, budget?: any, cancelOnCompaction?: boolean}} options
  */
 async function runTurn(options) {
   const controller = new AbortController();
@@ -61,6 +63,7 @@ async function runTurn(options) {
     apiKey: 'scripted-key',
     model: 'scripted-model',
     maxTokens: 2048,
+    requestBudget: options.budget,
     reasoningEffort: '',
     reliability: { maxAttempts: 1, retryBaseMs: 1, retryMaxMs: 2, streamMaxAttempts: 0 },
     limits: { maxTotalTokens: 1000000, maxConcurrentRuns: 1 },
@@ -82,14 +85,17 @@ async function runTurn(options) {
   try {
     const result = await agent.runAgentChat({
       cfg,
-      messages: options.messages || [
+      messages: options.messages ? structuredClone(options.messages) : [
         { role: 'system', content: '你是测试用 system' },
         { role: 'user', content: options.prompt || '继续任务' },
       ],
       tools: { registry, context },
       signal: controller.signal,
       forceCompaction: options.forceCompaction === true,
-      onDelta: (d) => deltas.push(d),
+      onDelta: (d) => {
+        deltas.push(d);
+        if (options.cancelOnCompaction && d.kind === 'compaction') controller.abort();
+      },
     });
     return { result, seen: stub.seen, calls: stub.calls, deltas };
   } finally {
@@ -98,6 +104,51 @@ async function runTurn(options) {
 }
 
 (async () => {
+  // Run-budget recovery happens below the context-window threshold, through the real HTTP ledger.
+  {
+    const messages = [
+      { role: 'system', content: 'Keep user constraints.' },
+      { role: 'user', content: 'Do not change package.json; run tests.' },
+      ...Array.from({ length: 60 }, (_, i) => ({ role: 'assistant', content: String(i) + 'old evidence '.repeat(80) })),
+      { role: 'assistant', content: '', tool_calls: [{ id: 'latest', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } }] },
+      { role: 'tool', tool_call_id: 'latest', content: 'LATEST EXACT EVIDENCE' },
+    ];
+    const opts = { ...agent.parseCompactionConfig({}), budgetAware: true, tailTokens: 1000 };
+    const cfg = { requestBudget: new RequestBudget(140000), maxTokens: 2048, compaction: opts };
+    const plan = (extra = {}) => planBudgetCompaction({ cfg, messages, tools: [], roundsLeft: 4, ...extra });
+    check('[运行预算] 窗口未满但剩余不足三轮 → 提前回收', plan().needed === true);
+    check('[运行预算] 已尝试／最后一轮不重复花摘要费用', !plan({ attempted: true }).needed && !plan({ roundsLeft: 1 }).needed);
+    check('[运行预算] 关闭开关恢复原行为', !plan({ cfg: { ...cfg, compaction: { ...opts, budgetAware: false } } }).needed);
+    check('[运行预算] 宽裕时不改变请求', !plan({ cfg: { ...cfg, requestBudget: new RequestBudget(1000000) } }).needed);
+    check('[运行预算] 回收已来不及承担后续工作时跳过', plan({ cfg: { ...cfg, requestBudget: new RequestBudget(20000) } }).reason === 'insufficient-rescue-budget');
+    check('[运行预算] 摘要成本超过节省时跳过', plan({ messages: messages.slice(0, 3), cfg: { ...cfg, requestBudget: new RequestBudget(5000) } }).reason === 'no-net-savings');
+    check('[运行预算] 父预算约束仍参与规划', !plan({ cfg: { ...cfg, requestBudget: new RequestBudget(100000, { parent: new RequestBudget(1000) }) } }).needed);
+    const unknown = new RequestBudget(140000);
+    unknown.reserve(139000)(null);
+    check('[运行预算] usage 未知的保守结算不能被救援绕过', !plan({ cfg: { ...cfg, requestBudget: unknown } }).needed && unknown.unknownSettlements === 1);
+    const budget = new RequestBudget(140000);
+    const run = await runTurn({ messages, budget, compaction: opts, script: [
+      { content: SUMMARY, usage: { total_tokens: 1100 } },
+      { content: '任务完成。', usage: { total_tokens: 300 } },
+    ] });
+    const sent = run.seen[1]?.messages || [];
+    check('[运行预算] 主请求实际输入预留下降', estimateInputTokens(sent, run.seen[1]?.tools) < estimateInputTokens(messages, run.seen[1]?.tools),
+      JSON.stringify({ before: estimateInputTokens(messages, run.seen[1]?.tools), after: estimateInputTokens(sent, run.seen[1]?.tools) }));
+    check('[运行预算] 真正发送一次摘要并继续主请求', run.calls === 2 && run.result.compacted === 1 && run.deltas.some((d) => d.kind === 'compacted' && d.trigger === 'run-budget'));
+    check('[运行预算] 约束与最近调用结果完整保留', sent.some((m) => String(m.content).includes('Do not change package.json')) && sent.some((m) => m.tool_calls?.[0]?.id === 'latest') && sent.some((m) => m.tool_call_id === 'latest' && m.content === 'LATEST EXACT EVIDENCE'));
+    check('[运行预算] 摘要和主请求计入同一总账且预留归零', budget.used === 1400 && budget.reserved === 0);
+    const failed = await runTurn({ messages, budget: new RequestBudget(140000), compaction: opts, script: [
+      { content: '' }, { toolCalls: [{ name: 'read_file', args: { path: 'a.txt' } }] }, { content: '完成。' },
+    ] });
+    check('[运行预算] 空摘要不覆盖历史，跨轮不反复救援', failed.calls === 3 && failed.result.compacted === 0 && failed.seen[1].messages.some((m) => m.content === messages[2].content) && failed.deltas.filter((d) => d.kind === 'compaction' && d.trigger === 'run-budget').length === 1, JSON.stringify({ calls: failed.calls, compacted: failed.result.compacted, error: failed.result.error, deltas: failed.deltas.filter(d => d.kind === 'compaction' || d.kind === 'compacted') }));
+    const cancelled = await runTurn({ messages, budget: new RequestBudget(140000), compaction: opts,
+      cancelOnCompaction: true, script: [{ content: SUMMARY }, { content: 'should not send' }] });
+    check('[运行预算] 回收期间取消不再发送模型请求', cancelled.calls === 0 && cancelled.result.aborted === true);
+    const noSavings = await runTurn({ messages, budget: new RequestBudget(140000), compaction: opts,
+      script: [{ content: 'oversized summary '.repeat(5000) }, { content: '完成。' }] });
+    check('[运行预算] 实际摘要膨胀时保留原历史', noSavings.result.compacted === 0 && noSavings.seen[1]?.messages.some((m) => m.content === messages[2].content));
+    check('[运行预算] 配置可独立关闭', agent.parseCompactionConfig({ 'agent.compact.budget_aware': 'false' }).budgetAware === false);
+  }
   // ---- (1) 照 Codex 的做法：提示词、触发线、新历史形状 ----
   {
     const prompt = compaction.COMPACTION_PROMPT;
